@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/stop-insights.sh",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && bash .claude/hooks/stop-insights.sh",
             "shell": "bash"
           }
         ]
