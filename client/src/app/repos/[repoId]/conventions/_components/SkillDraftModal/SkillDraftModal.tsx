@@ -363,23 +363,30 @@ function buildPreviewBody(accepted: Convention[], repoName?: string): string {
   const lines: string[] = [
     `# ${repoSlug}-conventions`,
     "",
-    `House conventions for \`${repoName ?? "this repo"}\`. Flag changes that violate any rule below and cite the offending \`file:line\`.`,
+    `Enforce house conventions for \`${repoName ?? "this repo"}\`.`,
+    "When reviewing a diff, flag every line that violates a rule below.",
+    "For each violation: cite `file:line`, quote the offending code, state which rule it breaks,",
+    "and show what the correct version should look like.",
+    "Set severity to **WARNING** for style/convention violations,",
+    "**CRITICAL** if the violation could cause a runtime error or data loss.",
     "",
   ];
   for (const c of accepted) {
     const rule = c.edited_rule ?? c.rule;
     const cat = c.category ?? "General";
     lines.push(`## ${slugify(cat)}`);
-    lines.push(rule);
-    if (c.evidence_path) {
-      const loc = `${c.evidence_path}${c.evidence_line != null ? `:${c.evidence_line}` : ""}`;
-      lines.push(`Detected in \`${loc}\`:`);
-      if (c.evidence_snippet) {
-        lines.push("```");
-        lines.push(c.evidence_snippet);
-        lines.push("```");
-      }
+    lines.push("");
+    lines.push(`**Rule:** ${rule}`);
+    lines.push("");
+    if (c.evidence_snippet) {
+      lines.push("✅ Correct pattern (as used in this codebase):");
+      lines.push("```");
+      lines.push(c.evidence_snippet);
+      lines.push("```");
+      lines.push("");
     }
+    lines.push("❌ Violation: any deviation from the rule above — wrong type, missing decorator,");
+    lines.push("   wrong import style, or omitted convention — must be flagged as a finding.");
     lines.push("");
   }
   return lines.join("\n");
