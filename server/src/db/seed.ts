@@ -7,6 +7,7 @@ import {
   SECURITY_REVIEWER_PROMPT,
   PERFORMANCE_REVIEWER_PROMPT,
   TEST_QUALITY_REVIEWER_PROMPT,
+  API_CONTRACT_REVIEWER_PROMPT,
 } from './seed-prompts.js';
 
 /** Default provider/model for the built-in reviewer agents. */
@@ -465,6 +466,235 @@ Report the exact line of the flaky pattern and explain what triggers the intermi
       await db
         .insert(t.agentSkills)
         .values({ agentId: psrAgent.id, skillId, order: i })
+        .onConflictDoNothing();
+    }
+  }
+
+  // ---- API Contract Reviewer skills ----
+  const acrSkillDefs = [
+    {
+      name: 'breaking-change',
+      description: 'Flags any change that removes, renames, or narrows a public API contract.',
+      type: 'convention' as const,
+      source: 'manual' as const,
+      body: `# breaking-change
+
+Flag any change that breaks the existing public API contract for callers who have not updated their code.
+A "breaking change" is one that forces clients to change their code to avoid a runtime error or behaviour change.
+
+Flag the offending \`file:line\` and explain exactly what the contract was and what it became.
+
+## Examples
+
+### ❌ Bad — silently breaks callers
+
+\`\`\`diff
+- export async function getUser(id: string): Promise<User>
++ export async function getUser(id: string, includeDeleted = false): Promise<User | null>
+\`\`\`
+
+Return type changed from \`User\` to \`User | null\`. All callers that wrote \`const u = await getUser(id); u.name\`
+will throw at runtime. This is a **breaking change** — flag it.
+
+### ✅ Good — backwards-compatible addition
+
+\`\`\`diff
+- export async function getUser(id: string): Promise<User>
++ export async function getUser(id: string, options?: { includeDeleted?: boolean }): Promise<User>
+\`\`\`
+
+Optional parameter, return type unchanged. Existing callers are unaffected.
+
+## Rules
+
+1. Any removal of a public export, route, or method is breaking.
+2. Any narrowing of an accepted parameter type is breaking (e.g. \`string | number\` → \`string\`).
+3. Any widening of a return type is breaking unless callers are guarded (\`User | null\` where \`User\` was expected).
+4. A route path change (rename, reorder of segments) is breaking.
+5. A required-parameter addition is breaking.
+6. Status code change on a success path (200 → 201, 200 → 204) is breaking if clients branch on it.`,
+    },
+    {
+      name: 'response-schema',
+      description: 'Flags changes to API response shape: renamed fields, removed fields, type changes.',
+      type: 'convention' as const,
+      source: 'manual' as const,
+      body: `# response-schema
+
+Flag any change to the shape of an API response that could cause a client to fail when deserialising or accessing fields.
+"Shape" means: field names, field types, nullability, optionality, nesting depth.
+
+Flag the offending \`file:line\`, show the before/after schema diff, and state which clients are at risk.
+
+## Examples
+
+### ❌ Bad — field renamed
+
+\`\`\`diff
+- { "userId": "abc123" }
++ { "user_id": "abc123" }
+\`\`\`
+
+\`userId\` is now \`user_id\`. Any client reading \`.userId\` gets \`undefined\` — silent data loss.
+
+### ❌ Bad — field removed
+
+\`\`\`diff
+- { "id": "1", "email": "a@b.com", "role": "admin" }
++ { "id": "1", "email": "a@b.com" }
+\`\`\`
+
+\`role\` removed. Clients that branch on \`user.role\` will behave incorrectly.
+
+### ✅ Good — additive field
+
+\`\`\`diff
+  { "id": "1", "email": "a@b.com"
++ , "avatar_url": "https://..." }
+\`\`\`
+
+New optional field. Existing clients ignore it; new clients can use it.
+
+## Rules
+
+1. Renaming any field in a response body is breaking — even if the old name was "wrong".
+2. Removing a field that clients currently read is breaking.
+3. Changing a field type (e.g. \`string\` → \`number\`, \`string\` → \`string[]\`) is breaking.
+4. Making a nullable field non-nullable (or vice versa) is breaking.
+5. Changing the nesting level of an existing field is breaking.
+6. Reordering array elements in a stable response is breaking when clients index by position.`,
+    },
+    {
+      name: 'semver-discipline',
+      description: 'Flags breaking changes shipped without a major version bump.',
+      type: 'convention' as const,
+      source: 'manual' as const,
+      body: `# semver-discipline
+
+Flag when a change to the API requires a semver major version bump but one has not been made,
+or when the commit message / PR title suggests a "minor" or "patch" change that is actually a major.
+
+## When a major bump is required
+
+A major bump (X.0.0) is required whenever a published API has a **breaking change** (see \`breaking-change\` skill).
+Specifically in this codebase:
+
+- Any route removal or rename → **major**
+- Any response field removal or rename → **major**
+- Any narrowing of accepted input (required param added, type narrowed) → **major**
+- Any authentication/authorization model change (removing a public endpoint, adding mandatory auth) → **major**
+
+## When a minor bump is enough
+
+- New optional query params or request body fields are added.
+- New routes are added.
+- New optional response fields are added.
+- Behaviour is extended in a backwards-compatible way.
+
+## When a patch is enough
+
+- Bug fixes that restore documented behaviour.
+- Performance improvements with no visible contract change.
+- Documentation or comment changes only.
+
+## Rule
+
+If a PR contains even ONE breaking change (per \`breaking-change\` rules), the semver bump must be major.
+Flag the inconsistency with the exact breaking change and the incorrect version label.`,
+    },
+    {
+      name: 'deprecation-policy',
+      description: 'Flags API elements removed without a prior deprecation marker and grace period.',
+      type: 'convention' as const,
+      source: 'manual' as const,
+      body: `# deprecation-policy
+
+Flag when a public API element (route, field, param, export) is silently removed or changed without first being
+marked as deprecated and given a migration period.
+
+Deprecation must be observable to callers before removal happens. Silent removal is always a breaking change.
+
+## Required deprecation lifecycle
+
+1. **Mark deprecated** — add a response header (\`Deprecation: true\`, \`Sunset: <date>\`) and/or a \`deprecated: true\`
+   field in the response body, and document the replacement.
+2. **Communicate** — the PR that introduces the deprecation must update API docs / changelog with the sunset date.
+3. **Grace period** — at least one minor release must exist between the deprecation marker and removal.
+4. **Remove** — only after the grace period and a major version bump.
+
+## Examples
+
+### ❌ Bad — silent removal in same PR
+
+Route removed without deprecation header or grace period. Callers will receive 404 with no warning.
+
+### ❌ Bad — field removed with a comment but no deprecation marker
+
+Comment-only deprecation is not machine-observable. Clients have no programmatic way to detect it.
+
+### ✅ Good — HTTP header
+
+\`\`\`
+Deprecation: true
+Sunset: Sat, 01 Mar 2025 00:00:00 GMT
+Link: <https://docs.example.com/migration>; rel="deprecation"
+\`\`\`
+
+RFC 8594-compliant deprecation signal.
+
+## Rule
+
+Any removal or renaming of a public API surface MUST be preceded by a deprecation marker in an earlier release.
+If this PR removes or renames something that was never marked deprecated, flag it as a policy violation.`,
+    },
+  ];
+
+  const acrSkillIds: string[] = [];
+  for (const s of acrSkillDefs) {
+    const [existing] = await db
+      .select()
+      .from(t.skills)
+      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, s.name)));
+    if (existing) {
+      acrSkillIds.push(existing.id);
+    } else {
+      const [inserted] = await db
+        .insert(t.skills)
+        .values({ workspaceId, ...s, enabled: true, version: 1 })
+        .returning();
+      await db.insert(t.skillVersions).values({ skillId: inserted!.id, version: 1, body: s.body });
+      acrSkillIds.push(inserted!.id);
+    }
+  }
+
+  // ---- API Contract Reviewer agent (with attached skills) ----
+  const acrName = 'API Contract Reviewer';
+  let [acrAgent] = await db
+    .select()
+    .from(t.agents)
+    .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, acrName)));
+  if (!acrAgent) {
+    [acrAgent] = await db
+      .insert(t.agents)
+      .values({
+        workspaceId,
+        name: acrName,
+        description: 'Detects breaking API contract changes: renamed/removed fields, semver violations, missing deprecation markers.',
+        provider: DEFAULT_PROVIDER,
+        model: DEFAULT_MODEL,
+        systemPrompt: API_CONTRACT_REVIEWER_PROMPT,
+        enabled: true,
+        version: 1,
+        createdBy: userId,
+      })
+      .returning();
+  }
+
+  if (acrAgent && acrSkillIds.length > 0) {
+    for (const [i, skillId] of acrSkillIds.entries()) {
+      await db
+        .insert(t.agentSkills)
+        .values({ agentId: acrAgent.id, skillId, order: i })
         .onConflictDoNothing();
     }
   }

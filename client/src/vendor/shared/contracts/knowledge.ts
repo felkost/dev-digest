@@ -169,15 +169,75 @@ export const CommunitySkill = z.object({
 export type CommunitySkill = z.infer<typeof CommunitySkill>;
 
 // ---- Conventions ----
-export const ConventionCandidate = z.object({
+export const ConventionStatus = z.enum([
+  'pending',
+  'verified',
+  'rejected_evidence',
+  'accepted',
+  'rejected_user',
+  'edited',
+]);
+export type ConventionStatus = z.infer<typeof ConventionStatus>;
+
+export const ConventionScanStatus = z.enum(['pending', 'running', 'done', 'failed']);
+export type ConventionScanStatus = z.infer<typeof ConventionScanStatus>;
+
+export const Convention = z.object({
   id: z.string(),
+  workspace_id: z.string(),
+  repo_id: z.string().nullable(),
+  scan_id: z.string().nullish(),
+  category: z.string().nullish(),
   rule: z.string(),
-  evidence_path: z.string(),
-  evidence_snippet: z.string(),
-  confidence: z.number().min(0).max(1),
+  edited_rule: z.string().nullish(),
+  evidence_path: z.string().nullish(),
+  evidence_snippet: z.string().nullish(),
+  evidence_line: z.number().int().nullish(),
+  evidence_line_end: z.number().int().nullish(),
+  evidence_url: z.string().nullish(),
+  model_confidence: z.number().min(0).max(1).nullish(),
+  verified_confidence: z.number().min(0).max(1).nullish(),
+  confidence: z.number().min(0).max(1).nullish(),
+  status: ConventionStatus,
   accepted: z.boolean(),
+  dedup_key: z.string().nullish(),
+  created_at: z.string(),
 });
-export type ConventionCandidate = z.infer<typeof ConventionCandidate>;
+export type Convention = z.infer<typeof Convention>;
+
+export const ConventionScan = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  repo_id: z.string(),
+  commit_sha: z.string(),
+  status: ConventionScanStatus,
+  scanned_file_count: z.number().int().nullish(),
+  candidate_count: z.number().int().nullish(),
+  verified_count: z.number().int().nullish(),
+  created_at: z.string(),
+});
+export type ConventionScan = z.infer<typeof ConventionScan>;
+
+export const ConventionSkillInput = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('merge'),
+    name: z.string().min(1),
+    description: z.string(),
+    type: SkillType,
+  }),
+  z.object({
+    mode: z.literal('grouped'),
+    groups: z.array(
+      z.object({
+        category: z.string(),
+        name: z.string().min(1),
+        description: z.string(),
+        type: SkillType,
+      }),
+    ),
+  }),
+]);
+export type ConventionSkillInput = z.infer<typeof ConventionSkillInput>;
 
 // ---- Agents ----
 export const Provider = z.enum(['openai', 'anthropic', 'openrouter']);
