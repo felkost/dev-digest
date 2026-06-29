@@ -15,6 +15,9 @@ import { ExternalServiceError } from '../../platform/errors.js';
 
 const DEFAULT_TIMEOUT = 60_000;
 const DEFAULT_MAX_TOKENS = 4096;
+// Review JSON (findings × fields) can easily exceed 4096 tokens on large diffs.
+// 8192 is the safe ceiling for all current Anthropic models (haiku/sonnet/opus).
+const STRUCTURED_MAX_TOKENS = 8192;
 
 /** Anthropic has no embeddings API; embeddings come from the OpenAI Embedder. */
 function splitSystem(messages: ChatMessage[]): {
@@ -95,6 +98,7 @@ export class AnthropicProvider implements LLMProvider {
     let tokensIn = 0;
     let tokensOut = 0;
     let lastRaw = '';
+    let lastError = '';
 
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
       const res = await withRetry(() =>
@@ -103,7 +107,7 @@ export class AnthropicProvider implements LLMProvider {
             model: req.model,
             system: system || undefined,
             messages,
-            max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
+            max_tokens: req.maxTokens ?? STRUCTURED_MAX_TOKENS,
             temperature: req.temperature ?? 0,
             tools: [
               {
@@ -137,16 +141,25 @@ export class AnthropicProvider implements LLMProvider {
           attempts: attempt,
         };
       }
+      lastError = parsed.error;
       messages.push({ role: 'assistant', content: res.content });
-      messages.push({
-        role: 'user',
-        content: parsed.repromptMessage,
-      });
+      if (toolUse) {
+        // Anthropic requires a tool_result immediately after every tool_use block;
+        // a bare text message here produces a 400. Deliver the reprompt as the
+        // tool_result content so the turn sequence stays valid.
+        messages.push({
+          role: 'user',
+          content: [{ type: 'tool_result' as const, tool_use_id: toolUse.id, content: parsed.repromptMessage }],
+        });
+      } else {
+        messages.push({ role: 'user', content: parsed.repromptMessage });
+      }
     }
 
-    throw new ExternalServiceError('Anthropic structured output failed schema validation', {
-      raw: lastRaw,
-    });
+    throw new ExternalServiceError(
+      `Anthropic structured output failed schema validation: ${lastError}`,
+      { raw: lastRaw },
+    );
   }
 
   async embed(): Promise<number[][]> {
