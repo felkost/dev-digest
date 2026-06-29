@@ -215,7 +215,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
-        cost_usd: costByPr.get(r.id) ?? null,
+        cost: costByPr.get(r.id) ?? null,
         findings_breakdown: findingsBreakdownByPr.get(r.id) ?? null,
       };
     });
