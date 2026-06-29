@@ -249,6 +249,10 @@ export const s = {
     fontWeight: 600,
     borderTop: "1px solid var(--border)",
     userSelect: "none" as const,
+    background: "none",
+    border: "none",
+    width: "100%",
+    textAlign: "left" as const,
   } satisfies CSSProperties,
 
   priorPrItem: {
