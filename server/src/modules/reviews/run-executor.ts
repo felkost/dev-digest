@@ -199,6 +199,15 @@ export class ReviewRunExecutor {
 
       const task = taskLine(pull) + rankNote;
 
+      // ---- Skills injection ------------------------------------------------
+      // Load enabled skills attached to this agent and inject their bodies into
+      // the prompt. Order is determined by agent_skills.order (user-controlled).
+      const linkedSkills = await this.agents.linkedSkills(agent.id);
+      const skillBodies = linkedSkills.filter((l) => l.skill.enabled).map((l) => l.skill.body);
+      if (skillBodies.length) {
+        runLog.info(`skills: ${skillBodies.length} skill(s) injected`);
+      }
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -219,6 +228,8 @@ export class ReviewRunExecutor {
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
+        // Enabled skills attached to this agent, in user-defined order.
+        ...(skillBodies.length ? { skills: skillBodies } : {}),
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),

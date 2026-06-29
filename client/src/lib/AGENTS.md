@@ -30,7 +30,7 @@ Use `useRunTrace` for subscribing to a review run's event stream. Do not create 
 ## Utilities
 
 | File | Purpose |
-|---|---|
+| --- | --- |
 | `feature-models.ts` | Resolve which model to use for a feature model slot |
 | `github-urls.ts` | Build GitHub PR / file / line URLs |
 | `model-label.ts` | Human-readable label for a provider+model pair |

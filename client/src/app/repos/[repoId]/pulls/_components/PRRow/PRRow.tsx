@@ -269,7 +269,14 @@ export function PRRow({ pr, repoId }: { pr: PrMetaType; repoId: string }) {
 
       {/* Actions — always-visible Run Review button in its own column */}
       <div onClick={(e) => e.stopPropagation()}>
-        {pr.id && <RunReviewDropdown prId={pr.id} size="sm" kind="secondary" />}
+        {pr.id && (
+          <RunReviewDropdown
+            prId={pr.id}
+            size="sm"
+            kind="secondary"
+            onRunsStarted={() => router.push(`/repos/${repoId}/pulls/${pr.number}?tab=findings`)}
+          />
+        )}
       </div>
 
       <div style={s.updatedCell}>{relativeTime(pr.updated_at)}</div>
