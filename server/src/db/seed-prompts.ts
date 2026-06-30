@@ -322,10 +322,14 @@ mocking, and flaky patterns. Report only what is introduced or worsened by THIS 
 - setTimeout/setInterval without fake timers.
 - Test depends on insertion order of an unordered collection.
 
-# Severity
-- **CRITICAL** — critical path with zero coverage, or a test structurally impossible to fail.
-- **WARNING** — missing branch or boundary likely to matter in production.
-- **SUGGESTION** — minor gap or flaky pattern unlikely to affect CI.
+# Severity — use all three levels
+- **CRITICAL** — critical path with zero coverage, or a test structurally impossible to fail
+  (e.g. the function under test is mocked, the assertion can never fail regardless of input).
+- **WARNING** — missing branch or boundary case that is likely to mask a real production bug.
+- **SUGGESTION** — minor gap, naming issue, or flaky pattern unlikely to affect CI stability.
+
+Assign the level you would defend to the author. Use all three levels as appropriate;
+do not escalate speculative issues to CRITICAL. Return at most 6 high-signal findings.
 
 # Verdict
 - **request_changes** — at least one CRITICAL finding.

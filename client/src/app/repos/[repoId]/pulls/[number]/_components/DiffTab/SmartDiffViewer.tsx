@@ -55,8 +55,6 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
   const [expanded, setExpanded] = React.useState(true);
   const lines = parsePatch(patch);
 
-  const highestColor =
-    file.findingsCount > 0 ? getHighestSeverityColor(file.findings) : undefined;
 
   return (
     <div style={{ marginBottom: 8, border: "1px solid var(--border)", borderRadius: 6 }}>
@@ -90,20 +88,6 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
         >
           {file.path}
         </span>
-        {/* Severity dot — replaces "X findings" text; colour = highest finding severity */}
-        {file.findingsCount > 0 && (
-          <span
-            title={`${file.findingsCount} finding${file.findingsCount !== 1 ? "s" : ""}`}
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: highestColor,
-              flexShrink: 0,
-              display: "inline-block",
-            }}
-          />
-        )}
         {file.pseudocode_summary && (
           <span
             style={{
@@ -139,8 +123,8 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
             lineHeight: 1.5,
           }}
         >
-          <span style={{ color: "var(--text-muted)" }}>↳ </span>
-          <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>What this does:</span>{" "}
+          <span style={{ color: "var(--text-muted)", marginRight: 6 }}>✦</span>
+          <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>What this does:</span>{" "}
           {file.pseudocode_summary}
         </div>
       )}
@@ -260,7 +244,7 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
                           background: "transparent",
                           color: getSeverityColor(findingOnLine.severity),
                           fontSize: 11,
-                          fontWeight: 600,
+                          fontWeight: 400,
                           cursor: "pointer",
                           whiteSpace: "nowrap",
                         }}

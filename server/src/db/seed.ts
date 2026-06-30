@@ -120,8 +120,20 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
 
     // pr_files (subset — includes one file per role so Smart Diff demo shows all three groups)
     await db.insert(t.prFiles).values([
-      { prId: pr!.id, path: 'src/middleware/ratelimit.ts', additions: 84, deletions: 0 },
-      { prId: pr!.id, path: 'src/api/public/webhooks.ts', additions: 31, deletions: 6 },
+      {
+        prId: pr!.id,
+        path: 'src/middleware/ratelimit.ts',
+        additions: 84,
+        deletions: 0,
+        pseudocodeSummary: 'New token-bucket limiter: read bucketKey → Redis INCR → if over limit return 429, else next().',
+      },
+      {
+        prId: pr!.id,
+        path: 'src/api/public/webhooks.ts',
+        additions: 31,
+        deletions: 6,
+        pseudocodeSummary: 'Forward webhook to caller-supplied callback_url with account token attached.',
+      },
       { prId: pr!.id, path: 'src/config.ts', additions: 4, deletions: 0 },
       { prId: pr!.id, path: 'src/api/users.ts', additions: 7, deletions: 2 },
       { prId: pr!.id, path: 'pnpm-lock.yaml', additions: 120, deletions: 3, patch: null },
@@ -333,6 +345,32 @@ Flag patterns that cause tests to pass sometimes and fail others.
 ## Reporting rule
 
 Report the exact line of the flaky pattern and explain what triggers the intermittent failure.`,
+    },
+    {
+      name: 'backend-api-conventions',
+      description: 'Enforces Fastify route and repository conventions for server-side code.',
+      type: 'convention' as const,
+      source: 'manual' as const,
+      body: [
+        '# Backend API Conventions',
+        '',
+        'Apply when the diff touches `server/` files.',
+        '',
+        '## Routes',
+        '- Every handler that needs workspace context MUST call `getContext()`.',
+        '- Route handlers must not contain business logic — delegate to the service.',
+        '- Business errors must be thrown as `AppError` (or its subclasses), never plain `Error`.',
+        '',
+        '## Repository',
+        '- Every query MUST filter by `workspace_id` — no exceptions.',
+        '- Never return raw DB rows — map to DTO in the service layer.',
+        '',
+        '## Secrets',
+        '- Never read from `process.env` directly — use `SecretsProvider`.',
+        '',
+        '## Report',
+        'Flag each violation with `file:line` and the exact rule broken.',
+      ].join('\n'),
     },
   ];
 

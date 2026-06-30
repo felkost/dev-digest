@@ -247,7 +247,7 @@ export class ReviewService {
       role: 'core' | 'wiring' | 'boilerplate';
       file: {
         path: string;
-        pseudocode_summary?: null;
+        pseudocode_summary: string | null;
         additions: number;
         deletions: number;
         finding_lines: number[];
@@ -278,7 +278,7 @@ export class ReviewService {
         role,
         file: {
           path: prFile.path,
-          pseudocode_summary: null,
+          pseudocode_summary: prFile.pseudocodeSummary ?? null,
           additions: prFile.additions,
           deletions: prFile.deletions,
           finding_lines: normFindings.map((f) => f.startLine),
