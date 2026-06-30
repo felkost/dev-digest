@@ -77,33 +77,58 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
         </span>
         <span
           style={{
-            fontFamily: "monospace",
-            fontSize: 12,
-            color: "var(--text-primary)",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
             flex: 1,
             overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
           }}
         >
-          {file.path}
-        </span>
-        {file.pseudocode_summary && (
           <span
             style={{
-              fontSize: 11,
-              color: "#4a9eff",
-              background: "rgba(74,158,255,0.12)",
-              border: "1px solid rgba(74,158,255,0.25)",
-              borderRadius: 4,
-              padding: "2px 8px",
-              flexShrink: 0,
+              fontFamily: "monospace",
+              fontSize: 12,
+              color: "var(--text-primary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
               whiteSpace: "nowrap",
             }}
           >
-            ⚡ summary
+            {file.path}
           </span>
-        )}
+          {file.findings?.some((f) => f.severity === "critical") && (
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "var(--crit)",
+                flexShrink: 0,
+                display: "inline-block",
+              }}
+            />
+          )}
+        </span>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            fontSize: 11,
+            color: "#4a9eff",
+            background: "rgba(74,158,255,0.12)",
+            border: "1px solid rgba(74,158,255,0.25)",
+            borderRadius: 4,
+            padding: "2px 8px",
+            flexShrink: 0,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
+            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+          </svg>
+          summary
+        </span>
         <span style={{ fontSize: 11, color: "#4caf50", flexShrink: 0 }}>
           +{file.additions}
         </span>
@@ -123,7 +148,9 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
             lineHeight: 1.5,
           }}
         >
-          <span style={{ color: "var(--text-muted)", marginRight: 6 }}>✦</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style={{ color: "var(--text-muted)", marginRight: 6, flexShrink: 0 }}>
+            <path d="M12 2 L13.5 10.5 L22 12 L13.5 13.5 L12 22 L10.5 13.5 L2 12 L10.5 10.5 Z" />
+          </svg>
           <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>What this does:</span>{" "}
           {file.pseudocode_summary}
         </div>
@@ -138,7 +165,21 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
             </div>
           ) : (
             <div style={{ fontFamily: "monospace", fontSize: 12, lineHeight: "18px" }}>
-              {lines.map((line, idx) => {
+              {(() => {
+                // Snap each finding to nearest add/del line at or after startLine
+                const findingDisplayMap = new Map<number, NonNullable<typeof file.findings>[number]>();
+                if (file.findings?.length) {
+                  const changedLines = lines
+                    .filter((l) => (l.kind === "add" || l.kind === "del") && (l.newNo ?? l.oldNo) != null)
+                    .map((l) => l.newNo ?? l.oldNo!);
+                  for (const finding of file.findings) {
+                    const target = changedLines.find((n) => n >= finding.startLine) ?? changedLines[changedLines.length - 1];
+                    if (target != null && !findingDisplayMap.has(target)) {
+                      findingDisplayMap.set(target, finding);
+                    }
+                  }
+                }
+                return lines.map((line, idx) => {
                 if (line.kind === "hunk") {
                   return (
                     <div
@@ -156,10 +197,9 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
                 }
 
                 const lineNo = line.newNo ?? line.oldNo ?? "";
-                const findingOnLine =
-                  line.newNo !== undefined && file.findings
-                    ? file.findings.find((f) => f.startLine === line.newNo)
-                    : undefined;
+                const findingOnLine = (line.newNo ?? line.oldNo) != null
+                  ? findingDisplayMap.get(line.newNo ?? line.oldNo!)
+                  : undefined;
 
                 let bg = "transparent";
                 let borderLeft = "3px solid transparent";
@@ -255,7 +295,8 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
                     )}
                   </div>
                 );
-              })}
+              });
+              })()}
             </div>
           )}
         </div>
@@ -296,7 +337,7 @@ function GroupView({ group, patches, onNavigateToFinding }: GroupViewProps) {
           style={{
             width: 10,
             height: 10,
-            borderRadius: "50%",
+            borderRadius: 2,
             background: meta.color,
             flexShrink: 0,
           }}

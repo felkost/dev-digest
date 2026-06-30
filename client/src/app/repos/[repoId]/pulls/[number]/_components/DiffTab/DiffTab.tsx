@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { SectionLabel, Button } from "@devdigest/ui";
+import { Button } from "@devdigest/ui";
 import { DiffViewer, type DiffCommentApi } from "@/components/diff-viewer";
 import { usePrComments, useCreatePrComment, useSmartDiff, usePrRuns } from "@/lib/hooks/reviews";
 import { notify } from "@/lib/toast";
@@ -46,6 +46,9 @@ export function DiffTab({ prId, filesCount, files, canComment }: DiffTabProps) {
 
   const patches = Object.fromEntries(files.map((f) => [f.path, f.patch]));
 
+  const totalAdditions = files.reduce((sum, f) => sum + (f.additions ?? 0), 0);
+  const totalDeletions = files.reduce((sum, f) => sum + (f.deletions ?? 0), 0);
+
   const commentCount = comments?.length ?? 0;
 
   const commenting: DiffCommentApi = {
@@ -67,23 +70,25 @@ export function DiffTab({ prId, filesCount, files, canComment }: DiffTabProps) {
 
   return (
     <section>
-      <SectionLabel
-        icon="Code"
-        right={
-          commentCount > 0 ? (
-            <Button
-              kind="ghost"
-              size="sm"
-              icon={showComments ? "EyeOff" : "Eye"}
-              onClick={() => setShowComments((v) => !v)}
-            >
-              {showComments ? "Hide comments" : "Show comments"} ({commentCount})
-            </Button>
-          ) : undefined
-        }
-      >
-        Files changed · {filesCount} files
-      </SectionLabel>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {filesCount} files
+          {' · '}
+          <span style={{ color: '#4caf50' }}>+{totalAdditions}</span>
+          {' '}
+          <span style={{ color: '#f44336' }}>-{totalDeletions}</span>
+        </span>
+        {commentCount > 0 && (
+          <Button
+            kind="ghost"
+            size="sm"
+            icon={showComments ? "EyeOff" : "Eye"}
+            onClick={() => setShowComments((v) => !v)}
+          >
+            {showComments ? "Hide comments" : "Show comments"} ({commentCount})
+          </Button>
+        )}
+      </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <button
           type="button"
