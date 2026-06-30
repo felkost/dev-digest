@@ -31,6 +31,7 @@
 - **2026-06-27 [Decision]** — `getBrief` now takes `workspaceId` and adds `INNER JOIN pull_requests ON pr_brief.pr_id = pull_requests.id WHERE pull_requests.workspace_id = $workspaceId`. The route handler already verified workspace ownership before calling it, but the query itself being unscoped violated the module convention (every DB query must filter by workspace). Defense-in-depth: the query is self-contained and safe regardless of calling code. `server/src/modules/reviews/repository/pull.repo.ts`
 - **2026-06-27 [Decision]** — `POST /repos/:id/review-all` rate-limited to 2 requests/minute per workspace (`config: { rateLimit: { max: 2, timeWindow: '1 minute' } }`). Each call fans out to all open PRs, so a single call can already queue dozens of LLM runs; 2/min prevents repeated fan-outs without hampering normal use. `server/src/modules/reviews/routes.ts`
 - **2026-06-30 [Mistake]** — When adding the `intent` spread to the `reviewPullRequest()` options object in `run-executor.ts`, the existing `skills` spread was deleted and replaced instead of being extended alongside it, silently dropping skills from all agent runs. The options object is additive — each slot spread is independent. When adding a new slot, extend: add the new spread without removing existing ones. `server/src/modules/reviews/run-executor.ts`
+- **2026-06-30 [Mistake]** — `GET /agents` returns `Agent[]` with no `skill_count`; `AgentCard` accepts `skillCount?: number` and renders a Sparkles badge, but both callers (`AgentsListView.tsx:86`, `agents/[id]/page.tsx:84`) never pass it — the badge is silently hidden by `{skillCount != null && (...)}`. Fix: LEFT JOIN + COUNT from `agent_skills` in `AgentsRepository.list()`, extend shared `Agent` contract with `skill_count: number`, update `toAgentDto`, then pass `skillCount={a.skill_count}` in both call sites. `server/src/modules/agents/repository.ts:54`, `client/src/app/agents/_components/AgentsListView/AgentsListView.tsx:86`, `client/src/app/agents/[id]/page.tsx:84`
 
 ## Decisions
 <!-- Architectural or design choices with the reasoning behind them. -->
@@ -56,4 +57,4 @@
 - **2026-06-30 [Pattern]** — `ReviewService` constructor now accepts an optional `logger?: Logger` (defaulting to `console`). Use `new ReviewService(container, req.log)` in route handlers that need structured logging from the service layer. The fallback to `console` means callers without a Fastify request logger (e.g. tests) work unchanged. `server/src/modules/reviews/service.ts:40`
 
 ---
-Last updated: 2026-06-30 · Entries: 37
+Last updated: 2026-06-30 · Entries: 38

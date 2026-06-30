@@ -81,7 +81,8 @@
       "Bash(powershell -Command ' *)"
     ],
     "additionalDirectories": [
-      "C:\\Users\\felko\\AppData\\Roaming\\nvm\\v22.9.0"
+      "C:\\Users\\felko\\AppData\\Roaming\\nvm\\v22.9.0",
+      "f:\\Data\\Neoversity_ai\\dev-digest\\.claude\\skills\\engineering-insights\\templates"
     ]
   },
   "hooks": {
