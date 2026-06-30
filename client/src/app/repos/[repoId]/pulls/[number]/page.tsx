@@ -58,6 +58,9 @@ function PRDetailContent() {
   const invalidateRunHistory = () => {
     if (prId) qc.invalidateQueries({ queryKey: ["pr-runs", prId] });
   };
+  const invalidatePrIntent = () => {
+    if (prId) qc.invalidateQueries({ queryKey: ["pull-intent", prId] });
+  };
 
   const tab = search.get("tab") ?? "overview";
   const traceRunId = search.get("trace");
@@ -167,6 +170,7 @@ function PRDetailContent() {
             onRunDone={() => {
               invalidateActiveRuns();
               invalidateRunHistory();
+              invalidatePrIntent();
               refetchReviews();
             }}
           />
