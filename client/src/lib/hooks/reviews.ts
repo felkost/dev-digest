@@ -15,6 +15,7 @@ import type {
   ReviewRunResponse,
   RunEvent,
   RunSummary,
+  SmartDiff,
 } from "@devdigest/shared";
 
 // ---- Active (in-flight) runs — server-side source of truth ----
@@ -66,6 +67,16 @@ export function useIntent(prId: string | null | undefined) {
     queryFn: () => api.get<Intent | null>(`/pulls/${prId}/intent`),
     enabled: !!prId,
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- Smart Diff (file grouping by role, inline finding badges) ----
+export function useSmartDiff(prId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['smart-diff', prId],
+    queryFn: () => api.get<SmartDiff | null>(`/pulls/${prId}/smart-diff`),
+    enabled: !!prId,
+    staleTime: 30 * 1000,
   });
 }
 

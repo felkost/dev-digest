@@ -118,12 +118,13 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       })
       .returning();
 
-    // pr_files (subset)
+    // pr_files (subset — includes one file per role so Smart Diff demo shows all three groups)
     await db.insert(t.prFiles).values([
       { prId: pr!.id, path: 'src/middleware/ratelimit.ts', additions: 84, deletions: 0 },
       { prId: pr!.id, path: 'src/api/public/webhooks.ts', additions: 31, deletions: 6 },
       { prId: pr!.id, path: 'src/config.ts', additions: 4, deletions: 0 },
       { prId: pr!.id, path: 'src/api/users.ts', additions: 7, deletions: 2 },
+      { prId: pr!.id, path: 'pnpm-lock.yaml', additions: 120, deletions: 3, patch: null },
     ]);
 
     // pr_commits
@@ -190,6 +191,17 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
         confidence: 0.86,
       },
     ]);
+  }
+
+  // Backfill pnpm-lock.yaml into pr_files for Smart Diff Boilerplate demo (idempotent)
+  const [existingLock] = await db
+    .select({ id: t.prFiles.id })
+    .from(t.prFiles)
+    .where(and(eq(t.prFiles.prId, pr!.id), eq(t.prFiles.path, 'pnpm-lock.yaml')));
+  if (!existingLock) {
+    await db.insert(t.prFiles).values({
+      prId: pr!.id, path: 'pnpm-lock.yaml', additions: 120, deletions: 3, patch: null,
+    });
   }
 
   // ---- built-in agents (the three starter presets) ----

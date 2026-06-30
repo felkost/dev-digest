@@ -10,6 +10,20 @@ import { REVIEW_STRATEGY } from './constants.js';
 import { taskLine } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
 import { routeModel } from '../../platform/model-router.js';
+import { classifyFile } from './smart-diff-rules.js';
+
+/**
+ * Conservative safe token budget for the DIFF portion of the prompt,
+ * reserving ~25K tokens for system/overhead. Based on published context limits.
+ */
+function diffBudgetForModel(model: string): number {
+  if (/gpt-4\.1|o3|o4-mini/.test(model)) return 900_000;           // 1M+ context
+  if (/gpt-4o/.test(model))               return  95_000;           // 128K context
+  if (/claude.*(haiku|sonnet|opus)/.test(model)) return 165_000;    // 200K context
+  if (/gemini/.test(model))               return 900_000;            // 1M context
+  if (/deepseek/.test(model))             return  55_000;            // 64K context
+  return 70_000;                                                      // safe default
+}
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
 export class RunCancelledError extends Error {
@@ -277,10 +291,14 @@ export class ReviewRunExecutor {
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
       // above, and persistence + observability below.
+      //
+      // Trim the diff to fit within the model's context window BEFORE sending.
+      // Core files are kept first; boilerplate dropped last when over budget.
+      const budgetedDiff = this.budgetDiff(diff, agent.model, runLog);
       const outcome = await reviewPullRequest({
         systemPrompt: agent.systemPrompt,
         model: agent.model,
-        diff,
+        diff: budgetedDiff,
         llm,
         // Per-agent review strategy (configured in the Agent editor); falls back
         // to the studio default. single-pass = whole diff in one call.
@@ -518,6 +536,56 @@ export class ReviewRunExecutor {
     } catch {
       return '';
     }
+  }
+
+  /**
+   * Trim the diff to fit within the per-model safe token budget before sending
+   * to the LLM. Returns the original diff unchanged when it already fits.
+   *
+   * Priority: core → wiring → boilerplate (greedy-pack — smaller wiring/boilerplate
+   * files may still fill gaps even when a large core file doesn't fit).
+   */
+  private budgetDiff(diff: UnifiedDiff, model: string, runLog: RunLogger): UnifiedDiff {
+    const budget = diffBudgetForModel(model);
+    const totalTokens = this.container.tokenizer.count(diff.raw);
+    if (totalTokens <= budget) return diff; // already fits
+
+    // Split raw diff into per-file sections on the git diff header boundary
+    const fileSections = new Map<string, string>();
+    const rawParts = diff.raw.split('\ndiff --git ');
+    for (let i = 0; i < rawParts.length; i++) {
+      const section = i === 0 ? rawParts[i]! : 'diff --git ' + rawParts[i]!;
+      const m = section.match(/^diff --git a\/(.+?) b\//);
+      if (m) fileSections.set(m[1]!, section);
+    }
+
+    // Sort: core first, boilerplate last — so reviewers see the important files
+    const roleOrder = { core: 0, wiring: 1, boilerplate: 2 } as const;
+    const sorted = [...diff.files].sort(
+      (a, b) => (roleOrder[classifyFile(a.path)] ?? 1) - (roleOrder[classifyFile(b.path)] ?? 1),
+    );
+
+    // Greedy-pack: skip files that don't fit but keep trying smaller ones
+    let used = 0;
+    const kept = new Set<string>();
+    for (const file of sorted) {
+      const section = fileSections.get(file.path) ?? '';
+      if (!section) continue;
+      const tokens = this.container.tokenizer.count(section);
+      if (used + tokens > budget) continue;
+      kept.add(file.path);
+      used += tokens;
+    }
+
+    const omitted = diff.files.length - kept.size;
+    runLog.info(
+      `diff budget: ${kept.size}/${diff.files.length} files kept (${used.toLocaleString()} / ${budget.toLocaleString()} tokens); ${omitted} low-priority file(s) omitted`,
+    );
+
+    return {
+      files: diff.files.filter((f) => kept.has(f.path)),
+      raw: [...kept].map((p) => fileSections.get(p) ?? '').join('\n'),
+    };
   }
 
   /**
