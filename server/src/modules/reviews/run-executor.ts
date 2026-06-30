@@ -13,16 +13,17 @@ import { routeModel } from '../../platform/model-router.js';
 import { classifyFile } from './smart-diff-rules.js';
 
 /**
- * Conservative safe token budget for the DIFF portion of the prompt,
- * reserving ~25K tokens for system/overhead. Based on published context limits.
+ * Conservative safe token budget for the DIFF portion of the prompt.
+ * Real overhead per run: ~44K tokens (system prompt + repo map + 4-5 injected skills).
+ * Budget = context_limit - 44K overhead - 5K safety buffer.
  */
 function diffBudgetForModel(model: string): number {
-  if (/gpt-4\.1|o3|o4-mini/.test(model)) return 900_000;           // 1M+ context
-  if (/gpt-4o/.test(model))               return  95_000;           // 128K context
-  if (/claude.*(haiku|sonnet|opus)/.test(model)) return 165_000;    // 200K context
-  if (/gemini/.test(model))               return 900_000;            // 1M context
-  if (/deepseek/.test(model))             return  55_000;            // 64K context
-  return 70_000;                                                      // safe default
+  if (/gpt-4\.1|o3/.test(model))          return 900_000;           // 1M+ context
+  if (/gemini/.test(model))                return 900_000;           // 1M context
+  if (/gpt-4o/.test(model))               return  75_000;           // 128K ctx − 53K overhead
+  if (/claude.*(haiku|sonnet|opus)/.test(model)) return 150_000;    // 200K ctx − 50K overhead
+  if (/deepseek/.test(model))             return  15_000;            // 64K ctx − 49K overhead
+  return 60_000;                                                      // safe default
 }
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */

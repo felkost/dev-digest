@@ -13,7 +13,7 @@ import { toJsonSchema, parseWithRepair } from '../../platform/structured.js';
 import { estimateCost } from './pricing.js';
 import { ExternalServiceError } from '../../platform/errors.js';
 
-const DEFAULT_TIMEOUT = 60_000;
+const DEFAULT_TIMEOUT = 300_000; // 5 min — large diffs on Claude can take 2–3 min
 const DEFAULT_MAX_TOKENS = 4096;
 // Review JSON (findings × fields) can easily exceed 4096 tokens on large diffs.
 // 8192 is the safe ceiling for all current Anthropic models (haiku/sonnet/opus).

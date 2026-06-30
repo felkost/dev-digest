@@ -32,21 +32,17 @@ function getHighestSeverityColor(findings: SmartDiffFile["findings"]): string {
   return "var(--sugg)";
 }
 
-function getSeverityDot(severity: string): React.ReactNode {
-  const color = getSeverityColor(severity);
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: color,
-        marginRight: 4,
-        flexShrink: 0,
-      }}
-    />
-  );
+// Maps internal severity to display label (critical → "blocker")
+function getSeverityLabel(severity: string): string {
+  if (severity === "critical") return "blocker";
+  return severity;
+}
+
+// Unicode icons matching the Lucide AlertOctagon / AlertTriangle / Lightbulb family
+function getSeverityIcon(severity: string): string {
+  if (severity === "critical") return "⊘";
+  if (severity === "warning") return "△";
+  return "○";
 }
 
 interface FileViewProps {
@@ -94,43 +90,60 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
         >
           {file.path}
         </span>
+        {/* Severity dot — replaces "X findings" text; colour = highest finding severity */}
+        {file.findingsCount > 0 && (
+          <span
+            title={`${file.findingsCount} finding${file.findingsCount !== 1 ? "s" : ""}`}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: highestColor,
+              flexShrink: 0,
+              display: "inline-block",
+            }}
+          />
+        )}
+        {file.pseudocode_summary && (
+          <span
+            style={{
+              fontSize: 11,
+              color: "#4a9eff",
+              background: "rgba(74,158,255,0.12)",
+              border: "1px solid rgba(74,158,255,0.25)",
+              borderRadius: 4,
+              padding: "2px 8px",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+            }}
+          >
+            ⚡ summary
+          </span>
+        )}
         <span style={{ fontSize: 11, color: "#4caf50", flexShrink: 0 }}>
           +{file.additions}
         </span>
         <span style={{ fontSize: 11, color: "#f44336", flexShrink: 0 }}>
           -{file.deletions}
         </span>
-        {file.findingsCount > 0 && (
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: "#fff",
-              background: highestColor,
-              borderRadius: 10,
-              padding: "1px 7px",
-              flexShrink: 0,
-            }}
-          >
-            {file.findingsCount} finding{file.findingsCount !== 1 ? "s" : ""}
-          </span>
-        )}
-        {file.pseudocode_summary && (
-          <span
-            style={{
-              fontSize: 11,
-              color: "var(--text-muted)",
-              maxWidth: 260,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              flexShrink: 1,
-            }}
-          >
-            {file.pseudocode_summary}
-          </span>
-        )}
       </div>
+
+      {/* "What this does" row — only when summary exists and file is expanded */}
+      {expanded && file.pseudocode_summary && (
+        <div
+          style={{
+            padding: "5px 12px 5px 28px",
+            borderBottom: "1px solid var(--border)",
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            lineHeight: 1.5,
+          }}
+        >
+          <span style={{ color: "var(--text-muted)" }}>↳ </span>
+          <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>What this does:</span>{" "}
+          {file.pseudocode_summary}
+        </div>
+      )}
 
       {/* File diff content */}
       {expanded && (
@@ -187,6 +200,7 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
                       background: bg,
                       borderLeft,
                       minHeight: 18,
+                      minWidth: "100%",
                     }}
                   >
                     {/* Line number gutter */}
@@ -219,18 +233,11 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
                     >
                       {prefix}
                     </span>
-                    {/* Line content */}
-                    <span
-                      style={{
-                        flex: 1,
-                        whiteSpace: "pre",
-                        color: "var(--text-primary)",
-                        overflow: "hidden",
-                      }}
-                    >
+                    {/* Line content — flexGrow fills row, flexShrink:0 lets long lines overflow for scroll */}
+                    <span style={{ flexGrow: 1, flexShrink: 0, whiteSpace: "pre", color: "var(--text-primary)" }}>
                       {line.text}
                     </span>
-                    {/* Finding badge */}
+                    {/* Finding badge — icon + label (critical shows as "blocker") */}
                     {findingOnLine && (
                       <button
                         type="button"
@@ -240,15 +247,16 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
                         }}
                         title={`[${findingOnLine.category}] ${findingOnLine.title}`}
                         style={{
-                          display: "flex",
+                          display: "inline-flex",
                           alignItems: "center",
                           gap: 4,
                           flexShrink: 0,
+                          position: "sticky",
+                          right: 6,
+                          zIndex: 1,
                           marginLeft: 8,
-                          marginRight: 6,
                           padding: "1px 8px",
-                          borderRadius: 10,
-                          border: `1px solid ${getSeverityColor(findingOnLine.severity)}`,
+                          border: "none",
                           background: "transparent",
                           color: getSeverityColor(findingOnLine.severity),
                           fontSize: 11,
@@ -257,8 +265,8 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {getSeverityDot(findingOnLine.severity)}
-                        {findingOnLine.severity}
+                        {getSeverityIcon(findingOnLine.severity)}{" "}
+                        {getSeverityLabel(findingOnLine.severity)}
                       </button>
                     )}
                   </div>
