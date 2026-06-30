@@ -64,7 +64,10 @@ export type Finding = z.infer<typeof Finding>;
 
 /** Review — the consolidated structured output of a single agent run. */
 export const Review = z.object({
-  verdict: Verdict,
+  // Some smaller models (e.g. haiku) omit verdict; default to neutral 'comment'.
+  // The actual GitHub review event is computed deterministically from findings,
+  // so this field is stored/displayed only — it never drives the review action.
+  verdict: Verdict.default('comment'),
   summary: z.string(),
   score: z
     .number()

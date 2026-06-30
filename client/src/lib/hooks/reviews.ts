@@ -8,12 +8,14 @@ import { api, API_BASE } from "../api";
 import { notify } from "../toast";
 import type {
   FindingActionKind,
+  Intent,
   PrBrief,
   PrReviewComment,
   ReviewRecord,
   ReviewRunResponse,
   RunEvent,
   RunSummary,
+  SmartDiff,
 } from "@devdigest/shared";
 
 // ---- Active (in-flight) runs — server-side source of truth ----
@@ -29,7 +31,7 @@ export interface ActiveRun {
 export function usePrActiveRuns(prId: string | null | undefined) {
   return useQuery({
     queryKey: ["pr-active-runs", prId],
-    queryFn: () => api.get<ActiveRun[]>(`/pulls/${prId}/runs/active`),
+    queryFn: ({ signal }) => api.get<ActiveRun[]>(`/pulls/${prId}/runs/active`, { signal }),
     enabled: !!prId,
     refetchInterval: (query) => ((query.state.data?.length ?? 0) > 0 ? 4000 : false),
   });
@@ -41,7 +43,7 @@ export function usePrActiveRuns(prId: string | null | undefined) {
 export function usePrRuns(prId: string | null | undefined) {
   return useQuery({
     queryKey: ["pr-runs", prId],
-    queryFn: () => api.get<RunSummary[]>(`/pulls/${prId}/runs`),
+    queryFn: ({ signal }) => api.get<RunSummary[]>(`/pulls/${prId}/runs`, { signal }),
     enabled: !!prId,
     refetchInterval: (query) =>
       (query.state.data ?? []).some((r) => r.status === "running") ? 4000 : false,
@@ -52,9 +54,29 @@ export function usePrRuns(prId: string | null | undefined) {
 export function usePrBrief(prId: string | null | undefined) {
   return useQuery({
     queryKey: ["pr-brief", prId],
-    queryFn: () => api.get<PrBrief | null>(`/pulls/${prId}/brief`),
+    queryFn: ({ signal }) => api.get<PrBrief | null>(`/pulls/${prId}/brief`, { signal }),
     enabled: !!prId,
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- Live PR Intent (from pr_intent table — populated after review runs) ---
+export function useIntent(prId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["pr-intent", prId],
+    queryFn: () => api.get<Intent | null>(`/pulls/${prId}/intent`),
+    enabled: !!prId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- Smart Diff (file grouping by role, inline finding badges) ----
+export function useSmartDiff(prId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['smart-diff', prId],
+    queryFn: () => api.get<SmartDiff | null>(`/pulls/${prId}/smart-diff`),
+    enabled: !!prId,
+    staleTime: 30 * 1000,
   });
 }
 
@@ -62,7 +84,7 @@ export function usePrBrief(prId: string | null | undefined) {
 export function usePrReviews(prId: string | null | undefined) {
   return useQuery({
     queryKey: ["reviews", prId],
-    queryFn: () => api.get<ReviewRecord[]>(`/pulls/${prId}/reviews`),
+    queryFn: ({ signal }) => api.get<ReviewRecord[]>(`/pulls/${prId}/reviews`, { signal }),
     enabled: !!prId,
   });
 }
@@ -102,7 +124,7 @@ export function useDeleteReview(prId: string | null | undefined) {
 export function usePrComments(prId: string | null | undefined) {
   return useQuery({
     queryKey: ["pr-comments", prId],
-    queryFn: () => api.get<PrReviewComment[]>(`/pulls/${prId}/comments`),
+    queryFn: ({ signal }) => api.get<PrReviewComment[]>(`/pulls/${prId}/comments`, { signal }),
     enabled: !!prId,
   });
 }
@@ -152,6 +174,8 @@ export function useRunReview() {
       }),
     onSuccess: (_d, { prId }) => {
       qc.invalidateQueries({ queryKey: ["reviews", prId] });
+      qc.invalidateQueries({ queryKey: ["pr-runs", prId] });
+      qc.invalidateQueries({ queryKey: ["pr-active-runs", prId] });
     },
   });
 }

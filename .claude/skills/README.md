@@ -9,6 +9,7 @@ Reusable AI skills that provide specialized knowledge and workflows. Canonical l
 | [fastify-best-practices](fastify-best-practices/SKILL.md) | Backend | Fastify routes, plugins, JSON-schema validation, error handling |
 | [drizzle-orm-patterns](drizzle-orm-patterns/SKILL.md) | Backend | Drizzle schema, queries, relations, transactions, migrations |
 | [postgresql-table-design](postgresql-table-design/SKILL.md) | Backend | Postgres schema design, data types, indexing, constraints |
+| [server-testing](server-testing/SKILL.md) | Backend | Fastify/Drizzle/Vitest test patterns — test split, inject(), mocks, coverage |
 | [next-best-practices](next-best-practices/SKILL.md) | Frontend | Next.js App Router, RSC boundaries, data fetching, optimization |
 | [react-best-practices](react-best-practices/SKILL.md) | Frontend | React anti-patterns, state management, hooks rules |
 | [react-testing-library](react-testing-library/SKILL.md) | Frontend | General-purpose React Testing Library guide with Vitest |
@@ -17,6 +18,8 @@ Reusable AI skills that provide specialized knowledge and workflows. Canonical l
 | [security](security/SKILL.md) | Full-stack | OWASP Top 10:2025, auth, injection, uploads, secrets |
 | [mermaid-diagram](mermaid-diagram/SKILL.md) | Shared | Mermaid diagrams in markdown (flowcharts, sequence, ERD, …) |
 | [engineering-insights](engineering-insights/SKILL.md) | Shared | Capture non-obvious discoveries into module insights.md files |
+| [plan-verifier](plan-verifier/SKILL.md) | Shared | Verification methodology — map plan requirements to codebase evidence |
+| [doc-writer](doc-writer/SKILL.md) | Shared | Doc type → location mapping, per-symbol structure, Mermaid conventions |
 
 ## What Are Skills?
 

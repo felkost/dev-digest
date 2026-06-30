@@ -12,7 +12,7 @@ import { AgentEditor } from "./_components/AgentEditor";
 import { useAgents, useAgent, useUpdateAgent } from "../../../lib/hooks/agents";
 import { ApiError } from "../../../lib/api";
 
-const VALID_TABS = ["config"];
+const VALID_TABS = ["config", "skills"];
 
 export default function AgentEditorPage() {
   const params = useParams<{ id: string }>();
@@ -42,7 +42,7 @@ export default function AgentEditorPage() {
       <AppShell crumb={crumb}>
         <ErrorState
           fullScreen
-          title="Couldn’t load this agent"
+          title="Could not load this agent"
           body={error instanceof ApiError ? error.message : "The agent could not be loaded."}
           onRetry={() => refetch()}
         />
@@ -109,7 +109,7 @@ export default function AgentEditorPage() {
               {!agent.enabled && <Badge color="var(--text-muted)">disabled</Badge>}
               <div style={{ marginLeft: "auto" }}>
                 <Button kind="secondary" size="sm" icon="GitPullRequest" onClick={() => router.push("/")}>
-                  Run on a PR…
+                  Run on a PR...
                 </Button>
               </div>
             </div>

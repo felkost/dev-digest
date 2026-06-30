@@ -4,10 +4,10 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Toggle, EmptyState, Icon } from "@devdigest/ui";
+import { Toggle, EmptyState, Icon, SEV } from "@devdigest/ui";
 import type { FindingRecord } from "@devdigest/shared";
 import { FindingCard } from "../FindingCard";
-import { useFindingAction } from "../../../../../../../lib/hooks/reviews";
+import { useFindingAction } from "@/lib/hooks/reviews";
 import { KEY_TO_ACTION } from "./constants";
 import { visibleFindings } from "./helpers";
 import { s } from "./styles";
@@ -75,18 +75,18 @@ export function FindingsPanel({
             const cnt = severityCounts[sev] ?? 0;
             if (!cnt) return null;
             const active = activeSeverity === sev;
-            const color = sev === "CRITICAL" ? "var(--crit)" : sev === "WARNING" ? "var(--warn)" : "var(--text-muted)";
-            const SevIcon = sev === "CRITICAL" ? Icon.AlertOctagon : sev === "WARNING" ? Icon.AlertTriangle : Icon.Lightbulb;
+            const { c: color, icon: iconName, label } = SEV[sev];
+            const SevIcon = Icon[iconName];
             return (
               <button
                 key={sev}
                 type="button"
                 style={s.pill(active, color)}
                 onClick={() => setActiveSeverity(active ? null : sev)}
-                title={active ? `Show all severities` : `Filter to ${sev} only`}
+                title={active ? `Show all severities` : `Filter to ${label} only`}
               >
                 <SevIcon size={11} />
-                {sev === "CRITICAL" ? "CRIT" : sev === "WARNING" ? "WARN" : "SUGG"}
+                {label.slice(0, 4).toUpperCase()}
                 <span style={s.pillCount(active)}>{cnt}</span>
               </button>
             );
