@@ -1,6 +1,7 @@
 import type { Container } from '../../platform/container.js';
 import type { Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
-import { reviewPullRequest, countBlockers } from '@devdigest/reviewer-core';
+import { reviewPullRequest, countBlockers, classifyIntent } from '@devdigest/reviewer-core';
+import type { Intent } from '@devdigest/shared';
 import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
@@ -8,6 +9,7 @@ import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './reposit
 import { REVIEW_STRATEGY } from './constants.js';
 import { taskLine } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
+import { routeModel } from '../../platform/model-router.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
 export class RunCancelledError extends Error {
@@ -33,6 +35,22 @@ export type RunOutcome = {
   grounding: string;
   raw: Review;
 };
+
+/**
+ * Build a compact files summary for the intent classifier.
+ * Includes ONLY file paths, +/- counts, and @@ hunk position headers.
+ * Deliberately excludes code body lines (+/-) to keep the prompt small.
+ */
+function buildFilesSummary(diff: UnifiedDiff): string {
+  return diff.files
+    .map((f) => {
+      const hunkHeaders = f.hunks
+        .map((h) => `  @@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`)
+        .join('\n');
+      return `${f.path} (+${f.additions}/-${f.deletions})${hunkHeaders ? '\n' + hunkHeaders : ''}`;
+    })
+    .join('\n\n');
+}
 
 /**
  * Owns the background execution of queued agent runs (extracted from
@@ -104,6 +122,52 @@ export class ReviewRunExecutor {
     }
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
 
+    // ---- Intent pre-pass (shared across all agents in this batch) ---------
+    // Classify the PR intent once. Cached in pr_intent — subsequent runs reuse
+    // the stored result. Pass the intent to each agent's review prompt.
+    let intent: Intent | undefined;
+    try {
+      intent = await this.repo.getIntent(pull.id);
+      if (!intent) {
+        const firstProvider = (jobs[0]?.agent.provider ?? 'anthropic') as Parameters<typeof routeModel>[1];
+        const intentModel = routeModel('intent', firstProvider);
+        const intentLlm = await this.container.llm(firstProvider);
+        const filesSummary = buildFilesSummary(diff);
+        const intentStart = Date.now();
+        const result = await classifyIntent({
+          title: pull.title,
+          body: pull.body ?? '',
+          filesSummary,
+          llm: intentLlm,
+          model: intentModel,
+          sessionId: `intent:${pull.id}`,
+        });
+        const { tokensIn, tokensOut, costUsd, ...intentData } = result;
+        intent = intentData;
+        await this.repo.upsertIntent(pull.id, intent);
+        logger?.info(
+          {
+            phase: 'intent',
+            prId: pull.id,
+            model: intentModel,
+            tokensIn,
+            tokensOut,
+            costUsd,
+            durationMs: Date.now() - intentStart,
+          },
+          'intent: classification complete',
+        );
+        runLog.info(`intent: classified using ${intentModel} — ${tokensIn} in / ${tokensOut} out`);
+      } else {
+        runLog.info('intent: using cached classification');
+        logger?.info({ phase: 'intent', prId: pull.id }, 'intent: cache hit');
+      }
+    } catch (err) {
+      runLog.info(`intent: classification failed — ${(err as Error).message} — proceeding without intent`);
+      logger?.warn({ phase: 'intent', prId: pull.id, err: (err as Error).message }, 'intent: classification failed (non-fatal)');
+      // Intent is optional — never fail the whole review batch because of it
+    }
+
     for (const { agent, runId } of jobs) {
       const agentStart = Date.now();
       logger?.info(
@@ -111,7 +175,7 @@ export class ReviewRunExecutor {
         `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
       );
       try {
-        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog);
+        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog, intent);
         logger?.info(
           {
             runId,
@@ -143,6 +207,7 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     runId: string,
     parentLog: RunLogger,
+    intent?: Intent,
   ): Promise<RunOutcome> {
     const start = Date.now();
     // Narrow the fanned-out pre-work logger to THIS run; the shared diff/intent
@@ -230,6 +295,9 @@ export class ReviewRunExecutor {
         ...(pull.body ? { prDescription: pull.body } : {}),
         // Enabled skills attached to this agent, in user-defined order.
         ...(skillBodies.length ? { skills: skillBodies } : {}),
+        // Intent pre-pass result — shared across agents in this batch, cached in
+        // pr_intent. Undefined when classification failed (non-fatal).
+        ...(intent ? { intent } : {}),
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),

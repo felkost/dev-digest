@@ -8,6 +8,7 @@ import { api, API_BASE } from "../api";
 import { notify } from "../toast";
 import type {
   FindingActionKind,
+  Intent,
   PrBrief,
   PrReviewComment,
   ReviewRecord,
@@ -53,6 +54,16 @@ export function usePrBrief(prId: string | null | undefined) {
   return useQuery({
     queryKey: ["pr-brief", prId],
     queryFn: ({ signal }) => api.get<PrBrief | null>(`/pulls/${prId}/brief`, { signal }),
+    enabled: !!prId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- Live PR Intent (from pr_intent table — populated after review runs) ---
+export function useIntent(prId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["pr-intent", prId],
+    queryFn: () => api.get<Intent | null>(`/pulls/${prId}/intent`),
     enabled: !!prId,
     staleTime: 5 * 60 * 1000,
   });

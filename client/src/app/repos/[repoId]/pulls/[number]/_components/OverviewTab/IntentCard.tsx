@@ -1,20 +1,14 @@
 "use client";
 
-import React from "react";
 import { Icon } from "@devdigest/ui";
-import type { PrBrief } from "@devdigest/shared";
+import type { Intent } from "@devdigest/shared";
 import { s } from "./styles";
 
-function riskColor(severity: string) {
-  return severity === "high"
-    ? "var(--crit)"
-    : severity === "medium"
-      ? "var(--warn)"
-      : "var(--text-muted)";
+interface IntentCardProps {
+  intent: Intent;
 }
 
-export function IntentCard({ brief }: { brief: PrBrief }) {
-  const { intent, risks } = brief;
+export function IntentCard({ intent }: IntentCardProps) {
   return (
     <div style={s.card}>
       <div style={s.cardHeader}>
@@ -49,23 +43,6 @@ export function IntentCard({ brief }: { brief: PrBrief }) {
             </div>
           )}
         </div>
-
-        {risks.risks.length > 0 && (
-          <div>
-            <div style={s.scopeHeader("var(--text-muted)")}>Risk areas</div>
-            <div style={s.riskGrid}>
-              {risks.risks.map((r, i) => {
-                const c = riskColor(r.severity);
-                return (
-                  <span key={i} style={s.riskChip(c)}>
-                    <span style={s.riskDot(c)} />
-                    {r.title}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

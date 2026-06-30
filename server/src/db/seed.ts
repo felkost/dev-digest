@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { createDb, type Db } from './client.js';
 import * as t from './schema.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import {
   GENERAL_REVIEWER_PROMPT,
   SECURITY_REVIEWER_PROMPT,
@@ -132,6 +132,21 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       sha: 'a1b2c3d4e5f6',
       message: 'Add token-bucket rate limiter',
       author: 'marisa.koch',
+    });
+
+    // intent seed — shows in IntentCard before a live review run
+    await db.insert(t.prIntent).values({
+      prId: pr!.id,
+      intent: 'Add rate limiting to public API endpoints to prevent abuse',
+      inScope: ['token-bucket rate limiter middleware', 'rate limit config per endpoint', 'webhook endpoint limits', 'user list endpoint limits'],
+      outOfScope: ['authentication changes', 'database schema changes', 'frontend UI changes'],
+    }).onConflictDoUpdate({
+      target: t.prIntent.prId,
+      set: {
+        intent: sql`excluded.intent`,
+        inScope: sql`excluded.in_scope`,
+        outOfScope: sql`excluded.out_of_scope`,
+      },
     });
 
     // a sample review + findings so the PR shows results before the first run
