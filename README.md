@@ -23,6 +23,14 @@ project context into reviews) lives inside the server at
 [`server/src/modules/repo-intel`](server/src/modules/repo-intel). Only
 **Postgres** runs in Docker; the API and web app run on the host via `pnpm dev`.
 
+The **MCP server** (`mcp/`, L04) is **opt-in and started separately** from the app
+scripts — `./scripts/dev.sh` never launches it. A project-scoped `.mcp.json` at the
+repo root makes Claude Code spawn it at startup. Because each connected MCP server
+adds its tool definitions to every session's context, disable it when you're not
+doing PR review: set `"disabledMcpjsonServers": ["devdigest"]` in
+`.claude/settings.local.json` (or `[]` to re-enable). Full run/toggle guide:
+[mcp/README.md](mcp/README.md).
+
 ## Architecture
 
 ```mermaid
