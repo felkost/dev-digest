@@ -1,4 +1,7 @@
 {
+  "env": {
+    "ENABLE_TOOL_SEARCH": "true"
+  },
   "permissions": {
     "allow": [
       "Skill(engineering-insights)",
@@ -78,7 +81,15 @@
       "Bash(python3 -c ' *)",
       "Bash(node -e \"const fs = require\\('fs'\\); fs.writeFileSync\\('f:/Data/Neoversity_ai/dev-digest/docs/plans/intent-ui-wire-plan.md', 'test', 'utf8'\\); console.log\\('ok'\\);\")",
       "Bash(node -e \"const fs=require\\('fs'\\); const p='f:/Data/Neoversity_ai/dev-digest/docs/plans/intent-ui-wire-plan.md'; let c=fs.readFileSync\\(p,'utf8'\\); console.log\\(c.length, c.slice\\(0,20\\)\\);\")",
-      "Bash(powershell -Command ' *)"
+      "Bash(powershell -Command ' *)",
+      "Bash(ls \"C:\\\\Users\\\\felko\\\\.claude\\\\\" 2>/dev/null && ls \"C:\\\\Users\\\\felko\\\\AppData\\\\Roaming\\\\Claude\\\\\" 2>/dev/null)",
+      "Read(//c/Users/felko/.claude\" 2>/dev/**)",
+      "Read(//c/Users/felko/.claude/**)",
+      "Read(//c/Users/felko/**)",
+      "PowerShell(gh pr list --repo felkost/dev-digest --state open)",
+      "PowerShell(curl http://localhost:3001/repos)",
+      "PowerShell(\\(Invoke-RestMethod http://localhost:3001/repos\\) | ConvertTo-Json -Depth 5)",
+      "PowerShell(\\(Invoke-RestMethod http://localhost:3001/repos/f8ec465f-bc3a-4e08-a002-812093e42a10/pulls\\) | ConvertTo-Json -Depth 5)"
     ],
     "additionalDirectories": [
       "C:\\Users\\felko\\AppData\\Roaming\\nvm\\v22.9.0",

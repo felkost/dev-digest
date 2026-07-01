@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { fileURLToPath } from 'node:url';
 import { createDb, type Db } from './client.js';
 import * as t from './schema.js';
 import { eq, and, sql } from 'drizzle-orm';
@@ -767,8 +768,9 @@ If this PR removes or renames something that was never marked deprecated, flag i
   return { workspaceId, userId };
 }
 
-// CLI entrypoint
-if (import.meta.url === `file://${process.argv[1]}`) {
+// CLI entrypoint (cross-platform: compare native paths, not a hand-built file:// URL,
+// which never matches on Windows where argv[1] uses backslashes).
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error('DATABASE_URL is required');

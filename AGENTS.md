@@ -14,9 +14,12 @@ Node ≥22 · pnpm ≥10 · TypeScript 5.7 · Fastify 5 · Next.js 15 · React 1
 | `client/` | `@devdigest/web` | 3000 |
 | `reviewer-core/` | `@devdigest/reviewer-core` | — |
 | `e2e/` | `@devdigest/e2e` | — |
+| `mcp/` | `@devdigest/mcp` | — |
 | `server/src/vendor/shared/` | `@devdigest/shared` | — |
 
 No monorepo workspace. Cross-package code shared via **tsconfig path aliases** — not published npm modules.
+
+`mcp/` (L04) is a standalone **stdio MCP server** that wraps the API (5 tools: `list_agents`, `run_agent_on_pr`, `get_findings`, `get_conventions`, `get_blast_radius`). It is an HTTP consumer of `:3001` only — no DB, no `reviewer-core` import. Plan: [docs/plans/2026-06-30-mcp-server.md](docs/plans/2026-06-30-mcp-server.md).
 
 ## Commands
 
@@ -75,3 +78,4 @@ Tables for L02–L08 exist in the schema but their modules are **not registered*
 - [reviewer-core/AGENTS.md](reviewer-core/AGENTS.md)
 - [client/AGENTS.md](client/AGENTS.md)
 - [e2e/AGENTS.md](e2e/AGENTS.md)
+- [mcp/AGENTS.md](mcp/AGENTS.md)
