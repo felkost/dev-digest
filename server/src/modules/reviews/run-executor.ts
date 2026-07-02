@@ -9,6 +9,7 @@ import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './reposit
 import { REVIEW_STRATEGY } from './constants.js';
 import { taskLine } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
+import { composePrBrief } from './brief-composer.js';
 import { routeModel } from '../../platform/model-router.js';
 import { classifyFile } from './smart-diff-rules.js';
 
@@ -413,6 +414,23 @@ export class ReviewRunExecutor {
       // marked done with no trace if saveRunTrace threw.
       runCompleted = true;
       this.container.runBus.complete(runId);
+
+      // L04: compose the live PR Brief (intent + blast + deterministic risks +
+      // prior-PR history) — zero LLM calls. Non-fatal by design: a brief
+      // composition failure must never affect an already-completed run.
+      try {
+        const [intent, blastResponse] = await Promise.all([
+          this.repo.getIntent(pull.id),
+          this.container.blast.getBlast(pull.workspaceId, pull.id),
+        ]);
+        await this.repo.upsertBrief(
+          pull.id,
+          composePrBrief({ intent, blastResponse, findings: keptFindings }),
+        );
+        runLog.info('PR brief composed and stored (0 LLM calls)');
+      } catch (briefErr) {
+        runLog.info(`PR brief composition skipped: ${(briefErr as Error).message}`);
+      }
 
       return { review, findings: findingRows, grounding, raw: outcome.review };
     } catch (err) {

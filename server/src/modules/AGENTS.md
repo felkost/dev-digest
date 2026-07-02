@@ -22,7 +22,11 @@ No auto-discovery — if it's not in `index.ts`, it does not load.
 
 `agents` · `repos` · `pulls` · `reviews` · `repo-intel` · `settings` · `polling` · `workspace`
 
-L02–L08 modules: tables exist in the schema, modules not yet registered.
+## Currently registered (L04)
+
+`blast`
+
+L02–L03 and L05–L08 modules: tables exist in the schema, modules not yet registered.
 
 ## See also
 

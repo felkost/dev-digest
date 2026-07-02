@@ -436,6 +436,20 @@ export class RepoIntelRepository {
       .where(eq(t.fileEdges.repoId, repoId));
   }
 
+  /**
+   * Reverse import edges: for each `toFile` in `toFiles`, return every
+   * `{ fromFile, toFile }` row where `toFile` is one of the given paths.
+   * Used by `getImporters` for one BFS level of reverse reachability.
+   * Returns `[]` for empty input (never issues a query with an empty IN list).
+   */
+  async getReverseEdges(repoId: string, toFiles: string[]): Promise<IndexerEdgeRow[]> {
+    if (toFiles.length === 0) return [];
+    return this.db
+      .select({ fromFile: t.fileEdges.fromFile, toFile: t.fileEdges.toFile })
+      .from(t.fileEdges)
+      .where(and(eq(t.fileEdges.repoId, repoId), inArray(t.fileEdges.toFile, toFiles)));
+  }
+
   /** `{path, percentile}` for the given paths (smart-diff / run-executor). */
   async getFileRankFor(repoId: string, paths: string[]): Promise<FileRankRow[]> {
     if (paths.length === 0) return [];

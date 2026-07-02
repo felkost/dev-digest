@@ -5,6 +5,9 @@
     "risks": "Risks",
     "history": "PR history"
   },
+  "inScope": "In scope",
+  "outOfScope": "Out of scope",
+  "riskAreas": "Risk areas",
   "noRisks": "No notable risks flagged.",
   "noHistory": "No prior PRs overlap these files.",
   "overlap": "{count} overlap",

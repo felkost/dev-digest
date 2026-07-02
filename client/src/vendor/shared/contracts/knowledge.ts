@@ -279,3 +279,17 @@ export const AgentSkillLink = z.object({
   order: z.number().int(),
 });
 export type AgentSkillLink = z.infer<typeof AgentSkillLink>;
+
+// Compact usage rollup for the Agents LIST card footer (runs · accept% · avg
+// cost · skills). Distinct from the heavier per-agent `AgentStats` detail
+// contract (observability.ts) so the list query stays cheap. Aggregated from
+// `agent_runs` and finding actions (accept rate over accepted+dismissed
+// findings). `accept_pct` / `avg_cost_usd` are null when nothing to average.
+export const AgentCardStats = z.object({
+  agent_id: z.string(),
+  runs: z.number().int(),
+  skill_count: z.number().int(),
+  accept_pct: z.number().nullable(),
+  avg_cost_usd: z.number().nullable(),
+});
+export type AgentCardStats = z.infer<typeof AgentCardStats>;

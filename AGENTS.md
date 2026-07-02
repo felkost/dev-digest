@@ -46,13 +46,31 @@ cd client && pnpm dev                                     # web only (:3000)
 
 - `GET /repos/:id/pulls` — `findings_breakdown: { critical, warning, suggestion }` from latest review per PR; `cost_usd` via `SUM(agent_runs.cost_usd)`
 - `GET /pulls/:id/runs` — `findings_breakdown` per run from `RunSummary`
-- `GET /pulls/:id/brief` — stored `PrBrief` JSONB (workspace-scoped); returns `null` for live PRs (seed-only data)
+- `GET /pulls/:id/brief` — stored `PrBrief` JSONB (workspace-scoped); returns `null` until a review run composes it (see L04)
 - `GET /reviews/:id` — single review + findings (workspace-scoped via PR join)
 - `POST /findings/:id/action` — unified accept/dismiss (`{ action: "accept"|"dismiss" }`)
 - `POST /repos/:id/review-all` — fan-out over open PRs; concurrency cap 3; rate-limit 2/min; detached child logger for background tasks
 
-**`pr_brief` is populated by `pnpm db:seed` only.** Live reviews never write to it. Intent/Blast Radius cards show seed data only; live PR generation is L02+.
+**`pr_brief` is composed live since L04.** After every successful review run, `run-executor` upserts a deterministic `PrBrief` (intent ← `pr_intent` · blast+history ← `container.blast.getBlast()` · risks ← mechanical CRITICAL/WARNING findings mapping in `reviews/brief-composer.ts`) — zero LLM calls, non-fatal on failure.
 Tables for L02–L08 exist in the schema but their modules are **not registered** — they are inert.
+
+## Active features (L04) — Blast Radius
+
+**UI:**
+
+- Blast Radius card on the Overview tab shows live data from `useBlast(prId)` (falls back to seed brief); Tree and Graph views toggle via local state
+- Graph view (`BlastGraph.tsx`, dynamic-imported with `ssr:false`) renders symbols → caller files → endpoints/crons in a 3-column React Flow layout; symbol/caller nodes are clickable GitHub blob links
+- `SymbolImpact.tsx` renders per-symbol caller list as `<a href="github.com/.../blob/{head_sha}/{file}#L{line}">` when `link` is present
+- Degraded badge in card header when `index.degraded` or `index.status === "partial"`; `available:false` → empty state (never a blank card)
+- `+N more` row per symbol when the 20-callers-per-symbol cap was reached (from `truncated` map)
+
+**API:**
+
+- `GET /pulls/:id/blast` — `BlastResponse`: changed symbols, per-symbol downstream callers (≤20 each), endpoint/cron attribution, index health, prior PRs, GitHub blob link; zero LLM calls; deterministic summary string
+
+**MCP:**
+
+- `get_blast_radius` calls `GET /pulls/:id/blast` (live index, not seed brief)
 
 ## Critical conventions
 

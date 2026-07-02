@@ -7,6 +7,7 @@
 
 ## Patterns
 <!-- Reusable approaches that worked in this module. -->
+- **2026-07-02 [Pattern]** — When adding a new `api-client.ts` export (`fetchBlast`, etc.), update the `vi.mock` factory in EVERY test file that already mocks `api-client.js` (including `server.validation.test.ts` and any per-tool test file). A missing entry in the factory leaves that function `undefined` in test scope, causing silent call failures rather than a clear error. Grep for `vi.mock.*api-client` to find all files. `mcp/test/`
 
 ## Mistakes
 <!-- Failure modes, antipatterns, wrong assumptions. Prioritize this section. -->
@@ -30,4 +31,4 @@
 <!-- Unresolved. Convert to an entry in the appropriate section when answered. -->
 
 ---
-Last updated: 2026-07-01 · Entries: 9
+Last updated: 2026-07-02 · Entries: 10

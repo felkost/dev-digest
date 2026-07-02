@@ -3,12 +3,21 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
+import type { Agent, AgentCardStats, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
 
 export function useAgents() {
   return useQuery({
     queryKey: ["agents"],
     queryFn: ({ signal }) => api.get<Agent[]>("/agents", { signal }),
+  });
+}
+
+/** Per-agent usage stats (runs · accept% · avg cost · skills) for the list cards. */
+export function useAgentStats() {
+  return useQuery({
+    queryKey: ["agent-stats"],
+    queryFn: ({ signal }) => api.get<AgentCardStats[]>("/agents/stats", { signal }),
+    staleTime: 30_000,
   });
 }
 

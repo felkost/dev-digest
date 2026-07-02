@@ -83,6 +83,17 @@ export async function getIntentScoped(
 
 // ---- brief (blast radius + risks + history stored as JSONB) ---------------
 
+/**
+ * Upsert the composed live PR Brief (L04). Written by the run-executor after a
+ * successful review run — deterministic composition, zero LLM calls.
+ */
+export async function upsertBrief(db: Db, prId: string, brief: PrBrief): Promise<void> {
+  await db
+    .insert(t.prBrief)
+    .values({ prId, json: brief })
+    .onConflictDoUpdate({ target: t.prBrief.prId, set: { json: brief } });
+}
+
 export async function getBrief(db: Db, prId: string, workspaceId: string): Promise<PrBrief | undefined> {
   const [row] = await db
     .select({ json: t.prBrief.json })

@@ -16,7 +16,7 @@ import type {
   ReviewRunResponse,
   ReviewRecord,
   Convention,
-  PrBrief,
+  BlastResponse,
   ApiErrorBody,
 } from '@devdigest/shared';
 
@@ -207,7 +207,7 @@ export async function fetchConventions(repoId: string): Promise<ApiResult<Conven
   return apiFetch<Convention[]>(`/repos/${repoId}/conventions`);
 }
 
-/** GET /pulls/:prId/brief → PrBrief | null */
-export async function fetchBrief(prId: string): Promise<ApiResult<PrBrief | null>> {
-  return apiFetch<PrBrief | null>(`/pulls/${prId}/brief`);
+/** GET /pulls/:prId/blast → BlastResponse */
+export async function fetchBlast(prId: string): Promise<ApiResult<BlastResponse>> {
+  return apiFetch<BlastResponse>(`/pulls/${prId}/blast`);
 }

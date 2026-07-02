@@ -16,7 +16,7 @@ pnpm test         # vitest (jsdom, no running API needed)
 - **Next.js 15** App Router + **React 19** — see [src/app/AGENTS.md](src/app/AGENTS.md)
 - **TanStack Query** for all server state — no `useEffect` for data fetching
 - **Tailwind CSS 4** — utility-first, no CSS modules
-- **Vendored UI primitives** in `src/vendor/ui/` — no Shadcn, no Radix, no external component library
+- **Vendored UI primitives** in `src/vendor/ui/` — no Shadcn, no Radix, no external component library. Exception: `@xyflow/react` (React Flow v12) is approved for the Blast Radius Graph view — it is a graph-layout engine, not a UI primitive library (added L04, 2026-07-02).
 - **next-intl** for i18n — all user-facing strings via translation keys, never hardcoded
 
 ## Key conventions

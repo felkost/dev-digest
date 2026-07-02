@@ -11,7 +11,7 @@ A standalone Node/TS process — **not** a `server/` Fastify module and **not** 
 stdin/stdout and forwards to `http://localhost:3001`.
 
 Tools: `list_agents` · `run_agent_on_pr` (blocking, ≤120 s) · `get_findings` · `get_conventions` ·
-`get_blast_radius` (seed-only stub).
+`get_blast_radius` (live — backed by the repo-intel index via `GET /pulls/:id/blast`).
 
 ## Commands
 

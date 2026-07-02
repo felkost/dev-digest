@@ -34,10 +34,16 @@ All in `src/modules/reviews/` and `src/modules/pulls/`:
 
 - `GET /repos/:id/pulls` — `findings_breakdown: { critical, warning, suggestion }` from each PR's latest review; `cost_usd` via `SUM(agent_runs.cost_usd)` grouped by PR
 - `GET /pulls/:id/runs` — `findings_breakdown` per run (from `RunSummary`)
-- `GET /pulls/:id/brief` — stored `PrBrief` JSONB workspace-scoped via `inner join pull_requests`; returns `null` for PRs not in `pr_brief` (seed-only table — live reviews never write to it)
+- `GET /pulls/:id/brief` — stored `PrBrief` JSONB workspace-scoped via `inner join pull_requests`; returns `null` for PRs not in `pr_brief` (composed live by the run-executor after each successful review run since L04 — see `src/modules/reviews/brief-composer.ts`; zero LLM calls)
 - `GET /reviews/:id` — single review + `findings: FindingRecord[]`, workspace-scoped via PR join
 - `POST /findings/:id/action` — unified `{ action: "accept"|"dismiss" }` endpoint; per-verb `/accept` + `/dismiss` routes remain for backward compat
 - `POST /repos/:id/review-all` — fire-and-forget fan-out; concurrency cap 3 (`scheduleNext` pattern); rate-limit 2/min; uses `req.log.child({...})` before the response is sent so background tasks have a valid logger after Fastify recycles the request
+
+## Active features (L04)
+
+In `src/modules/blast/`:
+
+- `GET /pulls/:id/blast` — `BlastResponse`: changed symbols, per-symbol downstream callers (≤20 each, `truncated` map for hidden counts), endpoint/cron attribution, `BlastIndexInfo`, prior PRs, `BlastLink` for GitHub blob URLs; zero LLM calls; workspace-scoped (404 on cross-workspace PR); see [src/modules/blast/README.md](src/modules/blast/README.md)
 
 **Security invariants enforced in this module:**
 

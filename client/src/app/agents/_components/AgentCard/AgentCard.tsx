@@ -1,26 +1,28 @@
-/* AgentCard — model chip, skills count, enabled toggle. Stats are an A5 mount;
-   we render the provider/model + skill count here. */
+/* AgentCard — model chip, skills count, enabled toggle, and a usage-stats
+   footer (runs · accept% · avg cost) fed by GET /agents/stats. */
 "use client";
 
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Icon, Badge, Toggle } from "@devdigest/ui";
-import type { Agent } from "@devdigest/shared";
+import type { Agent, AgentCardStats } from "@devdigest/shared";
 import { useDeleteAgent } from "../../../../lib/hooks/agents";
 import { ConfirmModal } from "@/components/confirm-modal";
-import { modelColor } from "./helpers";
+import { modelColor, acceptColor, formatCost } from "./helpers";
 import { s } from "./styles";
 
 export function AgentCard({
   ag,
   active,
   skillCount,
+  stats,
   onClick,
   onToggle,
 }: {
   ag: Agent;
   active?: boolean;
   skillCount?: number;
+  stats?: AgentCardStats;
   onClick?: () => void;
   onToggle?: (enabled: boolean) => void;
 }) {
@@ -83,6 +85,28 @@ export function AgentCard({
             </Badge>
           )}
         </div>
+        {stats &&
+          (stats.runs > 0 ? (
+            <div style={s.statRow}>
+              <span>{t("card.runs", { count: stats.runs })}</span>
+              {stats.accept_pct != null && (
+                <>
+                  <span style={s.statSep}>·</span>
+                  <span style={s.statAccept(acceptColor(stats.accept_pct))}>
+                    {t("card.accept", { pct: stats.accept_pct })}
+                  </span>
+                </>
+              )}
+              {stats.avg_cost_usd != null && (
+                <>
+                  <span style={s.statSep}>·</span>
+                  <span>{t("card.avg", { cost: formatCost(stats.avg_cost_usd) })}</span>
+                </>
+              )}
+            </div>
+          ) : (
+            <div style={s.statEmpty}>{t("card.noRuns")}</div>
+          ))}
       </div>
     </>
   );

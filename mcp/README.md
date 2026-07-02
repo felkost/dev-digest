@@ -49,13 +49,15 @@ flowchart LR
    cd server && pnpm dev
    ```
 
-2. **Seed the database** so `get_conventions` and `get_blast_radius` have data. Blast radius is pre-computed seed data only in L01 — live PRs return `available: false` without it.
+2. **Seed the database** so `get_conventions` has data and demo PRs are available for `get_blast_radius`.
 
    ```sh
    cd server && pnpm db:seed
    ```
 
    `pnpm db:seed` is idempotent; running it multiple times is safe.
+
+   **Note:** `get_blast_radius` now reads the live repo-intel index (`GET /pulls/:id/blast`). It returns `available: false` when the index has not been built for the repository — this is expected for freshly added repos until the indexer runs.
 
 ---
 
@@ -245,7 +247,7 @@ The Inspector opens in your browser with Transport `STDIO`, Command `tsx`, and A
 4. **`run_agent_on_pr`** — needs three UUIDs: `agent_id` (from step 3), plus `pr_id` and `repo_id` (see *Finding the IDs* below). Click **Run Tool**. This **blocks up to 120 s** (it starts a real review and polls) and requires an LLM key (`OPENROUTER_API_KEY`) in `server/.env`.
 5. **`get_findings`** — paste the same `pr_id`; run to read the verdict/findings without re-running.
 6. **`get_conventions`** — paste a `repo_id`; run to see the repo's accepted/verified conventions.
-7. **`get_blast_radius`** — paste a `pr_id`; returns `{ available: false }` unless the PR has pre-computed seed data.
+7. **`get_blast_radius`** — paste a `pr_id`; returns live blast radius from the repo-intel index, or `{ available: false }` when the index is not yet built for that repository.
 
 ### Finding the IDs
 
@@ -265,7 +267,7 @@ The Inspector opens in your browser with Transport `STDIO`, Command `tsx`, and A
 | `run_agent_on_pr` | `repo_id` (UUID), `pr_id` (UUID), `agent_id` (UUID) | Completed run: verdict, score, findings breakdown, top findings (up to 10). Blocks up to 120 s. | no |
 | `get_findings` | `pr_id` (UUID), `response_format` (`concise`\|`detailed`, default `concise`), `limit` (int 1–50, default 20) | Concise: per-agent verdict + score + findings breakdown. Detailed: adds finding bodies, paginated. | yes |
 | `get_conventions` | `repo_id` (UUID) | Accepted/verified repo conventions: `rule`, `category`, `status`, `evidence_path` | yes |
-| `get_blast_radius` | `pr_id` (UUID) | PR blast radius (seed data only); `{ available: false }` for live PRs without pre-computed data | yes |
+| `get_blast_radius` | `pr_id` (UUID) | PR blast radius from the live repo-intel index; `{ available: false, reason, index }` when the index is unavailable — never fabricates | yes |
 
 ### Tool details
 
@@ -282,7 +284,7 @@ Returns reviews already completed for a PR without starting a new run. `concise`
 Returns evidence-backed coding conventions mined from the codebase. Only `accepted` and `verified` conventions are returned; `pending` and `rejected` candidates are omitted. Useful for understanding a repository's house style before reasoning about a review.
 
 **`get_blast_radius`**
-Returns which symbols a PR changes, what downstream code depends on them, and which endpoints are affected. Backed by pre-computed seed data in L01. For any live PR that has no pre-computed blast radius the tool returns `{ available: false, reason: "..." }` — it never fabricates an answer.
+Returns which symbols a PR changes, what downstream code depends on them, and which HTTP endpoints or cron jobs are reachable from the changed files. Backed by the live repo-intel index via `GET /pulls/:id/blast`. When the index is unavailable the tool returns `{ available: false, reason: "...", index: { status, degraded } }` — it never fabricates an answer. The response includes per-symbol top-5 callers (as `file:line` references), aggregate counts, and top-3 prior PRs that touched the same files.
 
 ---
 

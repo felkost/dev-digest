@@ -26,6 +26,7 @@ vi.mock('../src/api-client.js', () => ({
   fetchReviews: vi.fn(),
   fetchConventions: vi.fn(),
   fetchBrief: vi.fn(),
+  fetchBlast: vi.fn(),
   enrichMessage: vi.fn((_c: string, m: string) => m),
 }));
 

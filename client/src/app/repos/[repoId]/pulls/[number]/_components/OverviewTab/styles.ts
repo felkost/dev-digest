@@ -13,11 +13,13 @@ export const s = {
   } satisfies CSSProperties,
 
   // Two-column grid for Intent + Blast Radius cards
+  // alignItems defaults to "stretch" (CSS grid default) so both cells share the same height.
+  // When the Blast Radius card grows (e.g. Prior PRs accordion expands), the Intent card
+  // stretches to match — no JS required.
   cardGrid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
     gap: 16,
-    alignItems: "start",
   } satisfies CSSProperties,
 
   card: {
@@ -53,8 +55,6 @@ export const s = {
     fontStyle: "italic" as const,
     color: "var(--text-primary)",
     lineHeight: 1.55,
-    borderLeft: "3px solid var(--accent-text)",
-    paddingLeft: 12,
     margin: 0,
   } satisfies CSSProperties,
 
@@ -65,6 +65,9 @@ export const s = {
   } satisfies CSSProperties,
 
   scopeHeader: (color: string): CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
     fontSize: 10,
     fontWeight: 700,
     letterSpacing: "0.08em",
@@ -73,13 +76,36 @@ export const s = {
     marginBottom: 2,
   }),
 
-  scopeItem: {
+  scopeItem: (muted: boolean): CSSProperties => ({
     display: "flex",
     alignItems: "flex-start",
     gap: 7,
     fontSize: 13,
-    color: "var(--text-secondary)",
+    color: muted ? "var(--text-muted)" : "var(--text-secondary)",
     lineHeight: 1.4,
+  }),
+
+  scopeBullet: {
+    color: "var(--text-muted)",
+    flexShrink: 0,
+    lineHeight: 1.4,
+  } satisfies CSSProperties,
+
+  intentDivider: {
+    borderTop: "1px solid var(--border)",
+    margin: "2px 0",
+  } satisfies CSSProperties,
+
+  riskAreasHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase" as const,
+    color: "var(--text-muted)",
+    marginBottom: 8,
   } satisfies CSSProperties,
 
   riskChip: (color: string): CSSProperties => ({
@@ -185,28 +211,20 @@ export const s = {
     fontFamily: "var(--font-mono, monospace)",
   } satisfies CSSProperties,
 
-  httpBadge: (method: string): CSSProperties => ({
-    display: "inline-block",
+  // Endpoint capsule (globe + `METHOD /path` monospace) — always blue: the
+  // color encodes TYPE (HTTP endpoint), not severity. Cron uses the amber
+  // cronBadge below. Pure repo-intel read; no findings involved.
+  httpBadge: (): CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
     fontSize: 10,
     fontWeight: 700,
-    padding: "2px 6px",
+    fontFamily: "var(--font-mono, monospace)",
+    padding: "2px 7px",
     borderRadius: 4,
-    background:
-      method === "GET"
-        ? "rgba(34,197,94,0.15)"
-        : method === "POST"
-          ? "rgba(59,130,246,0.15)"
-          : method === "DELETE"
-            ? "rgba(239,68,68,0.15)"
-            : "rgba(147,51,234,0.15)",
-    color:
-      method === "GET"
-        ? "var(--ok)"
-        : method === "POST"
-          ? "#60a5fa"
-          : method === "DELETE"
-            ? "var(--crit)"
-            : "#c084fc",
+    border: "1px solid rgba(59,130,246,0.35)",
+    background: "rgba(59,130,246,0.12)",
+    color: "#60a5fa",
   }),
 
   cronBadge: {
@@ -214,9 +232,11 @@ export const s = {
     alignItems: "center",
     gap: 4,
     fontSize: 10,
-    fontWeight: 600,
+    fontWeight: 700,
+    fontFamily: "var(--font-mono, monospace)",
     padding: "2px 7px",
     borderRadius: 4,
+    border: "1px solid rgba(245,158,11,0.35)",
     background: "rgba(245,158,11,0.12)",
     color: "var(--warn)",
   } satisfies CSSProperties,
@@ -255,16 +275,98 @@ export const s = {
     gap: 2,
   } satisfies CSSProperties,
 
+  priorPrTitleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  } satisfies CSSProperties,
+
+  priorPrBullet: {
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    background: "var(--text-muted)",
+    flexShrink: 0,
+    opacity: 0.6,
+  } satisfies CSSProperties,
+
+  priorPrNumber: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#60a5fa",
+    fontFamily: "var(--font-mono, monospace)",
+    flexShrink: 0,
+  } satisfies CSSProperties,
+
   priorPrTitle: {
     fontSize: 12,
-    color: "var(--text-secondary)",
-    fontWeight: 500,
+    color: "var(--text-primary)",
+    fontWeight: 600,
   } satisfies CSSProperties,
 
   priorPrMeta: {
     display: "flex",
-    gap: 8,
+    alignItems: "center",
+    gap: 6,
     fontSize: 11,
     color: "var(--text-muted)",
+    paddingLeft: 12,
+  } satisfies CSSProperties,
+
+  priorPrAvatar: (color: string): CSSProperties => ({
+    width: 14,
+    height: 14,
+    borderRadius: "50%",
+    background: color,
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: 700,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    textTransform: "lowercase" as const,
+  }),
+
+  priorPrNotes: {
+    fontSize: 11,
+    color: "var(--text-muted)",
+    marginTop: 2,
+    paddingLeft: 12,
+    lineHeight: 1.5,
+  } satisfies CSSProperties,
+
+  inlineCode: {
+    fontFamily: "var(--font-mono, monospace)",
+    fontSize: 10,
+    color: "#60a5fa",
+    background: "rgba(59,130,246,0.1)",
+    border: "1px solid rgba(59,130,246,0.25)",
+    borderRadius: 4,
+    padding: "0 4px",
+  } satisfies CSSProperties,
+
+  // Degraded badge in card header (subtle amber warning)
+  degradedBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 10,
+    fontWeight: 600,
+    padding: "2px 7px",
+    borderRadius: 4,
+    background: "rgba(245,158,11,0.12)",
+    color: "var(--warn)",
+    marginLeft: "auto",
+    cursor: "default",
+  } satisfies CSSProperties,
+
+  // "+N more" muted row after callers list
+  callerMore: {
+    paddingLeft: 22,
+    fontSize: 11,
+    color: "var(--text-muted)",
+    fontStyle: "italic" as const,
+    marginBottom: 4,
   } satisfies CSSProperties,
 } as const;

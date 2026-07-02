@@ -7,7 +7,7 @@
  *  - No import from @devdigest/reviewer-core.
  */
 
-import type { Agent, Convention, PrBrief, ReviewRecord } from '@devdigest/shared';
+import type { Agent, Convention, ReviewRecord, BlastResponse, BlastIndexInfo } from '@devdigest/shared';
 import type { FindingRecord } from '@devdigest/shared';
 
 // ---------------------------------------------------------------------------
@@ -71,59 +71,150 @@ export function projectConvention(c: Convention): ProjectedConvention {
 }
 
 // ---------------------------------------------------------------------------
-// Blast radius projection
+// Live blast radius projection (from BlastResponse — live endpoint)
 // ---------------------------------------------------------------------------
 
-/** Shape returned when blast radius is not available. */
-export type BlastUnavailable = {
+/** Maximum callers per symbol shown inline (plan §6 constraint). */
+const BLAST_CALLERS_PER_SYMBOL = 5;
+
+/** Maximum prior-PR history items shown. */
+const BLAST_HISTORY_LIMIT = 3;
+
+/** Shape returned when the live blast index is unavailable. */
+export type BlastLiveUnavailable = {
   available: false;
   reason: string;
+  index: BlastIndexInfo;
 };
 
-/** Shape returned when blast radius data is present. */
-export type BlastAvailable = {
+/** Compact caller shape for MCP responses — `file:line` + caller name. */
+export type BlastCallerCompact = {
+  ref: string;   // "src/foo.ts:42"
+  name: string;
+};
+
+/** Per-symbol compact shape. */
+export type BlastSymbolCompact = {
+  symbol: string;
+  callers: BlastCallerCompact[];
+  remaining_callers: number;
+  endpoints_affected: string[];
+  crons_affected: string[];
+};
+
+/** Compact prior-PR shape (top 3). */
+export type BlastHistoryItemCompact = {
+  pr_number: number;
+  title: string;
+  merged_at: string;
+};
+
+/** Shape returned when the live blast data is available. */
+export type BlastLiveAvailable = {
   available: true;
   summary: string;
-  changed_symbols_count: number;
-  downstream_count: number;
-  top_downstream: Array<{
-    symbol: string;
-    callers_count: number;
-    endpoints_affected: string[];
-  }>;
+  symbols_count: number;
+  callers_count: number;
+  endpoints_count: number;
+  crons_count: number;
+  symbols: BlastSymbolCompact[];
+  prior_prs: BlastHistoryItemCompact[];
+  index: BlastIndexInfo;
 };
 
-export type ProjectedBlast = BlastUnavailable | BlastAvailable;
+export type ProjectedBlastLive = BlastLiveUnavailable | BlastLiveAvailable;
 
 /**
- * Projects a PrBrief (or null) to a blast radius shape.
- *  - null brief → { available: false, reason: "blast radius computed in a later lesson" }
- *  - non-null brief → { available: true, ... } using brief.blast
+ * Projects a BlastResponse (from the live `GET /pulls/:id/blast` endpoint)
+ * to a compact shape suitable for MCP responses (LLM context).
  *
- * Per the PrBrief schema, blast is always present when brief is non-null.
- * We map DownstreamImpact to a concise shape: { symbol, callers_count, endpoints_affected }.
+ * Rules:
+ *  - available:false → passthrough with actionable reason derived from index state
+ *  - available:true → compact counts + per-symbol top-5 callers + prior PRs (top 3)
+ *  - Top 5 callers per symbol; remaining count from `truncated` map or computed
+ *  - Never fabricates — all fields grounded in the response
  */
-export function projectBlast(brief: PrBrief | null): ProjectedBlast {
-  if (brief === null) {
-    return {
-      available: false,
-      reason: 'blast radius computed in a later lesson',
-    };
+export function projectBlastLive(data: BlastResponse): ProjectedBlastLive {
+  if (!data.available || data.blast === null) {
+    const reason = deriveBlastUnavailableReason(data.index);
+    return { available: false, reason, index: data.index };
   }
 
-  const blast = brief.blast;
+  const blast = data.blast;
+
+  // Per-symbol projection: cap callers to BLAST_CALLERS_PER_SYMBOL.
+  const symbols: BlastSymbolCompact[] = blast.downstream.map((d) => {
+    const totalCallers = d.callers.length;
+    const topCallers = d.callers.slice(0, BLAST_CALLERS_PER_SYMBOL).map((c) => ({
+      ref: `${c.file}:${c.line}`,
+      name: c.name,
+    }));
+    // remaining count: prefer truncated map (server already capped + recorded extras),
+    // else compute from the visible list.
+    const truncatedExtra =
+      data.truncated !== undefined && data.truncated[d.symbol] !== undefined
+        ? (data.truncated[d.symbol] as number)
+        : 0;
+    const remaining = totalCallers > BLAST_CALLERS_PER_SYMBOL
+      ? totalCallers - BLAST_CALLERS_PER_SYMBOL + truncatedExtra
+      : truncatedExtra;
+
+    return {
+      symbol: d.symbol,
+      callers: topCallers,
+      remaining_callers: remaining,
+      endpoints_affected: d.endpoints_affected,
+      crons_affected: d.crons_affected,
+    };
+  });
+
+  // Aggregate counts across all symbols.
+  const callers_count = blast.downstream.reduce((sum, d) => sum + d.callers.length, 0);
+  const endpoints_set = new Set<string>();
+  const crons_set = new Set<string>();
+  for (const d of blast.downstream) {
+    for (const e of d.endpoints_affected) endpoints_set.add(e);
+    for (const c of d.crons_affected) crons_set.add(c);
+  }
+
+  // Prior PRs: top 3.
+  const prior_prs: BlastHistoryItemCompact[] = data.history.history
+    .slice(0, BLAST_HISTORY_LIMIT)
+    .map((h) => ({
+      pr_number: h.pr_number,
+      title: h.title,
+      merged_at: h.merged_at,
+    }));
 
   return {
     available: true,
     summary: blast.summary,
-    changed_symbols_count: blast.changed_symbols.length,
-    downstream_count: blast.downstream.length,
-    top_downstream: blast.downstream.slice(0, 5).map((d) => ({
-      symbol: d.symbol,
-      callers_count: d.callers.length,
-      endpoints_affected: d.endpoints_affected,
-    })),
+    symbols_count: blast.changed_symbols.length,
+    callers_count,
+    endpoints_count: endpoints_set.size,
+    crons_count: crons_set.size,
+    symbols,
+    prior_prs,
+    index: data.index,
   };
+}
+
+/**
+ * Derives a human-readable, actionable reason from index state
+ * for the `available:false` passthrough shape.
+ */
+function deriveBlastUnavailableReason(index: BlastIndexInfo): string {
+  if (index.reason) return index.reason;
+  if (index.status === 'failed') {
+    return 'The repo-intel index failed to build; re-run the indexer to enable blast radius';
+  }
+  if (index.status === 'degraded') {
+    return 'The repo-intel index is degraded; blast radius data may be incomplete';
+  }
+  if (index.status === 'partial') {
+    return 'The repo-intel index is partial; not enough data to compute blast radius for this PR';
+  }
+  return 'Blast radius is not available for this PR; ensure the repository has been indexed';
 }
 
 // ---------------------------------------------------------------------------

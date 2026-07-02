@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
@@ -232,5 +232,71 @@ export class AgentsRepository {
     await this.db
       .insert(t.agentSkills)
       .values(skillIds.map((skillId, i) => ({ agentId, skillId, order: i })));
+  }
+
+  // ---- usage stats (Agents list card footer) -----------------------------
+
+  /** Run count + avg cost per agent, from `agent_runs` (workspace-scoped).
+   *  avgCostUsd is null when no run in the group reported a cost. */
+  async runStatsByAgent(
+    workspaceId: string,
+  ): Promise<Map<string, { runs: number; avgCostUsd: number | null }>> {
+    const rows = await this.db
+      .select({
+        agentId: t.agentRuns.agentId,
+        runs: sql<number>`count(*)::int`,
+        avgCostUsd: sql<number | null>`avg(${t.agentRuns.costUsd})`,
+      })
+      .from(t.agentRuns)
+      .where(eq(t.agentRuns.workspaceId, workspaceId))
+      .groupBy(t.agentRuns.agentId);
+    const map = new Map<string, { runs: number; avgCostUsd: number | null }>();
+    for (const r of rows) {
+      if (!r.agentId) continue; // runs whose agent was deleted (agent_id set null)
+      map.set(r.agentId, {
+        runs: r.runs,
+        avgCostUsd: r.avgCostUsd == null ? null : Number(r.avgCostUsd),
+      });
+    }
+    return map;
+  }
+
+  /** Accepted / dismissed finding counts per agent, joined findings → reviews
+   *  (workspace-scoped via reviews). Drives the accept-rate on the card. */
+  async acceptanceByAgent(
+    workspaceId: string,
+  ): Promise<Map<string, { accepted: number; dismissed: number }>> {
+    const rows = await this.db
+      .select({
+        agentId: t.reviews.agentId,
+        accepted: sql<number>`count(*) filter (where ${t.findings.acceptedAt} is not null)::int`,
+        dismissed: sql<number>`count(*) filter (where ${t.findings.dismissedAt} is not null)::int`,
+      })
+      .from(t.findings)
+      .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
+      .where(eq(t.reviews.workspaceId, workspaceId))
+      .groupBy(t.reviews.agentId);
+    const map = new Map<string, { accepted: number; dismissed: number }>();
+    for (const r of rows) {
+      if (!r.agentId) continue;
+      map.set(r.agentId, { accepted: r.accepted, dismissed: r.dismissed });
+    }
+    return map;
+  }
+
+  /** Linked-skill count per agent for this workspace (agent_skills grouped). */
+  async skillCountByAgent(workspaceId: string): Promise<Map<string, number>> {
+    const rows = await this.db
+      .select({
+        agentId: t.agentSkills.agentId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(t.agentSkills)
+      .innerJoin(t.agents, eq(t.agentSkills.agentId, t.agents.id))
+      .where(eq(t.agents.workspaceId, workspaceId))
+      .groupBy(t.agentSkills.agentId);
+    const map = new Map<string, number>();
+    for (const r of rows) map.set(r.agentId, r.count);
+    return map;
   }
 }
