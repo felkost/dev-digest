@@ -52,6 +52,7 @@ import {
   RESYNC_JOB_KIND,
   SUPPORTED_EXT,
 } from './constants.js';
+import { capCallersPerSymbol } from './helpers.js';
 import { runFullIndex, type IndexPayload } from './pipeline/full.js';
 import { runIncremental } from './pipeline/incremental.js';
 
@@ -371,6 +372,11 @@ export class RepoIntelService implements RepoIntel {
     }
     callers.sort((a, b) => b.rank - a.rank);
 
+    // Cap callers PER changed symbol (viaSymbol) — NOT globally. A global cap
+    // drops low-rank but endpoint-bearing callers (e.g. a registration file like
+    // app.ts) on large PRs, erasing endpoint/cron attribution. See helpers.
+    const cappedCallers = capCallersPerSymbol(callers, MAX_CALLERS_PER_SYMBOL);
+
     // Precomputed facts per caller file (endpoints + crons), so consumers can
     // attribute them to the changed symbol whose callers live in that file.
     const facts = await this.repo.getFileFacts(repoId, callerFiles);
@@ -383,7 +389,7 @@ export class RepoIntelService implements RepoIntel {
 
     return {
       changedSymbols,
-      callers: callers.slice(0, MAX_CALLERS_PER_SYMBOL),
+      callers: cappedCallers,
       impactedEndpoints: [...endpoints],
       factsByFile,
       degraded: false,
