@@ -67,7 +67,32 @@ export async function getIntent(db: Db, prId: string): Promise<Intent | undefine
   return { intent: row.intent, in_scope: row.inScope, out_of_scope: row.outOfScope };
 }
 
+export async function getIntentScoped(
+  db: Db,
+  prId: string,
+  workspaceId: string,
+): Promise<Intent | undefined> {
+  const [row] = await db
+    .select({ intent: t.prIntent.intent, inScope: t.prIntent.inScope, outOfScope: t.prIntent.outOfScope })
+    .from(t.prIntent)
+    .innerJoin(t.pullRequests, eq(t.prIntent.prId, t.pullRequests.id))
+    .where(and(eq(t.prIntent.prId, prId), eq(t.pullRequests.workspaceId, workspaceId)));
+  if (!row) return undefined;
+  return { intent: row.intent, in_scope: row.inScope, out_of_scope: row.outOfScope };
+}
+
 // ---- brief (blast radius + risks + history stored as JSONB) ---------------
+
+/**
+ * Upsert the composed live PR Brief (L04). Written by the run-executor after a
+ * successful review run — deterministic composition, zero LLM calls.
+ */
+export async function upsertBrief(db: Db, prId: string, brief: PrBrief): Promise<void> {
+  await db
+    .insert(t.prBrief)
+    .values({ prId, json: brief })
+    .onConflictDoUpdate({ target: t.prBrief.prId, set: { json: brief } });
+}
 
 export async function getBrief(db: Db, prId: string, workspaceId: string): Promise<PrBrief | undefined> {
   const [row] = await db

@@ -25,8 +25,10 @@ import { PriceBook } from './price-book.js';
 import { ConfigError } from './errors.js';
 import { AgentsRepository } from '../modules/agents/repository.js';
 import { ReviewRepository } from '../modules/reviews/repository.js';
+import { SkillsRepository } from '../modules/skills/repository.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
+import { BlastService } from '../modules/blast/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
 import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.js';
 
@@ -48,6 +50,8 @@ export interface ContainerOverrides {
   llm?: Partial<Record<'openai' | 'anthropic' | 'openrouter', LLMProvider>>;
   /** repo-intel facade (T1.1+) — tests inject mock RepoIntel implementations. */
   repoIntel?: RepoIntel;
+  /** blast assembly service (L04) — tests inject a stub for brief composition. */
+  blast?: BlastService;
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
@@ -72,7 +76,9 @@ export class Container {
   // `container.agentsRepo` instead of reaching into another module's folder.
   private _agentsRepo?: AgentsRepository;
   private _reviewRepo?: ReviewRepository;
+  private _skillsRepo?: SkillsRepository;
   private _repoIntel?: RepoIntel;
+  private _blast?: BlastService;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
@@ -100,6 +106,10 @@ export class Container {
     return (this._reviewRepo ??= new ReviewRepository(this.db));
   }
 
+  get skillsRepo(): SkillsRepository {
+    return (this._skillsRepo ??= new SkillsRepository(this.db));
+  }
+
   get codeIndex(): CodeIndex {
     if (this.overrides.codeIndex) return this.overrides.codeIndex;
     this._codeIndex ??= new RipgrepCodeIndex(this.git);
@@ -115,6 +125,17 @@ export class Container {
     if (this.overrides.repoIntel) return this.overrides.repoIntel;
     this._repoIntel ??= new RepoIntelService(this);
     return this._repoIntel;
+  }
+
+  /**
+   * Blast-radius assembly (L04). Exposed on the container — like `repoIntel` —
+   * so cross-cutting consumers (the reviews run-executor composing the live
+   * PR Brief) never import another module's folder directly.
+   */
+  get blast(): BlastService {
+    if (this.overrides.blast) return this.overrides.blast;
+    this._blast ??= new BlastService(this);
+    return this._blast;
   }
 
   /** Import-graph builder (dependency-cruiser). T3 indexer pipeline only. */

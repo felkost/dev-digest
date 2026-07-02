@@ -169,4 +169,11 @@ export interface RepoIntel {
     opts?: { exclude?: string[] },
   ): Promise<string[]>;
   getCriticalPaths(repoId: string): Promise<string[][]>;
+
+  // --- L04: reverse import-graph reachability (blast radius endpoint) -----
+  /**
+   * Files that import any of `files`, transitively up to `depth` (reverse
+   * file_edges BFS). Degraded/flag-off → [].
+   */
+  getImporters(repoId: string, files: string[], depth?: number): Promise<string[]>;
 }

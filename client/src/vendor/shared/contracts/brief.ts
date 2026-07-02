@@ -87,6 +87,14 @@ export const SmartDiffFile = z.object({
   additions: z.number().int(),
   deletions: z.number().int(),
   finding_lines: z.array(z.number().int()),
+  findingsCount: z.number().int(),
+  findings: z.array(z.object({
+    id: z.string(),
+    startLine: z.number().int(),
+    severity: z.enum(['critical', 'warning', 'suggestion']),
+    category: z.string(),
+    title: z.string(),
+  })).optional(),
 });
 export type SmartDiffFile = z.infer<typeof SmartDiffFile>;
 
