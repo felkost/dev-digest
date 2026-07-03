@@ -7,8 +7,10 @@ export interface EditorTab {
   icon: IconName;
 }
 
-/** Editor tabs. Config + Skills (L02); Evals/Stats/CI added in later lessons. */
+/** Editor tabs. Config + Skills (L02) + Context (Project Context folder feature);
+    Evals/Stats/CI added in later lessons. */
 export const TABS: readonly EditorTab[] = [
   { key: "config", labelKey: "editor.tabs.config", icon: "Settings" },
   { key: "skills", labelKey: "editor.tabs.skills", icon: "Puzzle" },
+  { key: "context", labelKey: "editor.tabs.context", icon: "FileText" },
 ];

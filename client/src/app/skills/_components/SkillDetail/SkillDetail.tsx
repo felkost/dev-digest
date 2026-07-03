@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { Tabs, Button, Badge, Icon } from "@devdigest/ui";
 import type { Skill } from "@devdigest/shared";
 import { ConfigTab } from "./ConfigTab";
+import { ContextTab } from "./ContextTab";
 import { PreviewTab } from "./PreviewTab";
 import { EvalsTab } from "./EvalsTab";
 import { StatsTab } from "./StatsTab";
@@ -18,6 +19,7 @@ const TYPE_COLOR: Record<string, string> = {
 
 const TABS = [
   { key: "config", label: "Config", icon: "Settings" as const },
+  { key: "context", label: "Context", icon: "FileText" as const },
   { key: "preview", label: "Preview", icon: "Eye" as const },
   { key: "evals", label: "Evals", icon: "FlaskConical" as const },
   { key: "stats", label: "Stats", icon: "BarChart" as const },
@@ -60,6 +62,7 @@ export function SkillDetail({ skill }: SkillDetailProps) {
       {/* Body */}
       <div style={{ flex: 1, overflow: "auto" }}>
         {tab === "config" && <ConfigTab skill={skill} />}
+        {tab === "context" && <ContextTab skill={skill} />}
         {tab === "preview" && <PreviewTab skill={skill} />}
         {tab === "evals" && <EvalsTab skill={skill} />}
         {tab === "stats" && <StatsTab skill={skill} />}

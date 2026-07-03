@@ -29,6 +29,7 @@ import { SkillsRepository } from '../modules/skills/repository.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { BlastService } from '../modules/blast/service.js';
+import { ContextDocsService } from '../modules/context-docs/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
 import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.js';
 
@@ -52,6 +53,8 @@ export interface ContainerOverrides {
   repoIntel?: RepoIntel;
   /** blast assembly service (L04) — tests inject a stub for brief composition. */
   blast?: BlastService;
+  /** context-docs facade — tests inject a stub for discovery/attachment logic. */
+  contextDocs?: ContextDocsService;
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
@@ -79,6 +82,7 @@ export class Container {
   private _skillsRepo?: SkillsRepository;
   private _repoIntel?: RepoIntel;
   private _blast?: BlastService;
+  private _contextDocs?: ContextDocsService;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
@@ -136,6 +140,19 @@ export class Container {
     if (this.overrides.blast) return this.overrides.blast;
     this._blast ??= new BlastService(this);
     return this._blast;
+  }
+
+  /**
+   * Context-docs facade (discovery, root-folder config, agent/skill
+   * attachment orchestration). Exposed on the container — like `repoIntel`
+   * and `blast` — so cross-cutting consumers (agents/skills services, the
+   * reviews run-executor) never import the context-docs module's folder
+   * directly.
+   */
+  get contextDocs(): ContextDocsService {
+    if (this.overrides.contextDocs) return this.overrides.contextDocs;
+    this._contextDocs ??= new ContextDocsService(this);
+    return this._contextDocs;
   }
 
   /** Import-graph builder (dependency-cruiser). T3 indexer pipeline only. */

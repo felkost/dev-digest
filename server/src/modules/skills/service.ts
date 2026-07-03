@@ -1,4 +1,11 @@
-import type { Skill, SkillVersion, SkillStats, ImportPreview, EvalCase } from '@devdigest/shared';
+import type {
+  Skill,
+  SkillVersion,
+  SkillStats,
+  ImportPreview,
+  EvalCase,
+  SkillContextDocLink,
+} from '@devdigest/shared';
 import type { Container } from '../../platform/container.js';
 import { SkillsRepository } from './repository.js';
 import { toSkillDto, toSkillVersionDto, previewMarkdown } from './helpers.js';
@@ -7,7 +14,7 @@ import { AppError, NotFoundError } from '../../platform/errors.js';
 export class SkillsService {
   private repo: SkillsRepository;
 
-  constructor(container: Container) {
+  constructor(private container: Container) {
     this.repo = new SkillsRepository(container.db);
   }
 
@@ -70,6 +77,35 @@ export class SkillsService {
   async delete(workspaceId: string, id: string): Promise<void> {
     const deleted = await this.repo.deleteById(workspaceId, id);
     if (!deleted) throw new NotFoundError(`Skill ${id} not found`);
+  }
+
+  /**
+   * Attached context documents for a skill (ordered). 404-guards `skillId`
+   * against `workspaceId` via `get()` BEFORE delegating to `ContextDocsService`
+   * — `ContextDocsService.skillAttachments`/`setSkillAttachments` intentionally
+   * do NOT re-validate workspace ownership themselves (see context-docs
+   * service.ts's "ownership boundary" comment).
+   */
+  async contextDocLinks(workspaceId: string, skillId: string): Promise<SkillContextDocLink[]> {
+    await this.get(workspaceId, skillId);
+    const links = await this.container.contextDocs.skillAttachments(skillId);
+    return links.map((l) => ({ owner_id: skillId, path: l.path, order: l.order }));
+  }
+
+  /**
+   * Replace the skill's full set of attached context-document paths (full
+   * replace-and-reorder semantics, mirrors the agent-side equivalent). Same
+   * workspace guard as `contextDocLinks` — validated here, before
+   * `ContextDocsService` is touched.
+   */
+  async setContextDocs(
+    workspaceId: string,
+    skillId: string,
+    paths: string[],
+  ): Promise<SkillContextDocLink[]> {
+    await this.get(workspaceId, skillId);
+    const links = await this.container.contextDocs.setSkillAttachments(skillId, paths);
+    return links.map((l) => ({ owner_id: skillId, path: l.path, order: l.order }));
   }
 
   async versions(workspaceId: string, skillId: string): Promise<SkillVersion[]> {

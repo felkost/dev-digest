@@ -1,5 +1,5 @@
 import type { Container } from '../../platform/container.js';
-import type { Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
+import type { Provider, Review, RunTrace, RunTraceContextDoc, UnifiedDiff } from '@devdigest/shared';
 import { reviewPullRequest, countBlockers, classifyIntent } from '@devdigest/reviewer-core';
 import type { Intent } from '@devdigest/shared';
 import { RunLogger } from '../../platform/run-logger.js';
@@ -12,6 +12,14 @@ import { loadDiff } from './diff-loader.js';
 import { composePrBrief } from './brief-composer.js';
 import { routeModel } from '../../platform/model-router.js';
 import { classifyFile } from './smart-diff-rules.js';
+import { resolveConfinedPath } from '../context-docs/helpers.js';
+
+/**
+ * Derived from the container's agentsRepo interface without importing
+ * `agents/repository.js` directly (module isolation rule — mirrors
+ * `blast/service.ts`'s `BlastResult` derivation pattern).
+ */
+type LinkedSkillRow = Awaited<ReturnType<Container['agentsRepo']['linkedSkills']>>[number];
 
 /**
  * Conservative safe token budget for the DIFF portion of the prompt.
@@ -66,6 +74,15 @@ function buildFilesSummary(diff: UnifiedDiff): string {
       return `${f.path} (+${f.additions}/-${f.deletions})${hunkHeaders ? '\n' + hunkHeaders : ''}`;
     })
     .join('\n\n');
+}
+
+/** Linear-scan, keep-order dedupe (mirrors `blast/service.ts`'s `dedupeStrings`). */
+function dedupeStrings(values: string[]): string[] {
+  const out: string[] = [];
+  for (const v of values) {
+    if (!out.some((existing) => existing === v)) out.push(v);
+  }
+  return out;
 }
 
 /**
@@ -289,6 +306,21 @@ export class ReviewRunExecutor {
         runLog.info(`skills: ${skillBodies.length} skill(s) injected`);
       }
 
+      // ---- Project context documents injection -------------------------------
+      // Agent-direct attachments + attachments of the agent's already-fetched
+      // linked+enabled skills (reuses `linkedSkills` above — no re-fetch),
+      // deduped by path, read fresh from the PR's repo clone, confined, and
+      // tokenized. Never throws — unreadable/out-of-bounds paths are recorded
+      // as `skipped` trace entries and the run proceeds normally.
+      const contextDocsResult = await this.buildContextDocs(
+        workspaceId,
+        pull.repoId,
+        repo,
+        agent.id,
+        linkedSkills,
+        runLog,
+      );
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -315,6 +347,9 @@ export class ReviewRunExecutor {
         ...(pull.body ? { prDescription: pull.body } : {}),
         // Enabled skills attached to this agent, in user-defined order.
         ...(skillBodies.length ? { skills: skillBodies } : {}),
+        // Attached Project Context documents (agent-direct ∪ via linked skills,
+        // deduped), raw text — assemblePrompt wraps each with wrapUntrusted.
+        ...(contextDocsResult.specs.length ? { specs: contextDocsResult.specs } : {}),
         // Intent pre-pass result — shared across agents in this batch, cached in
         // pr_intent. Undefined when classification failed (non-fatal).
         ...(intent ? { intent } : {}),
@@ -384,6 +419,7 @@ export class ReviewRunExecutor {
           pr: pull.number,
           source: 'local',
         },
+        context_documents: contextDocsResult.trace,
         stats: {
           duration_ms: durationMs,
           tokens_in: tokensIn,
@@ -401,7 +437,9 @@ export class ReviewRunExecutor {
         })),
         raw_output: outcome.raw,
         memory_pulled: [],
-        specs_read: [],
+        // Repurposed from always-`[]`: paths of the context documents that were
+        // actually injected this run (skipped entries are excluded).
+        specs_read: contextDocsResult.trace.filter((d) => d.status === 'injected').map((d) => d.path),
         // Persisted log = the run's FULL event buffer (incl. shared pre-work:
         // diff load + intent), not just events recorded inside this method.
         log: runLog.logFor(runId),
@@ -558,6 +596,137 @@ export class ReviewRunExecutor {
   }
 
   /**
+   * Resolve, dedupe, read, and tokenize this agent's attached Project Context
+   * documents (agent-direct ∪ via the agent's linked+enabled skills), fresh
+   * against the PR's repo clone at run time.
+   *
+   * - Merge order: agent-direct attachments first (in their order), then
+   *   skill-derived attachments (in skill order, then per-skill attachment
+   *   order) — deduped by path, first occurrence wins (AC-14).
+   * - Each deduped path is re-validated with `resolveConfinedPath` (AC-13) —
+   *   a stale/crafted/relocated path is never read; it is recorded as
+   *   `skipped` with a `skip_reason` and the run proceeds normally.
+   * - A confined path that still fails to read (deleted since attach, AC-12)
+   *   is likewise recorded as `skipped`, never thrown.
+   * - Overlay content, when present for a path, is preferred over the clone
+   *   read (AC-25) — the CONFINEMENT check still applies to the path itself;
+   *   only the content SOURCE changes. On a no-clone repo (AC-36) an
+   *   overlay-attached path injects from the overlay; a path with no overlay
+   *   takes the existing AC-12 "file not found in clone" skip.
+   * - `wrapUntrusted` wrapping happens inside reviewer-core's `assemblePrompt`
+   *   — this method appends RAW text only (overlay body or clone content
+   *   identically — AC-30).
+   *
+   * Never throws — any repo/config lookup failure degrades to "no context
+   * documents this run" (mirrors the other best-effort enrichment builders in
+   * this class, e.g. `buildCallersDigest`/`buildRepoMapDigest`).
+   */
+  private async buildContextDocs(
+    workspaceId: string,
+    repoId: string,
+    repo: typeof schema.repos.$inferSelect,
+    agentId: string,
+    linkedSkills: LinkedSkillRow[],
+    runLog: RunLogger,
+  ): Promise<{ specs: string[]; trace: RunTraceContextDoc[] }> {
+    try {
+      // ---- Resolve attachments: agent-direct ∪ via linked+enabled skills ----
+      const agentLinks = await this.container.contextDocs.agentAttachments(agentId);
+      const orderedPaths: string[] = agentLinks.map((l) => l.path);
+
+      const enabledSkills = linkedSkills.filter((l) => l.skill.enabled);
+      for (const { skill } of enabledSkills) {
+        const skillLinks = await this.container.contextDocs.skillAttachments(skill.id);
+        for (const link of skillLinks) orderedPaths.push(link.path);
+      }
+
+      const dedupedPaths = dedupeStrings(orderedPaths);
+      if (dedupedPaths.length === 0) return { specs: [], trace: [] };
+
+      // ---- Resolve repo context folders + clone root -------------------------
+      // `ContextDocsService.getContextFolders` throws NotFoundError for a
+      // missing/cross-workspace repo (unlike the repository-level method it
+      // wraps, which returns `undefined`); `repo` here is already a loaded,
+      // validated row, so this should never actually happen — but degrade to
+      // "no configured folders" (matching the prior `folders ?? []`
+      // semantics) rather than let the outer catch wipe out the per-doc
+      // `skipped` trace entries below.
+      let folders: string[] | undefined;
+      try {
+        folders = await this.container.contextDocs.getContextFolders(workspaceId, repoId);
+      } catch {
+        folders = undefined;
+      }
+      const repoRef = { owner: repo.owner, name: repo.name };
+      const cloneRoot = this.container.git.clonePathFor(repoRef);
+      const effectiveFolders = folders ?? [];
+
+      const specs: string[] = [];
+      const trace: RunTraceContextDoc[] = [];
+
+      for (const docPath of dedupedPaths) {
+        const confined = resolveConfinedPath(cloneRoot, effectiveFolders, docPath);
+        if (!confined) {
+          trace.push({
+            path: docPath,
+            token_size: 0,
+            status: 'skipped',
+            skip_reason: 'outside clone root or configured folders',
+          });
+          continue;
+        }
+
+        const relPath = docPath.replace(/\\/g, '/');
+
+        // Overlay content, when present for this path, is preferred over the
+        // clone read (AC-25). The CONFINEMENT check above still applies to the
+        // path itself; only the content SOURCE changes. For a no-clone repo
+        // (AC-36) the overlay branch is what supplies content — the clone read
+        // below would always fail there, which is the existing AC-12 skip path.
+        const overlay = await this.container.contextDocs.getOverlayForInjection(repoId, docPath);
+
+        let content: string;
+        if (overlay) {
+          content = overlay.body;
+        } else {
+          try {
+            content = await this.container.git.readFile(repoRef, relPath);
+          } catch {
+            trace.push({
+              path: docPath,
+              token_size: 0,
+              status: 'skipped',
+              skip_reason: 'file not found in clone',
+            });
+            continue;
+          }
+        }
+
+        const tokenSize = this.container.tokenizer.count(content);
+        trace.push({ path: docPath, token_size: tokenSize, status: 'injected', skip_reason: null });
+        specs.push(content);
+      }
+
+      const injectedCount = trace.filter((d) => d.status === 'injected').length;
+      const skippedCount = trace.length - injectedCount;
+      const injectedTokens = trace
+        .filter((d) => d.status === 'injected')
+        .reduce((sum, d) => sum + d.token_size, 0);
+      if (trace.length > 0) {
+        runLog.info(
+          `context docs: ${injectedCount} injected (${injectedTokens} tokens), ${skippedCount} skipped`,
+        );
+      }
+
+      return { specs, trace };
+    } catch (err) {
+      // Never let context-doc resolution break a run — degrade to "none".
+      runLog.info(`context docs: resolution failed — ${(err as Error).message}`);
+      return { specs: [], trace: [] };
+    }
+  }
+
+  /**
    * Trim the diff to fit within the per-model safe token budget before sending
    * to the LLM. Returns the original diff unchanged when it already fits.
    *
@@ -634,6 +803,7 @@ export class ReviewRunExecutor {
       raw_output: '',
       memory_pulled: [],
       specs_read: [],
+      context_documents: [],
       log: this.container.runBus.buffer(runId).map((e) => ({ t: e.t, kind: e.kind, msg: e.msg })),
     };
   }

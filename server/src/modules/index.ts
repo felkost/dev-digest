@@ -11,6 +11,7 @@ import skills from './skills/routes.js';
 import conventions from './conventions/routes.js';
 import smartDiff from './reviews/smart-diff.routes.js';
 import blast from './blast/routes.js';
+import contextDocs from './context-docs/routes.js';
 
 /**
  * Module registry. Each feature module is a Fastify plugin in
@@ -38,4 +39,5 @@ export const modules: Record<string, FastifyPluginAsync> = {
   conventions,
   smartDiff,
   blast,
+  contextDocs,
 };

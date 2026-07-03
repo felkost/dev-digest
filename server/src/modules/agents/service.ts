@@ -4,6 +4,7 @@ import type {
   AgentSkillLink,
   AgentCardStats,
   AgentVersion,
+  AgentContextDocLink,
   CiFailOn,
   ModelInfo,
   Provider,
@@ -197,6 +198,41 @@ export class AgentsService {
     const resolvedOrder = order ?? existing.length;
     await this.repo.linkSkill(agentId, skillId, resolvedOrder);
     return this.skillLinks(agentId);
+  }
+
+  /**
+   * Attached context documents for an agent (ordered). 404-guards `agentId`
+   * against `workspaceId` via `get()` BEFORE delegating to `ContextDocsService`
+   * — `ContextDocsService.agentAttachments`/`setAgentAttachments` intentionally
+   * do NOT re-validate workspace ownership themselves (see context-docs
+   * service.ts's "ownership boundary" comment). Returns `undefined` when the
+   * agent isn't in this workspace (route maps that to 404).
+   */
+  async contextDocLinks(
+    workspaceId: string,
+    agentId: string,
+  ): Promise<AgentContextDocLink[] | undefined> {
+    const agent = await this.repo.getById(workspaceId, agentId);
+    if (!agent) return undefined;
+    const links = await this.container.contextDocs.agentAttachments(agentId);
+    return links.map((l) => ({ owner_id: agentId, path: l.path, order: l.order }));
+  }
+
+  /**
+   * Replace the agent's full set of attached context-document paths (full
+   * replace-and-reorder semantics, mirrors `setSkills`). Same workspace guard
+   * as `contextDocLinks` — validated here, before `ContextDocsService` is
+   * touched.
+   */
+  async setContextDocs(
+    workspaceId: string,
+    agentId: string,
+    paths: string[],
+  ): Promise<AgentContextDocLink[] | undefined> {
+    const agent = await this.repo.getById(workspaceId, agentId);
+    if (!agent) return undefined;
+    const links = await this.container.contextDocs.setAgentAttachments(agentId, paths);
+    return links.map((l) => ({ owner_id: agentId, path: l.path, order: l.order }));
   }
 
   /**

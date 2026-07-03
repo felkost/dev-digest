@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { SkillType, SkillSource } from '@devdigest/shared';
+import { SkillType, SkillSource, ContextDocAttachment } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { SkillsService } from './service.js';
@@ -70,6 +70,8 @@ const CreateEvalCaseBody = z.object({
  *   GET    /skills/:id/evals             → eval cases (owner_kind='skill')
  *   POST   /skills/:id/evals             → create eval case
  *   DELETE /skills/:id/evals/:caseId     → delete eval case
+ *   GET    /skills/:id/context-docs      → attached context documents (ordered)
+ *   POST   /skills/:id/context-docs      → set/reorder attached context documents (full replace)
  */
 export default async function skillsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
@@ -195,6 +197,22 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
       void workspaceId;
       await service.deleteEvalCase(workspaceId, req.params.caseId);
       return { ok: true };
+    },
+  );
+
+  // ---- Context document attachments ----------------------------------------
+
+  app.get('/skills/:id/context-docs', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(app.container, req);
+    return service.contextDocLinks(workspaceId, req.params.id);
+  });
+
+  app.post(
+    '/skills/:id/context-docs',
+    { schema: { params: IdParams, body: ContextDocAttachment } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      return service.setContextDocs(workspaceId, req.params.id, req.body.document_paths);
     },
   );
 }

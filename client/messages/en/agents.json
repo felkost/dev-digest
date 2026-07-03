@@ -50,6 +50,7 @@
     "tabs": {
       "config": "Config",
       "skills": "Skills",
+      "context": "Context",
       "evals": "Evals",
       "stats": "Stats",
       "ci": "CI"
@@ -96,6 +97,23 @@
     "enabledCount": "{linked} of {total} enabled",
     "filterPlaceholder": "Filter skills…",
     "orderHint": "Order matters — earlier skills appear earlier in the assembled prompt. Toggle to attach."
+  },
+  "context": {
+    "title": "Project context",
+    "hint": "Order matters — earlier docs appear earlier in the assembled `## Project context` block. Toggle to attach.",
+    "attachedOfTotal": "{attached} of {total} attached",
+    "noRepo": "No repository selected — select a repo to browse its context documents.",
+    "filterPlaceholder": "Filter by path or category…",
+    "noDocuments": "No documents in this repository",
+    "noMatchingAvailable": "No documents match your filter.",
+    "preview": "Preview",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "tokenCountValue": "{count} tokens",
+    "serializationPreview": {
+      "toggle": "Serialization preview ({tokens} tokens total)",
+      "total": "Total: {tokens} tokens"
+    }
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."

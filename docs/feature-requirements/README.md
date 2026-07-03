@@ -1,3 +1,19 @@
 # Feature Requirements
 
-One file per feature. Used as input to the brainstorm and planner agents.
+Feature specifications — the **WHAT** of a feature, written before any plan or code exists. Produced by the **spec-creator** agent (or by hand), consumed by the **implementation-planner** agent as input for a Development Plan.
+
+## Conventions
+
+- One file per feature: `YYYY-MM-DD-<feature-slug>.md` (same naming pattern as `docs/plans/`)
+- Header carries a **Spec ID**: `SPEC-YYYY-MM-DD-<feature-slug>` (filename-derived — always includes the feature name); `Supersedes:` references it
+- Language: English — spec files and the whole spec-creator dialog
+- Acceptance criteria in EARS form with stable IDs (`AC-1`, `AC-2` …) — full template in [.claude/agents/spec-creator.md](../../.claude/agents/spec-creator.md)
+- Status lifecycle: `draft → approved → implemented`; a replaced spec gets `superseded` and its successor carries a `Supersedes:` link
+- Drafts are revisable in place (AC IDs append-only — never renumbered); once `approved`, content is frozen — a changed decision requires a new spec with a `Supersedes:` link
+- Specs describe WHAT and WHY — never HOW. Implementation plans live in `docs/plans/`; post-implementation behavioral specs of a single package live in `{package}/specs/`
+- Specs may include Mermaid workflow / module-communication diagrams and interface-level contracts (field names + semantics as tables or example payloads) — but no code, no Zod/SQL, no file paths
+- Every edge case cites the `AC-n` that covers it; non-functional criteria are measurable and carry a verification hint
+
+## Index
+
+- [2026-07-02-project-context-folder.md](2026-07-02-project-context-folder.md) — `SPEC-2026-07-02-project-context-folder` (draft — v2) — browse/edit repo markdown (DB-shadow overlay) + attach to agents/skills; inject into the reviewer's `## Project context` slot as untrusted data; two-panel UI + coverage ring

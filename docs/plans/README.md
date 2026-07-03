@@ -1,6 +1,6 @@
 # Plans
 
-Implementation plans produced by the planner agent. One file per feature or task.
+Implementation plans produced by the implementation-planner agent. One file per feature or task.
 
 ## Naming convention
 
@@ -11,7 +11,7 @@ Example: `2026-06-29-researcher-agent.md`
 ## Lifecycle
 
 1. **researcher** — gathers codebase snapshot and external context before planning.
-2. **planner** — asks structured questions, reads module insights, writes the plan here.
+2. **implementation-planner** — reviews the spec's requirements (or captures them standalone when no spec exists), asks targeted clarifications, reads module insights, writes the plan here after user confirmation.
 3. **implementer** — reads the plan, picks one assigned task, executes it to green.
 
 One implementer instance per task — spawn them in parallel for independent tasks.

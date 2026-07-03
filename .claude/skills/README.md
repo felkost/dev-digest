@@ -20,6 +20,8 @@ Reusable AI skills that provide specialized knowledge and workflows. Canonical l
 | [engineering-insights](engineering-insights/SKILL.md) | Shared | Capture non-obvious discoveries into module insights.md files |
 | [plan-verifier](plan-verifier/SKILL.md) | Shared | Verification methodology — map plan requirements to codebase evidence |
 | [doc-writer](doc-writer/SKILL.md) | Shared | Doc type → location mapping, per-symbol structure, Mermaid conventions |
+| [implement](implement/SKILL.md) | Workflow | `/implement docs/plans/<plan>.md` — executes a finished Development Plan (implementer waves → completeness gate → architecture review + fix iterations → tests → bug review → sign-off); spec and plan are created manually first |
+| [workflow-retro](workflow-retro/SKILL.md) | Workflow | `/workflow-retro [session-ids\|latest]` — manual retrospective of a multi-agent run: real token/cache/tool/parallelism metrics from transcripts (incl. nested subagents), insights + concrete actions, trend row in docs/retros/ledger.md |
 
 ## What Are Skills?
 

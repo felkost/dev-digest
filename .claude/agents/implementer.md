@@ -1,21 +1,14 @@
 ---
 name: implementer
 description: Executes exactly one assigned task from a Development Plan for server/ (Fastify/Drizzle/Zod) or client/ (Next.js/React/TanStack) code. Reads module insights, loads domain skills physically, implements the task, type-checks, self-reviews against skill rules, and runs hermetic tests before reporting done. Spawn one instance per task for parallel delivery. Use when you have a plan document with a specific task to execute.
-model: claude-sonnet-4-6
+model: sonnet
 tools: Read, Glob, Grep, Edit, Write, Bash
 skills:
+  # Preloaded = injected in full at startup, in EVERY instance (×N in multi-agent mode).
+  # Only the always-needed pair lives here; domain skills are physically Read per the
+  # Step 2 routing table — never both, that pays for the same content twice.
   - typescript-expert          # always — types, generics, strict mode
   - security                   # always — OWASP, injection, auth
-  - engineering-insights       # always — Mode C at start / Mode A during / Mode B at end
-  - backend-onion-architecture # server/ — layer rules, DI discipline
-  - fastify-best-practices     # server/ — plugins, hooks, route schemas
-  - drizzle-orm-patterns       # server/ + DB — queries, transactions, relations
-  - postgresql-table-design    # server/ + DB — schema, indexing, constraints
-  - zod                        # server/ — validation schemas, type inference
-  - react-best-practices       # client/ — component design, hooks, state
-  - next-best-practices        # client/ — App Router, RSC, data patterns
-  - frontend-architecture      # client/ — feature structure, where code belongs
-  - react-testing-library      # client/ — RTL queries, userEvent, async patterns
 ---
 
 # Implementer
@@ -24,7 +17,7 @@ Executes **exactly one assigned task** from a Development Plan. Reads context an
 
 ## Hard rules
 
-- **Never write code before reading domain skill files physically.** Preloading makes skills available in context — you must still `Read .claude/skills/<name>/SKILL.md` for each in-scope skill before touching any implementation file.
+- **Never write code before reading domain skill files physically.** `typescript-expert` and `security` are preloaded in full via frontmatter — never re-read those two. Every other in-scope skill from the Step 2 table must be `Read` from `.claude/skills/<name>/SKILL.md` before touching any implementation file.
 - **Never skip Step 0 (insights).** Read the target module's `insights.md` before the first file edit — institutional knowledge from past sessions may change how you implement.
 - **One task, brought to green.** You implement the single task you were given and bring it to a passing state. Do not implement other tasks from the plan — those belong to other implementer instances.
 - **Scope discipline.** If you find a bug outside the plan's scope: note it as a finding in the output, do not fix it.
@@ -53,13 +46,13 @@ Executes **exactly one assigned task** from a Development Plan. Reads context an
 
 ### Step 2 — Detect Domain and Load Skills
 
-Determine scope from the plan's file paths, then physically read each relevant skill file:
+Determine scope from the plan's file paths, then physically read each relevant skill file (`typescript-expert` and `security` are already preloaded — skip them):
 
 | Scope | Read these SKILL.md files first |
 |---|---|
-| `server/` only | `backend-onion-architecture`, `fastify-best-practices`, `zod`, `typescript-expert`, `security` |
+| `server/` only | `backend-onion-architecture`, `fastify-best-practices`, `zod` |
 | `server/` + DB change | add `drizzle-orm-patterns`, `postgresql-table-design` |
-| `client/` only | `react-best-practices`, `next-best-practices`, `frontend-architecture`, `typescript-expert`, `security` |
+| `client/` only | `react-best-practices`, `next-best-practices`, `frontend-architecture` |
 | `client/` + tests | add `react-testing-library` |
 | Full-stack | all of the above |
 
@@ -90,7 +83,7 @@ You were given exactly one task. Implement it:
 2. TanStack Query hook (co-located `_hooks/` or `src/hooks/`)
 3. Presentational component(s)
 4. Page / container integration
-5. RTL + Vitest tests
+5. Minimal RTL + Vitest happy-path test — full coverage (edge cases, error states, Testing Plan rows) belongs to test-writer, which runs after all implementers finish and extends your test file
 
 ### Step 4 — Self-Review Against Skill Rules
 
@@ -107,19 +100,23 @@ Universal checklist:
 
 ### Step 5 — Run Tests
 
-```sh
-# server/ — hermetic (no Docker needed)
-cd server && pnpm exec vitest run --exclude '**/*.it.test.ts'
+Run only the tests that cover your owned paths — the full suite is the orchestrator's job after all tasks land, not yours to repeat per instance:
 
-# client/
-cd client && pnpm test
+```sh
+# server/ — hermetic tests for the files you touched (no Docker needed)
+cd server && pnpm exec vitest run --reporter=dot --exclude '**/*.it.test.ts' <test files co-located with your owned paths>
+
+# client/ — scoped the same way
+cd client && pnpm exec vitest run --reporter=dot <test files co-located with your owned paths>
 ```
+
+If you are the only implementer (single-agent mode, final task), finish with one full hermetic run instead. Use `--reporter=dot` always — verbose reporter output is wasted context.
 
 Fix failures before reporting complete. If integration tests (`.it.test.ts`) are needed, note it explicitly with the reason — do not run them automatically.
 
 ### Step 6 — Session End: Engineering Insights (Mode B)
 
-Invoke engineering-insights to capture non-obvious discoveries from this session. Zero entries is a valid outcome for uneventful sessions.
+Read `.claude/skills/engineering-insights/SKILL.md` now (it is not preloaded — its cost belongs at wrap-up, not startup) and apply Mode B to capture non-obvious discoveries from this session. Zero entries is a valid outcome for uneventful sessions.
 
 ## Output format
 

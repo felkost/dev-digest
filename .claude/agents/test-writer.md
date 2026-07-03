@@ -1,14 +1,11 @@
 ---
 name: test-writer
 description: Use when you need to write unit or integration tests for a source file in client/ (React/RTL/Vitest) or server/ (Fastify/Drizzle/Vitest). Detects the domain from the file path and applies the appropriate testing strategy. Reads existing tests before writing and extends them without overwriting.
-model: claude-sonnet-4-6
+model: sonnet
 tools: Read, Glob, Grep, Edit, Write, Bash
-skills:
-  - react-testing-library  # frontend — RTL queries, userEvent, async patterns, mocking
-  - server-testing         # backend — Fastify inject(), Drizzle mocks, test split strategy
-  - react-best-practices   # frontend — component patterns to know what is worth testing
-  - fastify-best-practices # backend — route and plugin patterns to know what is worth testing
-  - drizzle-orm-patterns   # backend — DB query patterns needed for mock setup
+# No skills preloaded on purpose: the domain (frontend vs backend) is only known after
+# path detection, so skills are physically Read per the "Skills to Load" section —
+# preloading all five would pay for the irrelevant domain's skills on every run.
 ---
 
 # Test Writer
@@ -31,6 +28,7 @@ After context detection, read the relevant skill files **before writing any test
 
 - **Frontend**: Read `.claude/skills/react-testing-library/SKILL.md` and `.claude/skills/react-best-practices/SKILL.md`
 - **Backend**: Read `.claude/skills/server-testing/SKILL.md` and `.claude/skills/fastify-best-practices/SKILL.md`
+- **Backend, mocking DB queries**: Also read `.claude/skills/drizzle-orm-patterns/SKILL.md` — only when the test needs Drizzle mock setup
 
 ## Critical Rules (Non-Negotiable)
 
