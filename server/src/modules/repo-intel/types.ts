@@ -161,6 +161,15 @@ export interface RepoIntel {
   getUnresolvedReferences(repoId: string, files: string[]): Promise<RefRow[]>;
   /** Top-N file paths by rank, filtered of tests/configs. */
   getConventionSamples(repoId: string, n: number): Promise<string[]>;
+  /**
+   * Repo-wide file_facts inventory (endpoints/crons per file), no `files`
+   * filter — the complete indexed set for `repoId`. Intentionally UNCAPPED:
+   * this is a general aggregation read (e.g. onboarding's routes/endpoints
+   * section), not LLM input. Degrades to `[]` per the DEGRADED CONTRACT above.
+   */
+  getAllFileFacts(
+    repoId: string,
+  ): Promise<{ filePath: string; endpoints: string[]; crons: string[] }[]>;
 
   // --- T3: onboarding reading-path + critical paths (graph required) ------
   getTopFilesByRank(

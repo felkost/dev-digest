@@ -53,6 +53,9 @@ importers:
       graphology-metrics:
         specifier: ^2.4.0
         version: 2.4.0(graphology-types@0.24.8)
+      ignore:
+        specifier: ^7.0.5
+        version: 7.0.5
       js-tiktoken:
         specifier: ^1.0.21
         version: 1.0.21

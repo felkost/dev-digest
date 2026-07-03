@@ -22,6 +22,7 @@ All server state lives in hooks backed by TanStack Query — never `useEffect` f
 - Naming: `use<Domain><Action>` — e.g., `useReviewRun`, `useAgentList`, `usePrDetail`
 - QueryKey shape: `[domain, id?, ...filters]` — keep consistent for correct cache invalidation
 - Mutations call `queryClient.invalidateQueries` on success — don't manually update cache
+  - Exception: when the mutation response IS the canonical updated object (single consumer, full payload), prefer `queryClient.setQueryData` with that response over `invalidateQueries` — it avoids a redundant refetch and can't race. Precedent: `useGenerateOnboardingTour`.
 
 ## SSE (live run progress)
 

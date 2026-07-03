@@ -562,6 +562,31 @@ export class RepoIntelRepository {
     }));
   }
 
+  /**
+   * Repo-wide file_facts inventory — every row for `repoId`, no `files` filter.
+   *
+   * This is a general-purpose aggregation read (e.g. onboarding's routes/
+   * endpoints inventory), NOT LLM input, so it is intentionally UNCAPPED at
+   * this layer. Do not add a `.limit()` or hub-file filter here: capping for
+   * LLM consumption belongs exclusively in the onboarding module's
+   * `buildLlmInput` (`LLM_INPUT_MAX_ENDPOINTS` / `LLM_INPUT_MAX_ROUTES_PER_FILE`).
+   */
+  async getAllFileFacts(repoId: string): Promise<IndexerFileFactsRow[]> {
+    const rows = await this.db
+      .select({
+        filePath: t.fileFacts.filePath,
+        endpoints: t.fileFacts.endpoints,
+        crons: t.fileFacts.crons,
+      })
+      .from(t.fileFacts)
+      .where(eq(t.fileFacts.repoId, repoId));
+    return rows.map((r) => ({
+      filePath: r.filePath,
+      endpoints: (r.endpoints as string[]) ?? [],
+      crons: (r.crons as string[]) ?? [],
+    }));
+  }
+
   /** Repo-map cache read by PK. */
   async getRepoMapCache(
     repoId: string,

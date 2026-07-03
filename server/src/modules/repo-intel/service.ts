@@ -687,6 +687,27 @@ export class RepoIntelService implements RepoIntel {
   }
 
   /**
+   * Repo-wide file_facts aggregator (routes/endpoints inventory) — every
+   * indexed file's endpoints/crons for `repoId`, no `files` filter.
+   *
+   * Deliberately does NOT apply blast/service.ts's `HUB_ENDPOINT_LIMIT`
+   * filtering: that filter exists to stop blast from attributing an entire
+   * app's routes to one changed symbol's callers. This method has a
+   * different concern — describing the COMPLETE "what routes exist in this
+   * repo" inventory (onboarding), so hub files must stay included here.
+   * LLM-input-side capping (`LLM_INPUT_MAX_ENDPOINTS`,
+   * `LLM_INPUT_MAX_ROUTES_PER_FILE`) is applied downstream in the onboarding
+   * module's `buildLlmInput` — never import that cap (or blast's hub filter)
+   * into this aggregation layer.
+   */
+  async getAllFileFacts(
+    repoId: string,
+  ): Promise<{ filePath: string; endpoints: string[]; crons: string[] }[]> {
+    if (!this.container.config.repoIntelEnabled) return [];
+    return this.repo.getAllFileFacts(repoId);
+  }
+
+  /**
    * Top-N file paths by rank DESC, dropping tests/configs/migrations and any
    * caller-supplied `exclude` substrings. Over-fetches by 10× before filtering
    * so the post-filter still yields N where possible.
