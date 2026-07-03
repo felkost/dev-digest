@@ -17,3 +17,4 @@ Feature specifications — the **WHAT** of a feature, written before any plan or
 ## Index
 
 - [2026-07-02-project-context-folder.md](2026-07-02-project-context-folder.md) — `SPEC-2026-07-02-project-context-folder` (draft — v2) — browse/edit repo markdown (DB-shadow overlay) + attach to agents/skills; inject into the reviewer's `## Project context` slot as untrusted data; two-panel UI + coverage ring
+- [2026-07-03-onboarding-generator.md](2026-07-03-onboarding-generator.md) — `SPEC-2026-07-03-onboarding-generator` (draft) — per-repo Onboarding Tour: deterministic repo-intel facts (rank/critical paths/routes/scripts) + exactly ONE structured LLM call for the 5-section narrative; full-mode (managed clone) + lite-mode (GitHub API) fallback; persisted + regenerable
