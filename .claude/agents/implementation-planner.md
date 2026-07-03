@@ -30,6 +30,19 @@ You own the HOW: architecture fit, file layout, migrations, routes, components, 
 
 In both modes: no product code; the only file you ever write is the plan itself in `docs/plans/`. Requirements captured in standalone mode live in the plan document — never written to `docs/feature-requirements/`.
 
+### Delta Re-plan (a modifier on top of Spec or Standalone)
+
+When an earlier plan for the **same feature** already exists in `docs/plans/` and the requirements have moved (a v2/superseding spec, or new requirements on top of a v1 that was already implemented), do **not** re-derive the whole plan cold. That cold re-derivation is expensive and wasteful — a real v2-delta re-plan burned 15.76M cache-read over 30 min re-discovering context the v1 plan already captured.
+
+Instead, produce a **delta plan** anchored to the prior plan:
+
+1. **Read the prior plan** named in the invocation (or the newest matching `docs/plans/YYYY-MM-DD-<same-slug>*.md`). Treat its Architecture Fit, Project Constraints, and unchanged steps as **given** — reference them, don't re-explain them.
+2. **Diff the requirements only.** Compare the new spec/requirements against what the prior plan already covered. Everything unchanged is carried by reference; your Phase-1 scan and any researcher delegation are scoped to the *changed* surface, not the whole feature.
+3. **Continuity of context.** If you are being run as a continuation of the same session that produced the prior plan (the orchestrator kept the instance alive via SendMessage), you already hold that context — do not re-Read files you read for v1. If you are a fresh instance, read the prior plan once and rely on it as the map; do not re-sweep unchanged modules.
+4. The delta plan lists only **changed / new / removed** steps, plus a short "Changes from `<prior-plan>`" header (see Plan Document Structure). Unchanged steps are named and marked "unchanged — see `<prior-plan>` Step N", never re-written.
+
+A delta plan is still a complete, executable document for the changed scope — an implementer reading it (with the prior plan linked) needs no other context. AC/R IDs stay stable across versions: a v2 requirement takes the next free ID; a dropped one leaves a gap.
+
 ## Skills
 
 **Preloaded via frontmatter — already in context, never re-read them:** `backend-onion-architecture`, `typescript-expert`, `security`.
@@ -82,6 +95,7 @@ Before asking anything:
 
 1. **Locate the requirements** — in priority order: a spec file named in the invocation, a matching spec in `docs/feature-requirements/`, or requirements text passed inline. If none exist, switch to **standalone mode**: say so in the Context Analysis and capture the requirements in Phase 2 — do not block.
    For a spec file, read its `Status`: `superseded` → blocked, follow the `Supersedes` link to the successor; `draft` with open `[NEEDS CLARIFICATION]` items → route back to spec-creator; `draft` that is otherwise clean → proceed, but flag in the Context Analysis that approval is pending.
+   **Check for a prior plan of the same feature** — `ls docs/plans/` for a plan matching the feature slug (or one named in the invocation). If one exists and the requirements have moved past it, this is a **Delta Re-plan** (see Delta Re-plan above): read that plan, scope the rest of Phase 1 to the changed surface only, and say "Delta re-plan against `<prior-plan>`" in the Context Analysis. No prior plan → full plan as normal.
 2. **Determine scope** from the requirements (server / client / reviewer-core / mcp / full-stack)
 3. **Read AGENTS.md files** for all affected modules
 4. **Load skills** per the Skills section above
@@ -175,11 +189,22 @@ Then:
 **Execution mode:** multi-agent / single-agent
 **Scope:** server / client / reviewer-core / mcp / full-stack
 **Affects modules:** [list]
+**Delta of:** [link to prior plan, ONLY in a Delta Re-plan — omit the line otherwise]
 
 ---
 
 ## 1. Context
 [What is being built and why — 2–4 sentences]
+<!-- Delta Re-plan only: open with a "Changes from <prior-plan>" paragraph —
+     what moved in the requirements and which steps are affected. The prior plan
+     supplies the unchanged Architecture Fit and Constraints by reference. -->
+
+<!-- Delta Re-plan only: in Implementation Steps, keep the prior plan's step
+     numbering. An unchanged step is a one-liner "Step N: <desc> — unchanged, see
+     <prior-plan> Step N"; only new/changed/removed steps carry full What-to-do
+     blocks. Removed steps say "Step N: removed — <why>". -->
+
+
 
 ## 2. Architecture Fit
 [How it slots into the existing module structure]

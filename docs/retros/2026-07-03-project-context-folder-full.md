@@ -66,7 +66,7 @@ Files Read in ≥3 contexts (inject-per-run candidates):
 | 5 | Continue reviewers/fixers via SendMessage for follow-up passes instead of cold respawn | `/implement` fix-loop dispatch (`.claude/skills/implement`) | Kill cold-start (77.5% → ~95%) on re-reviews and small fixes |
 
 ## Follow-up (applied 2026-07-03)
-- [~] Rec #1 — partial: "avoid cold v2 re-plan" captured as habit #6 in `orchestration-cost-habits.md`; full continuation-of-planner wiring deferred
+- [x] Rec #1 — **applied.** implementation-planner now has a **Delta Re-plan mode** (Phase 1 detects a prior plan for the same feature; writes a delta anchored to it — unchanged steps by reference, changed surface only — instead of re-deriving cold). Plan header gains a `Delta of:` line + "Changes from <prior-plan>" section. Orchestration trigger (name the prior plan / continue the instance via SendMessage) captured in `orchestration-cost-habits.md` habit #6.
 - [x] Rec #2 — **applied.** implementation-planner: "MAXIMIZE WAVE WIDTH" note in the parallelization map + new anti-pattern. `/implement` Phase 1: "Maximize wave width" check before spawning each wave
 - [x] Rec #3 — **applied.** `/implement` Phase 1: "Inject, don't point" — step text + owned/shared file digests into the task prompt
 - [x] Rec #4 — **applied.** Separate-chats habit added as habit #4 in `orchestration-cost-habits.md`
