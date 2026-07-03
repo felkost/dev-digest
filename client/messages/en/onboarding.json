@@ -40,9 +40,9 @@
     "lite": "Generated from limited data (no repository index)"
   },
   "complexity": {
-    "low": "Low",
-    "medium": "Medium",
-    "high": "High"
+    "low": "Low complexity",
+    "medium": "Medium complexity",
+    "high": "High complexity"
   },
   "rateLimited": "You're generating tours too quickly — please wait a minute and try again.",
   "generateError": {

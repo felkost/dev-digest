@@ -12,30 +12,28 @@ export function FirstTasksSection({ section }: { section: OnboardingTourSection 
   const t = useTranslations("onboarding");
 
   return (
-    <div style={s.wrap}>
-      {section.body && <p style={s.body}>{section.body}</p>}
-      <div style={s.cardsRow}>
-        {section.tasks.map((task, i) => {
-          const complexity = COMPLEXITY[task.complexity];
-          return (
-            <div key={`${task.target_path}-${i}`} style={s.card}>
-              <div style={s.cardTitle}>{task.title}</div>
-              <span className="mono" style={s.targetPath}>
-                {task.target_path}
-              </span>
-              <span
-                style={{
-                  ...s.complexityBadge,
-                  color: complexity.c,
-                  background: complexity.bg,
-                }}
-              >
-                {t(`complexity.${task.complexity}`)}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+    <div style={s.cardsRow}>
+      {section.tasks.map((task, i) => {
+        const complexity = COMPLEXITY[task.complexity];
+        return (
+          <div key={`${task.target_path}-${i}`} style={s.card}>
+            <div style={s.cardTitle}>{task.title}</div>
+            <span className="mono" style={s.targetPath}>
+              {task.target_path}
+            </span>
+            <span
+              style={{
+                ...s.complexityBadge,
+                color: complexity.c,
+                background: complexity.bg,
+                borderColor: complexity.c,
+              }}
+            >
+              {t(`complexity.${task.complexity}`)}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

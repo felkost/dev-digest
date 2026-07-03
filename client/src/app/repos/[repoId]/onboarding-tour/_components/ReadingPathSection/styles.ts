@@ -20,24 +20,26 @@ export const s = {
     padding: 0,
     display: "flex",
     flexDirection: "column" as const,
-    gap: 2,
+    gap: 14,
   } satisfies CSSProperties,
 
   row: {
     display: "flex",
     alignItems: "flex-start",
-    gap: 10,
-    padding: "8px 0",
-    borderBottom: "1px solid var(--border)",
+    gap: 12,
   } satisfies CSSProperties,
 
   index: {
+    display: "inline-grid",
+    placeItems: "center",
+    width: 20,
+    height: 20,
+    borderRadius: "50%",
+    background: "var(--sugg-bg)",
+    color: "var(--sugg)",
     fontSize: 11,
     fontWeight: 700,
-    color: "var(--text-muted)",
-    width: 18,
     flexShrink: 0,
-    paddingTop: 1,
   } satisfies CSSProperties,
 
   rowMain: {

@@ -33,4 +33,13 @@ export const s = {
     whiteSpace: "pre-wrap" as const,
     overflowX: "auto" as const,
   } satisfies CSSProperties,
+
+  diagramSvg: {
+    padding: 24,
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    minHeight: 80,
+    overflowX: "auto" as const,
+  } satisfies CSSProperties,
 } as const;

@@ -6,7 +6,7 @@ import type { OnboardingTourSectionKind, OnboardingTourTask } from "@devdigest/s
     LOCALLY here per the promotion rule — a single feature-local consumer does
     not warrant adding to the shared tokens.ts. */
 export const COMPLEXITY: Record<OnboardingTourTask["complexity"], { c: string; bg: string }> = {
-  low: { c: "var(--sugg)", bg: "var(--sugg-bg)" },
+  low: { c: "var(--ok)", bg: "var(--ok-bg)" },
   medium: { c: "var(--warn)", bg: "var(--warn-bg)" },
   high: { c: "var(--crit)", bg: "var(--crit-bg)" },
 };

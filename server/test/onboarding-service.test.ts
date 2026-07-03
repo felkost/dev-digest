@@ -561,9 +561,12 @@ describe('OnboardingService.generateTour — rendered prompt shape (Step 6 edit 
     }
     expect(prompt).not.toContain('routes_and_apis');
     expect(prompt).not.toMatch(/up to 4[^.]*links.*pointing at REAL files from the provided\s*facts\/tree\.\s*$/m);
-    // The reading_path guidance explicitly overrides any generic cap.
+    // The reading_path guidance requires one entry per ranked file, no truncation.
     expect(prompt.replace(/\s+/g, ' ')).toContain(
-      'For `reading_path`, emit one entry per ranked file provided in the input — do not truncate.',
+      'per ranked file provided in the input; do not truncate',
     );
+    // how_to_run commands must go into entries, not the body prose.
+    expect(prompt).toContain('how_to_run');
+    expect(prompt.replace(/\s+/g, ' ')).toContain('EXACT shell command');
   });
 });

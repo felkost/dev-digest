@@ -40,13 +40,10 @@ function CommandRow({ index, command }: { index: number; command: string }) {
 
 export function HowToRunSection({ section }: { section: OnboardingTourSection }) {
   return (
-    <div style={s.wrap}>
-      {section.body && <p style={s.body}>{section.body}</p>}
-      <ol style={s.list}>
-        {section.entries.map((entry, i) => (
-          <CommandRow key={`${entry.path}-${i}`} index={i + 1} command={entry.path} />
-        ))}
-      </ol>
-    </div>
+    <ol style={s.list}>
+      {section.entries.map((entry, i) => (
+        <CommandRow key={`${entry.path}-${i}`} index={i + 1} command={entry.path} />
+      ))}
+    </ol>
   );
 }

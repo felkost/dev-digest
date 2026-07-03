@@ -44,7 +44,7 @@ export const s = {
   command: {
     flex: 1,
     fontSize: 12.5,
-    color: "var(--accent-text)",
+    color: "var(--text-primary)",
   } satisfies CSSProperties,
 
   copyBtn: {

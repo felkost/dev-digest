@@ -68,9 +68,13 @@ const LlmSection = z.object({
   title: z.string(),
   body: z.string(),
   diagram: z.string().nullable(),
-  entries: z.array(LlmEntry).default([]),
-  tasks: z.array(LlmTask).default([]),
-  links: z.array(LlmLink).default([]),
+  // Structured-outputs (OpenAI) require every field to be required OR nullable —
+  // `.optional()`/`.default()` is rejected. These per-kind payload arrays are
+  // nullable (a section that doesn't use one emits null); the service treats
+  // null as an empty array.
+  entries: z.array(LlmEntry).nullable(),
+  tasks: z.array(LlmTask).nullable(),
+  links: z.array(LlmLink).nullable(),
 });
 
 /** Narrower schema passed to `completeStructured` — narrative sections only. */

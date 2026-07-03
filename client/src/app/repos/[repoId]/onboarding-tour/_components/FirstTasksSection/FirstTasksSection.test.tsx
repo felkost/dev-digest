@@ -28,21 +28,21 @@ function renderWithIntl(ui: React.ReactElement) {
 }
 
 describe("FirstTasksSection — complexity badge color-token traceability", () => {
-  it("maps Low complexity to the --sugg token", () => {
+  it("maps Low complexity to the --ok (green) token", () => {
     renderWithIntl(<FirstTasksSection section={section([{ title: "Fix typo", target_path: "README.md", complexity: "low" }])} />);
-    const badge = screen.getByText("Low");
-    expect(badge.style.color).toBe("var(--sugg)");
+    const badge = screen.getByText("Low complexity");
+    expect(badge.style.color).toBe("var(--ok)");
   });
 
   it("maps Medium complexity to the --warn token", () => {
     renderWithIntl(<FirstTasksSection section={section([{ title: "Add test", target_path: "src/x.ts", complexity: "medium" }])} />);
-    const badge = screen.getByText("Medium");
+    const badge = screen.getByText("Medium complexity");
     expect(badge.style.color).toBe("var(--warn)");
   });
 
   it("maps High complexity to the --crit token", () => {
     renderWithIntl(<FirstTasksSection section={section([{ title: "Refactor core", target_path: "src/core.ts", complexity: "high" }])} />);
-    const badge = screen.getByText("High");
+    const badge = screen.getByText("High complexity");
     expect(badge.style.color).toBe("var(--crit)");
   });
 

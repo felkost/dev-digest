@@ -287,7 +287,7 @@ export class OnboardingService {
     for (const sec of result.data.sections) {
       narrativeBySection.set(sec.kind, sec);
       const rMap = new Map<string, string>();
-      for (const entry of sec.entries) rMap.set(entry.path, entry.rationale);
+      for (const entry of sec.entries ?? []) rMap.set(entry.path, entry.rationale);
       rationaleByPathBySection.set(sec.kind, rMap);
     }
 
@@ -324,6 +324,16 @@ export class OnboardingService {
             rationaleMap.get(p) ?? `Part of a critical dependency chain (position ${idx + 1}).`,
           rank: mode === 'lite' ? null : idx + 1,
           github_link: linkFor(p),
+        }));
+      } else if (kind === 'how_to_run') {
+        // Run steps are the LLM's per-entry shell commands (grounded in the
+        // package.json/docker-compose facts). path = the command; not a file, so
+        // no rank and no GitHub blob link.
+        entries = (narrative?.entries ?? []).map((e) => ({
+          path: e.path,
+          rationale: e.rationale,
+          rank: null,
+          github_link: null,
         }));
       }
 
