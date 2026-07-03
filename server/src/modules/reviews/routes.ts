@@ -13,6 +13,8 @@ import { ReviewService } from './service.js';
 import * as pullRepo from './repository/pull.repo.js';
 import * as t from '../../db/schema.js';
 import { loadDiff } from './diff-loader.js';
+import { BriefGeneratorService } from './brief-generator.js';
+import { BRIEF_GENERATE_RATE_LIMIT } from './constants.js';
 
 /**
  * reviews module.
@@ -153,6 +155,43 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     if (!pull) throw new NotFoundError('PR not found');
     const brief = await pullRepo.getBrief(container.db, req.params.id, workspaceId);
     return brief ?? null;
+  });
+
+  // ---- Generate/regenerate the LLM-derived part of the PR Brief -------------
+  // Rate-limited per-workspace (not per-IP) — mirrors onboarding/routes.ts's
+  // ONBOARDING_RATE_LIMIT keyGenerator pattern exactly. A single call triggers
+  // exactly one paid structured LLM call (BriefGeneratorService.generate).
+  app.post(
+    '/pulls/:id/brief',
+    {
+      schema: { params: IdParams },
+      config: {
+        rateLimit: {
+          ...BRIEF_GENERATE_RATE_LIMIT,
+          keyGenerator: async (req: import('fastify').FastifyRequest) => {
+            const { workspaceId } = await getContext(container, req);
+            return `risk-brief-generate:${workspaceId}`;
+          },
+        },
+      },
+    },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      const generator = new BriefGeneratorService(container, req.log.child({ route: 'brief.generate', prId: req.params.id }));
+      return generator.generate(workspaceId, req.params.id);
+    },
+  );
+
+  // ---- Clear the LLM-derived part of the PR Brief (reset to "not generated") -
+  // Zero LLM calls — no rate limit needed. Workspace-scoped via getPull (same
+  // pattern as GET/POST above); returns the PR to the "Generate brief" empty
+  // state on the client (gating there is `!brief?.llm`).
+  app.delete('/pulls/:id/brief', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    const pull = await pullRepo.getPull(container.db, workspaceId, req.params.id);
+    if (!pull) throw new NotFoundError('PR not found');
+    const cleared = await pullRepo.clearLlmBrief(container.db, req.params.id);
+    return cleared ?? null;
   });
 
   // ---- PR Intent (classifier output for a PR) --------------------------------

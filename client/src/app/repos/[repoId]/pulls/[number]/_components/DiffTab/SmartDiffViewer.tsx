@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { parsePatch } from "@/components/diff-viewer/helpers";
 import type { SmartDiff, SmartDiffGroup, SmartDiffFile } from "@devdigest/shared";
 
@@ -49,15 +49,60 @@ interface FileViewProps {
   file: SmartDiffFile;
   patch: string | null | undefined;
   onNavigateToFinding: (findingId: string) => void;
+  targetFile: string | null;
+  targetLine: string | null;
 }
 
-function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
+/** Transient highlight tint — same blue accent already used in this file for the "summary" badge. */
+const HIGHLIGHT_BG = "rgba(74,158,255,0.18)";
+const HIGHLIGHT_MS = 1500;
+
+function FileView({ file, patch, onNavigateToFinding, targetFile, targetLine }: FileViewProps) {
+  const isTarget = targetFile === file.path;
   const [expanded, setExpanded] = React.useState(true);
+  const [highlightedLineId, setHighlightedLineId] = React.useState<string | null>(null);
   const lines = parsePatch(patch);
 
+  // Force-expand when this file becomes the navigation target (don't fight manual collapse otherwise).
+  React.useEffect(() => {
+    if (isTarget) setExpanded(true);
+  }, [isTarget, targetFile]);
+
+  // Scroll to + transiently highlight the target line. Falls back to the file container
+  // when the line anchor doesn't exist (e.g. review_focus items default to line=1, which
+  // is rarely a rendered diff row) so navigation still lands somewhere visible instead of
+  // silently doing nothing. The file-fallback scrolls with `block: "start"` (file header at
+  // top of viewport) rather than "center" — on a tall file, centering the container lands
+  // the user mid-diff, which looks random rather than "this file just opened."
+  React.useEffect(() => {
+    if (!isTarget || typeof document === "undefined") return;
+    const lineId = targetLine ? `diff-line-${targetFile}-${targetLine}` : null;
+    let raf2 = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Double-rAF: after force-expand flips `expanded`, the file's diff rows render on the
+    // next paint — a single rAF can still fire before that DOM update commits.
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        const lineEl = lineId ? document.getElementById(lineId) : null;
+        if (lineEl) {
+          lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
+          setHighlightedLineId(lineId);
+          timer = setTimeout(() => setHighlightedLineId(null), HIGHLIGHT_MS);
+        } else {
+          const fileEl = document.getElementById(`diff-file-${targetFile}`);
+          fileEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      if (timer) clearTimeout(timer);
+    };
+  }, [isTarget, targetFile, targetLine, expanded]);
 
   return (
-    <div style={{ marginBottom: 8, border: "1px solid var(--border)", borderRadius: 6 }}>
+    <div id={`diff-file-${file.path}`} style={{ marginBottom: 8, border: "1px solid var(--border)", borderRadius: 6 }}>
       {/* File header */}
       <div
         onClick={() => setExpanded((v) => !v)}
@@ -196,10 +241,13 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
                   );
                 }
 
-                const lineNo = line.newNo ?? line.oldNo ?? "";
-                const findingOnLine = (line.newNo ?? line.oldNo) != null
-                  ? findingDisplayMap.get(line.newNo ?? line.oldNo!)
+                const lineNoRaw = line.newNo ?? line.oldNo;
+                const lineNo = lineNoRaw ?? "";
+                const findingOnLine = lineNoRaw != null
+                  ? findingDisplayMap.get(lineNoRaw)
                   : undefined;
+                const lineId = lineNoRaw != null ? `diff-line-${file.path}-${lineNoRaw}` : undefined;
+                const isHighlighted = lineId != null && lineId === highlightedLineId;
 
                 let bg = "transparent";
                 let borderLeft = "3px solid transparent";
@@ -215,9 +263,12 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
                   prefix = "-";
                 }
 
+                if (isHighlighted) bg = HIGHLIGHT_BG;
+
                 return (
                   <div
                     key={idx}
+                    id={lineId}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -225,6 +276,7 @@ function FileView({ file, patch, onNavigateToFinding }: FileViewProps) {
                       borderLeft,
                       minHeight: 18,
                       minWidth: "100%",
+                      transition: "background 0.3s ease",
                     }}
                   >
                     {/* Line number gutter */}
@@ -309,11 +361,19 @@ interface GroupViewProps {
   group: SmartDiffGroup;
   patches: Record<string, string | null | undefined>;
   onNavigateToFinding: (findingId: string) => void;
+  targetFile: string | null;
+  targetLine: string | null;
 }
 
-function GroupView({ group, patches, onNavigateToFinding }: GroupViewProps) {
+function GroupView({ group, patches, onNavigateToFinding, targetFile, targetLine }: GroupViewProps) {
   const meta = ROLE_META[group.role] ?? { label: group.role, description: "", color: "#6b7280" };
-  const [expanded, setExpanded] = React.useState(group.role !== "boilerplate");
+  const hasTarget = targetFile != null && group.files.some((f) => f.path === targetFile);
+  const [expanded, setExpanded] = React.useState(group.role !== "boilerplate" || hasTarget);
+
+  // Force-expand a collapsed (e.g. boilerplate) group when it holds the navigation target.
+  React.useEffect(() => {
+    if (hasTarget) setExpanded(true);
+  }, [hasTarget]);
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -368,14 +428,28 @@ function GroupView({ group, patches, onNavigateToFinding }: GroupViewProps) {
       {/* Files */}
       {expanded && (
         <div style={{ paddingLeft: 0 }}>
-          {group.files.map((file) => (
-            <FileView
-              key={file.path}
-              file={file}
-              patch={patches[file.path]}
-              onNavigateToFinding={onNavigateToFinding}
-            />
-          ))}
+          {(() => {
+            // Dedupe by path — server smart-diff composition can emit the same file
+            // more than once within a group for large PRs, which would otherwise
+            // produce a duplicate React key AND duplicate DOM anchor ids
+            // (`diff-file-${path}`, `diff-line-${path}-${line}`), breaking internal nav.
+            const seen = new Set<string>();
+            const uniqueFiles = group.files.filter((f) => {
+              if (seen.has(f.path)) return false;
+              seen.add(f.path);
+              return true;
+            });
+            return uniqueFiles.map((file) => (
+              <FileView
+                key={file.path}
+                file={file}
+                patch={patches[file.path]}
+                onNavigateToFinding={onNavigateToFinding}
+                targetFile={targetFile}
+                targetLine={targetLine}
+              />
+            ));
+          })()}
         </div>
       )}
     </div>
@@ -384,6 +458,9 @@ function GroupView({ group, patches, onNavigateToFinding }: GroupViewProps) {
 
 export function SmartDiffViewer({ smartDiff, patches }: SmartDiffViewerProps) {
   const router = useRouter();
+  const search = useSearchParams();
+  const targetFile = search?.get("file") ?? null;
+  const targetLine = search?.get("line") ?? null;
 
   function navigateToFinding(findingId: string) {
     const params = new URLSearchParams(window.location.search);
@@ -407,6 +484,8 @@ export function SmartDiffViewer({ smartDiff, patches }: SmartDiffViewerProps) {
           group={group}
           patches={patches}
           onNavigateToFinding={navigateToFinding}
+          targetFile={targetFile}
+          targetLine={targetLine}
         />
       ))}
     </div>

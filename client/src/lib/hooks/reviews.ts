@@ -60,6 +60,40 @@ export function usePrBrief(prId: string | null | undefined) {
   });
 }
 
+/** Generate/regenerate the LLM-derived part of the PR Brief (POST /pulls/:id/brief).
+   The response IS the full canonical PrBrief, so we setQueryData directly
+   instead of invalidating — avoids a redundant refetch and can't race
+   (precedent: useGenerateOnboardingTour). */
+export function useGenerateBrief(prId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => {
+      if (!prId) throw new Error('prId required');
+      return api.post<PrBrief>(`/pulls/${prId}/brief`);
+    },
+    onSuccess: (brief) => {
+      qc.setQueryData(["pr-brief", prId], brief);
+    },
+  });
+}
+
+/** Clear a generated PR Brief back to the "Generate brief" empty state
+   (DELETE /pulls/:id/brief). Response IS the canonical updated PrBrief (llm:
+   null) or null, so we setQueryData directly — same rationale as
+   useGenerateBrief: avoids a redundant refetch and can't race. */
+export function useClearBrief(prId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => {
+      if (!prId) throw new Error('prId required');
+      return api.del<PrBrief | null>(`/pulls/${prId}/brief`);
+    },
+    onSuccess: (brief) => {
+      qc.setQueryData(["pr-brief", prId], brief ?? null);
+    },
+  });
+}
+
 // ---- Live PR Intent (from pr_intent table — populated after review runs) ---
 export function useIntent(prId: string | null | undefined) {
   return useQuery({

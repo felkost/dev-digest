@@ -18,5 +18,17 @@
     "blame": "blame",
     "noHistory": "No history available for this line.",
     "noCommits": "No commits found for this line."
+  },
+  "reviewFocus": {
+    "header": "Review Focus — Read These First",
+    "empty": "No review-focus items."
+  },
+  "emptyState": {
+    "title": "No brief yet",
+    "subtitle": "Generate a Why+Risk brief for this PR.",
+    "cta": "Generate brief",
+    "generating": "Generating…",
+    "error": "Brief generation failed: {error}",
+    "retry": "Try again"
   }
 }

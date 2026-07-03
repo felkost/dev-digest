@@ -80,6 +80,10 @@ function PRDetailContent() {
   );
   const lethalTrifecta = allFindings.filter((f) => f.kind === "lethal_trifecta");
   const findingsCount = allFindings.length;
+  const changedPaths = React.useMemo(
+    () => new Set((pr?.files ?? []).map((f) => f.path)),
+    [pr],
+  );
 
   const repoName = activeRepo?.full_name ?? repoId;
   // The real "owner/repo" (null until the repo is loaded) — used to build
@@ -150,7 +154,13 @@ function PRDetailContent() {
 
       <div style={{ padding: "24px 32px 44px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 1080, margin: "0 auto" }}>
         {tab === "overview" && (
-          <OverviewTab prBody={pr.body} prId={prId} runs={runs} costUsd={pr.cost_usd} />
+          <OverviewTab
+            prBody={pr.body}
+            prId={prId}
+            runs={runs}
+            costUsd={pr.cost_usd}
+            changedPaths={changedPaths}
+          />
         )}
 
         {tab === "findings" && (
