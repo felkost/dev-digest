@@ -79,7 +79,7 @@ export function activated(result: Result, skill: string): boolean {
 
 type Task = (prompt: string, artifact: string, opts?: RunOptions) => Promise<Result>;
 
-function runQualityCases(artifact: string, cases: QualityCase[], task: Task): void {
+function runQualityCases(artifact: string, cases: QualityCase[], task: Task, testTimeout?: number): void {
   for (const c of cases) {
     test(c.name, async () => {
       const threshold = c.threshold ?? DEFAULT_THRESHOLD;
@@ -108,12 +108,19 @@ function runQualityCases(artifact: string, cases: QualityCase[], task: Task): vo
       if (verdict) {
         expect(verdict.score, JSON.stringify(verdict.results)).toBeGreaterThanOrEqual(threshold);
       }
-    });
+    }, testTimeout);
   }
 }
 
+// The tool tier runs the Agent SDK through the LiteLLM proxy (Anthropic wire ⇄ OpenRouter). Under
+// a slow OpenRouter model the strictest tier's hardest case (multi-violation checkout diff) can
+// loop past the global 240s cap and be killed as a timeout — a flake, not a scoring miss. Give the
+// agent tier extra headroom; skills/workflow stay on the global vitest.config.ts cap.
+const AGENT_TEST_TIMEOUT_MS = 360_000;
+
 export const runSkillCases = (skill: string, cases: SkillCase[]) => runQualityCases(skill, cases, skillTask);
-export const runAgentCases = (agent: string, cases: AgentCase[]) => runQualityCases(agent, cases, agentTask);
+export const runAgentCases = (agent: string, cases: AgentCase[]) =>
+  runQualityCases(agent, cases, agentTask, AGENT_TEST_TIMEOUT_MS);
 
 export function runWorkflowCases(cases: WorkflowCase[]): void {
   for (const c of cases) {
