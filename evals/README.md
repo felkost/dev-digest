@@ -169,6 +169,13 @@ workflow cases:
 | `deepseek/deepseek-chat` | ✅ | ❌ does the work inline instead of dispatching |
 | `openai/gpt-4.1-mini` | ✅ | ❌ |
 
+> **Agents tier is stricter than dispatch.** Measured on CI (2026-07-05): `google/gemini-2.5-flash`
+> passes the negative (no-fabrication) agent cases but fails the strict positive ones — it misses
+> documented violations, cites no rule identifiers, and paraphrases instead of quoting verbatim
+> (0/6 and 2/6 practices on the two positive `architecture-reviewer` cases). For the **agents**
+> tier use `anthropic/claude-haiku-4.5` (the model these cases were authored against); keep
+> gemini-2.5-flash for the workflow tier where dispatch, not review depth, is measured.
+
 **Two caveats for the tool tiers on cheap models:**
 
 1. **Rate-limit flakiness under load.** Running the whole suite back-to-back can get throttled by

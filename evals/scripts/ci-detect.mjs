@@ -34,6 +34,17 @@ function hasEvals(tier, name) {
   return readdirSync(dir).some((f) => f.endsWith(".eval.ts"));
 }
 
+/**
+ * Does the artifact under test exist on this checkout? Evals can outlive their artifact (e.g. an
+ * A/B variant's eval merged without the variant's agent .md) — running such a suite is a
+ * guaranteed `agent not found` crash, so it must be skipped, not run.
+ */
+function hasArtifact(tier, name) {
+  return tier === "skills"
+    ? existsSync(join(REPO_ROOT, ".claude", "skills", name, "SKILL.md"))
+    : existsSync(join(REPO_ROOT, ".claude", "agents", `${name}.md`));
+}
+
 /** Collect distinct artifact names touched under a `.claude` and/or `evals` prefix. */
 function touched(reClaude, reEvals) {
   const names = new Set();
@@ -55,10 +66,22 @@ const agentNames = touched(
   /^evals\/agents\/([^/]+)\//,
 ).filter((n) => n.toLowerCase() !== "readme");
 
-const skills = skillNames.filter((n) => hasEvals("skills", n));
-const skippedSkills = skillNames.filter((n) => !hasEvals("skills", n));
-const agents = agentNames.filter((n) => hasEvals("agents", n));
-const skippedAgents = agentNames.filter((n) => !hasEvals("agents", n));
+/**
+ * Why a changed suite must NOT run on CI (null = runnable). A `.ci-skip` marker file in the
+ * suite dir opts an experiment out of gating (e.g. an A/B variant whose cases are EXPECTED to
+ * fail at threshold 1.0 — it exists for eval:repeat/eval:delta, not for pass/fail).
+ */
+function skipReason(tier, name) {
+  if (!hasEvals(tier, name)) return "no evals";
+  if (!hasArtifact(tier, name)) return "artifact missing in .claude";
+  if (existsSync(join(EVALS_DIR, tier, name, ".ci-skip"))) return "marked .ci-skip (experiment, not a gate)";
+  return null;
+}
+
+const skills = skillNames.filter((n) => !skipReason("skills", n));
+const skippedSkills = skillNames.filter((n) => skipReason("skills", n));
+const agents = agentNames.filter((n) => !skipReason("agents", n));
+const skippedAgents = agentNames.filter((n) => skipReason("agents", n));
 
 // The workflow tier measures the LIVE harness, so anything that changes it re-triggers it:
 // the root or .claude CLAUDE.md, any agent definition, the workflow cases, or the engine itself.
@@ -86,8 +109,8 @@ console.error(`changed files : ${changed.length}`);
 console.error(`skills → run  : ${skills.join(", ") || "(none)"}`);
 console.error(`agents → run  : ${agents.join(", ") || "(none)"}`);
 console.error(`workflow tier : ${runWorkflow ? "run" : "skip"}`);
-if (skippedSkills.length) console.error(`SKIP skills (no evals): ${skippedSkills.join(", ")}`);
-if (skippedAgents.length) console.error(`SKIP agents (no evals): ${skippedAgents.join(", ")}`);
+for (const n of skippedSkills) console.error(`SKIP skill ${n} — ${skipReason("skills", n)}`);
+for (const n of skippedAgents) console.error(`SKIP agent ${n} — ${skipReason("agents", n)}`);
 
 // Markdown summary on the run page (GITHUB_STEP_SUMMARY), so the trigger-table outcome is
 // visible without opening the step log.

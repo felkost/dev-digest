@@ -14,10 +14,11 @@
 #
 # Model knobs are repo Actions VARIABLES (Settings → Secrets and variables → Actions →
 # Variables) with cheap defaults — upgrade quality by changing a variable, no commit needed:
-#   EVAL_MODEL_CONTENT   default deepseek/deepseek-chat    skills tier + LLM judge
-#   EVAL_MODEL_TOOLS     default google/gemini-2.5-flash   agents + workflow tiers
-#                        (verified in evals/README.md: deepseek does NOT dispatch subagents,
-#                        so the tool tiers need gemini-2.5-flash or better)
+#   EVAL_MODEL_CONTENT   default deepseek/deepseek-chat      skills tier + LLM judge
+#   EVAL_MODEL_AGENTS    default anthropic/claude-haiku-4.5  agents tier — measured: cheaper
+#                        models miss violations / cite no rule ids (evals/README.md)
+#   EVAL_MODEL_WORKFLOW  default google/gemini-2.5-flash     workflow tier — dispatch verified;
+#                        deepseek does NOT dispatch subagents (evals/README.md)
 #   EVAL_JUDGE_MODEL     default deepseek/deepseek-chat
 #
 # Secret: OPENROUTER_API_KEY. When absent (e.g. a fork PR) model steps are skipped with a notice.
@@ -102,7 +103,8 @@ jobs:
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       EVAL_MODEL_CONTENT: ${{ vars.EVAL_MODEL_CONTENT || 'deepseek/deepseek-chat' }}
-      EVAL_MODEL_TOOLS: ${{ vars.EVAL_MODEL_TOOLS || 'google/gemini-2.5-flash' }}
+      EVAL_MODEL_AGENTS: ${{ vars.EVAL_MODEL_AGENTS || 'anthropic/claude-haiku-4.5' }}
+      EVAL_MODEL_WORKFLOW: ${{ vars.EVAL_MODEL_WORKFLOW || 'google/gemini-2.5-flash' }}
       EVAL_JUDGE_MODEL: ${{ vars.EVAL_JUDGE_MODEL || 'deepseek/deepseek-chat' }}
     steps:
       - uses: actions/checkout@v4
@@ -172,8 +174,8 @@ jobs:
           SKIPPED_SKILLS: ${{ steps.detect.outputs.skipped_skills }}
           SKIPPED_AGENTS: ${{ steps.detect.outputs.skipped_agents }}
         run: |
-          for n in $SKIPPED_SKILLS; do echo "::notice::SKIP skill '$n' — changed, but has no evals under evals/skills/$n"; done
-          for n in $SKIPPED_AGENTS; do echo "::notice::SKIP agent '$n' — changed, but has no evals under evals/agents/$n"; done
+          for n in $SKIPPED_SKILLS; do echo "::notice::SKIP skill '$n' — no evals, missing SKILL.md, or marked .ci-skip (reason in the detect step log)"; done
+          for n in $SKIPPED_AGENTS; do echo "::notice::SKIP agent '$n' — no evals, missing agent .md, or marked .ci-skip (reason in the detect step log)"; done
 
       - uses: pnpm/action-setup@v4
         if: steps.plan.outputs.any == 'true'
@@ -208,8 +210,10 @@ jobs:
           SKILLS_JSON: ${{ steps.detect.outputs.skills }}
         run: |
           for name in $(echo "$SKILLS_JSON" | jq -r '.[]'); do
-            echo "──▶ vitest run skills/$name  (model: $EVAL_MODEL)"
-            pnpm exec vitest run "skills/$name"
+            echo "──▶ vitest run skills/$name/  (model: $EVAL_MODEL)"
+            # trailing slash: vitest filters by SUBSTRING, so "skills/foo" would also match
+            # "skills/foo-variant/..." — the slash pins the exact directory.
+            pnpm exec vitest run "skills/$name/"
           done
 
       # Tool tier — via the proxy. BLOCKING.
@@ -218,12 +222,14 @@ jobs:
         env:
           EVAL_BACKEND: openrouter
           OPENROUTER_BASE_URL: http://localhost:4000
-          EVAL_MODEL: ${{ env.EVAL_MODEL_TOOLS }}
+          EVAL_MODEL: ${{ env.EVAL_MODEL_AGENTS }}
           AGENTS_JSON: ${{ steps.detect.outputs.agents }}
         run: |
           for name in $(echo "$AGENTS_JSON" | jq -r '.[]'); do
-            echo "──▶ vitest run agents/$name  (model: $EVAL_MODEL)"
-            pnpm exec vitest run "agents/$name"
+            echo "──▶ vitest run agents/$name/  (model: $EVAL_MODEL)"
+            # trailing slash: substring filtering — "agents/architecture-reviewer" would also
+            # match agents/architecture-reviewer-lite/ and crash on its missing agent .md.
+            pnpm exec vitest run "agents/$name/"
           done
 
       # Systemic tier — ADVISORY on cheap models: activation-kind cases are behaviour-shaped and
@@ -235,7 +241,7 @@ jobs:
         env:
           EVAL_BACKEND: openrouter
           OPENROUTER_BASE_URL: http://localhost:4000
-          EVAL_MODEL: ${{ env.EVAL_MODEL_TOOLS }}
+          EVAL_MODEL: ${{ env.EVAL_MODEL_WORKFLOW }}
         run: pnpm eval:workflow
 
       - name: Annotate advisory failure
@@ -255,7 +261,8 @@ jobs:
           if [ -z "$MODEL" ]; then
             case "$SUITE" in
               skills*) MODEL="$EVAL_MODEL_CONTENT" ;;
-              *)       MODEL="$EVAL_MODEL_TOOLS" ;;
+              agents*) MODEL="$EVAL_MODEL_AGENTS" ;;
+              *)       MODEL="$EVAL_MODEL_WORKFLOW" ;;
             esac
           fi
           echo "──▶ vitest run $SUITE  (model: $MODEL)"
