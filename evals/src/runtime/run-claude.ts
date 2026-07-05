@@ -59,12 +59,29 @@ export async function runClaude(prompt: string, opts: RunOptions = {}): Promise<
     systemPrompt = (systemPrompt ?? "") + directive;
   }
 
+  // bypassPermissions auto-approves EVERY tool call; allowedTools only pre-approves, it does NOT
+  // restrict. Measured on CI: an agent allow-listed to Read/Glob/Grep still ran Bash and
+  // ReportFindings (and ReportFindings swallows report content the judge then never sees).
+  // disallowedTools is the actual gate — deny the mutating/output-hijacking tools unless the
+  // case explicitly allowed them.
+  const DENIED_UNLESS_ALLOWED = [
+    "Bash",
+    "Write",
+    "Edit",
+    "NotebookEdit",
+    "ReportFindings",
+    "WebFetch",
+    "WebSearch",
+  ];
+  const disallowedTools = DENIED_UNLESS_ALLOWED.filter((t) => !allowedTools.includes(t));
+
   const options: Options = {
     model: opts.model ?? EVAL_MODEL,
     maxTurns: opts.maxTurns ?? MAX_TURNS,
-    permissionMode: "bypassPermissions", // safe: evals only read/plan and tools are allow-listed
+    permissionMode: "bypassPermissions", // paired with disallowedTools above — see comment
     systemPrompt,
     allowedTools,
+    disallowedTools,
     cwd: opts.cwd ?? REPO_ROOT,
     // Default: do NOT load on-disk config — isolates the injected artifact. workflowTask overrides.
     settingSources: opts.settingSources ?? [],

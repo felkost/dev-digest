@@ -583,9 +583,12 @@ tokens > 125% of baseline), `missing_data` (a config has zero records for a test
 
 ## Safety
 
-Sessions run with `permissionMode: "bypassPermissions"`, so `workflowTask` keeps a **read-only
-allow-list** (`Read, Grep, Glob, Task, Agent, Skill` — no `Bash`/`Write`/`Edit`). Don't copy the
-bypass pattern into a context that grants write tools.
+Sessions run with `permissionMode: "bypassPermissions"`. **`allowedTools` alone does NOT restrict
+under bypass** — it only pre-approves; measured on CI, an agent allow-listed to `Read, Glob, Grep`
+still ran `Bash` and `ReportFindings`. The actual gate is `disallowedTools`: `run-claude.ts` denies
+`Bash / Write / Edit / NotebookEdit / ReportFindings / WebFetch / WebSearch` unless a case's
+allow-list explicitly includes them. Don't copy the bypass pattern into a context without that
+deny-list.
 
 ## Deferred (recorded so it isn't rediscovered)
 

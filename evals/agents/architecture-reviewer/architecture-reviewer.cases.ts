@@ -51,8 +51,12 @@ export const cases: AgentCase[] = [
     kind: "quality",
     prompt: REVIEW_PROMPT,
     practices: [
-      "does not invent an architecture-contract violation for the optional `reply?: FastifyReply` parameter beyond the inward-only-dependencies import issue itself (no runtime bug/security finding fabricated as an architecture rule)",
-      "stays scoped to structural/layering/DI findings and does not comment on naming, style, or test coverage",
+      // Wording is deliberately explicit about what IS allowed: the fixture's `reply?: FastifyReply`
+      // parameter is layering-relevant, so commentary/findings tying it to inward-only-dependencies
+      // are fine. Earlier vaguer wording made the judge flip-flop (~50% pass) between counting that
+      // commentary as "fabrication" or "scope violation".
+      "does not fabricate a runtime-bug or security finding from the optional `reply?: FastifyReply` parameter — discussing that parameter as part of the inward-only-dependencies / layering violation is acceptable and expected; only a non-architectural (runtime crash, security vulnerability) finding counts as fabrication",
+      "stays scoped to structural/layering/DI findings and does not comment on naming, style, or test coverage (layering commentary about the `reply?: FastifyReply` parameter IS structural and in scope)",
     ],
     threshold: 1.0,
     maxTurns: 25,

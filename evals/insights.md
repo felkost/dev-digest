@@ -11,6 +11,8 @@
 
 ## Mistakes
 <!-- Failure modes, antipatterns, wrong assumptions. Prioritize this section. -->
+- **2026-07-05 [Mistake]** — assuming `allowedTools` restricts the toolset under `permissionMode: "bypassPermissions"`. It only PRE-APPROVES; bypass auto-approves everything else, so an agent allow-listed to Read/Glob/Grep ran `Bash` and `ReportFindings` on CI — and ReportFindings swallowed report content the LLM judge never saw (silent practice failures). The real gate is `disallowedTools`; run-claude now denies mutating/output-hijacking tools unless explicitly allowed. `evals/src/runtime/run-claude.ts:62`
+- **2026-07-05 [Mistake]** — eval cases and the artifact under test can silently diverge: the L06 agent cases demand `RULE:` identifiers (`inward-only-dependencies`, `reviewer-core-zero-io`, …), verbatim evidence, and a `**Gate:**` verdict, but the repo's own architecture-reviewer.md (2026-07-02, 90 lines) never defined any of that — the identical 3 practices failed on BOTH gemini and haiku, which is the fingerprint of an artifact/eval mismatch, not model weakness. `history.jsonl` had zero `agents/` rows, so the tier had never actually run before CI. Check `grep <expected-identifiers> <artifact>` before blaming the model. Fixed by importing the template strict agent (`upstream/Lesson-06-lab-finish`).
 
 ## Decisions
 <!-- Architectural or design choices with the reasoning behind them. -->
@@ -27,4 +29,4 @@
 <!-- Unresolved. Convert to an entry in the appropriate section when answered. -->
 
 ---
-Last updated: 2026-07-05 · Entries: 6
+Last updated: 2026-07-05 · Entries: 8
