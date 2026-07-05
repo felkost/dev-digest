@@ -111,7 +111,12 @@ export async function runClaude(prompt: string, opts: RunOptions = {}): Promise<
             }
             if (block.name === "Read") {
               const fp = input.file_path ?? input.path;
-              if (fp) reads.push(fp);
+              // Normalize to forward slashes: on Windows the Read tool receives an absolute
+              // backslash path, but every expectFilesRead in cases.ts is authored POSIX-style
+              // (e.g. "reviewer-core/docs/pipeline.md") and matched via .includes() — a raw
+              // backslash path never contains that substring, so unnormalized paths silently
+              // fail every trace/contrast assertion on Windows even when the right file was read.
+              if (fp) reads.push(fp.replace(/\\/g, "/"));
             }
             if (block.name === "Skill") {
               const s = input.skill ?? input.command;

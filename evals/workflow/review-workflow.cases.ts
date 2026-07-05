@@ -35,25 +35,32 @@ export const cases: WorkflowCase[] = [
     // not exploring source. Earlier phrasing ("розберись, як усе влаштовано") sent the model straight
     // into schema.ts / pipeline.run.ts and it never opened the routed doc. One anchor doc (pipeline.md)
     // keeps this a deterministic routing check — asserting two docs in one session is inherently flaky.
+    // A softer "Я збираюся змінити pipeline. Перш ніж торкатися коду..." earlier let the model treat
+    // the read as conditional on receiving change details first — it asked "what changes exactly?"
+    // instead of reading. The task below is now self-contained: read now, nothing else expected.
     name: "pipeline task follows CLAUDE.md routing to pipeline.md",
     prompt:
-      "Я збираюся змінити review pipeline. Перш ніж торкатися коду — звірся з настановами цього репо " +
-      "(CLAUDE.md) щодо того, яку документацію треба прочитати для змін у pipeline, і прочитай саме ці документи.",
+      "Твоє єдине завдання зараз: за настановами цього репо (CLAUDE.md) визнач, яку документацію " +
+      "треба прочитати перед зміною review pipeline, і прочитай саме ці документи. Не став уточнюючих " +
+      "питань і не чекай на деталі змін — просто прочитай документацію зараз.",
     expectFilesRead: ["reviewer-core/docs/pipeline.md"],
     maxTurns: 8,
   },
 
-  // --- trace (1 session): CLAUDE.md "Hit unexpected behavior" routing -> gotchas ----------------
+  // --- trace (1 session): CLAUDE.md "Hit unexpected behavior" routing -> insights.md -------------
   // Was a contrast case, but the control run (empty tmpdir) could still reach the real repo by
-  // absolute path and read gotchas.md, making the negative flaky. As a single-session trace it
-  // reliably checks the same routing rule: in the real repo, the discovery prompt reads gotchas.md.
+  // absolute path and read insights.md, making the negative flaky. As a single-session trace it
+  // reliably checks the same routing rule: in the real repo, the discovery prompt reads insights.md.
+  // NOTE: reviewer-core/AGENTS.md documents gotchas as a flat `insights.md` file (per the
+  // engineering-insights skill convention), not an `insights/` directory — the path below must
+  // match that, not an invented gotchas.md.
   {
     kind: "trace",
     name: "CLAUDE.md routes a gotchas lookup to reviewer-core/insights",
     prompt:
       "У reviewer-core я стикнувся з несподіваною поведінкою — щось працює не так, як я очікував. " +
       "За настановами цього репо, де це вже могло бути задокументовано? Прочитай той файл.",
-    expectFilesRead: ["reviewer-core/insights/gotchas.md"],
+    expectFilesRead: ["reviewer-core/insights.md"],
     maxTurns: 5,
   },
 

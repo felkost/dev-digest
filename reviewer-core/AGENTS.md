@@ -9,6 +9,13 @@ Root conventions in [../AGENTS.md](../AGENTS.md).
 - **Grounding is mandatory** — never bypass `groundFindings()`. New finding types must either cite a real diff line or be added to the full-file kind whitelist in `grounding.ts`.
 - **`INJECTION_GUARD`** — appended automatically by `assemblePrompt()`. Never strip or work around it.
 
+## Read When
+
+| Task | Read |
+|---|---|
+| Changing a step of the review pipeline (mode selection, assembly, map-reduce, grounding order) | [reviewer-core/docs/pipeline.md](docs/pipeline.md) |
+| Hit unexpected behavior in this package | [reviewer-core/insights.md](insights.md) |
+
 ## Public API (`src/index.ts`)
 
 | Export | Purpose |
@@ -39,7 +46,7 @@ Tests: `npm test` (Vitest, hermetic — uses stubbed `LLMProvider`).
 ## See also
 
 - [README.md](README.md) — pipeline diagram, grounding algorithm
-- [docs/](docs/) — design decisions
+- [docs/](docs/) — design decisions, incl. [docs/pipeline.md](docs/pipeline.md), [docs/grounding-algorithm.md](docs/grounding-algorithm.md)
 - [specs/](specs/) — engine behavior specs
 - [insights.md](insights.md) — accumulated gotchas
 - [../AGENTS.md](../AGENTS.md) — root conventions

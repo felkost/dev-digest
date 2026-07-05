@@ -22,6 +22,13 @@ pnpm exec vitest run .it.test                             # integration tests on
 - Route schemas use Zod via `fastify-type-provider-zod` — one schema drives both validation and TS types
 - Expected failures → throw `AppError`; never throw raw strings or plain `Error`
 
+## Read When
+
+| Task | Read |
+|---|---|
+| Adding or changing an API endpoint | [server/docs/api-contracts.md](docs/api-contracts.md) |
+| Hit unexpected behavior in this package | [server/insights.md](insights.md) |
+
 ## Testing
 
 - `*.it.test.ts` = integration (testcontainers Postgres, real DB, no mocks) — needs Docker running
@@ -61,6 +68,6 @@ In `src/modules/blast/`:
 - [src/modules/AGENTS.md](src/modules/AGENTS.md) — module scaffold rules
 - [src/db/AGENTS.md](src/db/AGENTS.md) — migration rules, schema conventions
 - [src/vendor/shared/AGENTS.md](src/vendor/shared/AGENTS.md) — cross-package contracts
-- [docs/](docs/) — design decisions
+- [docs/](docs/) — design decisions, incl. [docs/api-contracts.md](docs/api-contracts.md)
 - [specs/](specs/) — service behavior specs
 - [insights.md](insights.md) — accumulated gotchas

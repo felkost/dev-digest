@@ -1,0 +1,27 @@
+# insights.md — evals
+
+> Append-only. Add new entries at the bottom of the correct section.
+> Discovery bar: "Would a fresh agent save ≥10 minutes from reading this?" If not, skip.
+> Format: `**YYYY-MM-DD [Category]** — actionable sentence. `file:line``
+> See `.claude/skills/engineering-insights/` for full criteria and format rules.
+
+## Patterns
+<!-- Reusable approaches that worked in this module. -->
+
+## Mistakes
+<!-- Failure modes, antipatterns, wrong assumptions. Prioritize this section. -->
+
+## Decisions
+<!-- Architectural or design choices with the reasoning behind them. -->
+
+## Quirks
+<!-- Dependency gotchas, env constraints, non-obvious tool or library behavior. -->
+- **2026-07-05 [Quirk]** — `eval:quality` parses SKILL.md frontmatter with `gray-matter`/`js-yaml` (strict YAML), which crashes with an uncaught `YAMLException` — aborting the entire run, not just that skill — when a `description:` field contains an unquoted `: ` (colon-space), e.g. `Use when: (1)`. The Claude Code harness parses the same frontmatter leniently and loads the skill fine, so the bug is invisible until the eval runs. Fix: remove colon-space (use `—`) or quote the whole value. `evals/src/skill-quality.ts:39`
+- **2026-07-05 [Quirk]** — On Windows, `pnpm exec vitest ...` spawned from `runVitestOnce`/`countTests` throws `Error: spawn pnpm ENOENT` because `pnpm` is a `.cmd` shim and Node's `spawn`/`execFileSync` don't resolve `PATHEXT` without `shell: true`. Crashes `eval:benchmark`/`eval:repeat` immediately on Windows. Fix: `shell: process.platform === "win32"` on both calls. `evals/src/run-vitest.ts:19,36`
+- **2026-07-05 [Quirk]** — Workflow `trace`/`contrast` cases assert `expectFilesRead` via `filesRead.some(f => f.includes(file))`, but on Windows the `Read` tool's `file_path` arrives as an absolute backslash path (`F:\...\pipeline.md`) while every `expectFilesRead` in `cases.ts` is authored POSIX-style (`"reviewer-core/docs/pipeline.md"`) — `.includes()` never matches, so a case can fail even though the model read exactly the right file. Confirmed via trace: `reads:` listed the exact expected file (Windows-style) yet the assertion still read `false`. Fix: normalize backslashes to forward slashes at the single capture point. `evals/src/runtime/run-claude.ts:112`
+
+## Open Questions
+<!-- Unresolved. Convert to an entry in the appropriate section when answered. -->
+
+---
+Last updated: 2026-07-05 · Entries: 3
