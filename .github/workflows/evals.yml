@@ -15,8 +15,10 @@
 # Model knobs are repo Actions VARIABLES (Settings → Secrets and variables → Actions →
 # Variables) with cheap defaults — upgrade quality by changing a variable, no commit needed:
 #   EVAL_MODEL_CONTENT   default deepseek/deepseek-chat      skills tier + LLM judge
-#   EVAL_MODEL_AGENTS    default anthropic/claude-haiku-4.5  agents tier — measured: cheaper
-#                        models miss violations / cite no rule ids (evals/README.md)
+#   EVAL_MODEL_AGENTS    default mistralai/mistral-medium-3.1  agents tier — the strictest tier
+#                        (threshold 1.0, exact RULE ids). Measured: anthropic/claude-haiku-4.5
+#                        passes; google/gemini-2.5-flash misses violations / cites no rule ids
+#                        (evals/README.md) — fall back to haiku via the variable if mistral flakes
 #   EVAL_MODEL_WORKFLOW  default google/gemini-2.5-flash     workflow tier — dispatch verified;
 #                        deepseek does NOT dispatch subagents (evals/README.md)
 #   EVAL_JUDGE_MODEL     default deepseek/deepseek-chat
@@ -103,7 +105,7 @@ jobs:
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       EVAL_MODEL_CONTENT: ${{ vars.EVAL_MODEL_CONTENT || 'deepseek/deepseek-chat' }}
-      EVAL_MODEL_AGENTS: ${{ vars.EVAL_MODEL_AGENTS || 'anthropic/claude-haiku-4.5' }}
+      EVAL_MODEL_AGENTS: ${{ vars.EVAL_MODEL_AGENTS || 'mistralai/mistral-medium-3.1' }}
       EVAL_MODEL_WORKFLOW: ${{ vars.EVAL_MODEL_WORKFLOW || 'google/gemini-2.5-flash' }}
       EVAL_JUDGE_MODEL: ${{ vars.EVAL_JUDGE_MODEL || 'deepseek/deepseek-chat' }}
     steps:

@@ -1,16 +1,21 @@
-diff --git a/server/src/modules/blast/score.ts b/server/src/modules/blast/score.ts
+diff --git a/server/src/modules/blast/repository.ts b/server/src/modules/blast/repository.ts
 index eeeeeee..fffffff 100644
---- a/server/src/modules/blast/score.ts
-+++ b/server/src/modules/blast/score.ts
-@@ -1,10 +1,12 @@
- export interface BlastRow {
-   id: string;
-   score: number;
- }
+--- a/server/src/modules/blast/repository.ts
++++ b/server/src/modules/blast/repository.ts
+@@ -53,14 +53,15 @@ export class BlastRepository {
+   async getPrFilePaths(workspaceId: string, prId: string): Promise<string[]> {
+     const rows = await this.db
+       .select({ path: t.prFiles.path })
+       .from(t.prFiles)
+       .innerJoin(t.pullRequests, eq(t.prFiles.prId, t.pullRequests.id))
+       .where(
+         and(
+           eq(t.prFiles.prId, prId),
+           eq(t.pullRequests.workspaceId, workspaceId),
+         ),
+       );
 
--export function summarize(rows: BlastRow[]) {
--  return rows.map((r) => ({ id: r.id, score: r.score }));
-+// Renamed locals for readability; behaviour unchanged.
-+export function summarize(rows: BlastRow[]) {
-+  return rows.map((row) => ({ id: row.id, score: row.score }));
- }
+-    return rows.map((r) => r.path);
++    // Renamed the callback local for readability; behaviour unchanged.
++    return rows.map((row) => row.path);
+   }
