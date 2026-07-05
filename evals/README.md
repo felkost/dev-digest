@@ -188,6 +188,11 @@ workflow cases:
 
 ### Wiring it into GitHub Actions (per-PR)
 
+> **This repo already ships the wired-up workflow:** `.github/workflows/evals.yml` — a free
+> blocking `quality` job plus a change-triggered `model-evals` job (per-skill / per-agent /
+> workflow tiers, models switchable via the `EVAL_MODEL_CONTENT` / `EVAL_MODEL_TOOLS` /
+> `EVAL_JUDGE_MODEL` repo Actions variables). The sketch below is the minimal reference version.
+
 The engine is CI-ready: bring the proxy up as a step, wait for it, run the tier, tear it down. Put
 the OpenRouter key in the repo's **Actions secrets** as `OPENROUTER_API_KEY` (Settings → Secrets and
 variables → Actions). Create `.github/workflows/<name>.yml` in your repo:

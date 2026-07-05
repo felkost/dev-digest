@@ -48,10 +48,12 @@ const skillNames = touched(
   /^\.claude\/skills\/([^/]+)\//,
   /^evals\/skills\/([^/]+)\//,
 );
+// README.md sits next to the agent definitions but is not an agent — without the filter an edit
+// to it would register a phantom "README" agent AND re-trigger the (expensive) workflow tier.
 const agentNames = touched(
   /^\.claude\/agents\/([^/]+)\.md$/,
   /^evals\/agents\/([^/]+)\//,
-);
+).filter((n) => n.toLowerCase() !== "readme");
 
 const skills = skillNames.filter((n) => hasEvals("skills", n));
 const skippedSkills = skillNames.filter((n) => !hasEvals("skills", n));
@@ -64,7 +66,7 @@ const runWorkflow = changed.some(
   (f) =>
     f === "CLAUDE.md" ||
     f === ".claude/CLAUDE.md" ||
-    /^\.claude\/agents\/.+\.md$/.test(f) ||
+    (/^\.claude\/agents\/.+\.md$/.test(f) && !/\/readme\.md$/i.test(f)) ||
     /^evals\/workflow\//.test(f) ||
     /^evals\/src\//.test(f),
 );
@@ -86,3 +88,28 @@ console.error(`agents → run  : ${agents.join(", ") || "(none)"}`);
 console.error(`workflow tier : ${runWorkflow ? "run" : "skip"}`);
 if (skippedSkills.length) console.error(`SKIP skills (no evals): ${skippedSkills.join(", ")}`);
 if (skippedAgents.length) console.error(`SKIP agents (no evals): ${skippedAgents.join(", ")}`);
+
+// Markdown summary on the run page (GITHUB_STEP_SUMMARY), so the trigger-table outcome is
+// visible without opening the step log.
+const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+if (summaryFile) {
+  const row = (label, run, skipped) =>
+    `| ${label} | ${run.length ? run.map((n) => `\`${n}\``).join(", ") : "—"} | ${
+      skipped.length ? skipped.map((n) => `\`${n}\``).join(", ") : "—"
+    } |`;
+  appendFileSync(
+    summaryFile,
+    [
+      "### Eval change detection",
+      "",
+      `Changed files: **${changed.length}**`,
+      "",
+      "| Tier | Runs | Skipped (no evals) |",
+      "|---|---|---|",
+      row("skills", skills, skippedSkills),
+      row("agents", agents, skippedAgents),
+      `| workflow | ${runWorkflow ? "**run**" : "—"} | |`,
+      "",
+    ].join("\n"),
+  );
+}

@@ -36,7 +36,17 @@ function evaluate(skillDir: string): Report {
   if (!existsSync(skillMd)) {
     return { skill: name, errors: [`SKILL.md not found in ${skillDir}`], warnings: [], verdict: "FAIL" };
   }
-  const { data: fm, content: body } = matter(readFileSync(skillMd, "utf8"));
+  // gray-matter parses frontmatter with strict YAML and THROWS on e.g. an unquoted `: ` inside
+  // `description:`. The Claude Code harness loads the same file fine, so without this guard one
+  // bad skill would abort the whole run instead of failing just that skill.
+  let fm: Record<string, unknown>;
+  let body: string;
+  try {
+    ({ data: fm, content: body } = matter(readFileSync(skillMd, "utf8")));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message.split("\n")[0] : String(err);
+    return { skill: name, errors: [`frontmatter YAML parse error: ${msg}`], warnings: [], verdict: "FAIL" };
+  }
   const errors: string[] = [];
   const warnings: string[] = [];
 
