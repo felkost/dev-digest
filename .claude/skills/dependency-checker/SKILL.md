@@ -75,3 +75,5 @@ Fill [report-template.md](report-template.md) in order: **Scope → Dependency G
 - [ ] Internal (alias) deps are distinguished from external npm deps.
 - [ ] No claim of `workspace:*`/pnpm workspaces.
 - [ ] No dependency was installed, edited, or removed — only recommended.
+
+<!-- ci-trigger: exercise skill-tier eval (content); no semantic change -->

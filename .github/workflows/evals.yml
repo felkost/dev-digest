@@ -288,3 +288,4 @@ jobs:
             evals/results/history.jsonl
             evals/results/outputs/
           if-no-files-found: ignore
+# ci-trigger: exercise Job 2 change-detection (skill + agent + workflow edit); no behavior change

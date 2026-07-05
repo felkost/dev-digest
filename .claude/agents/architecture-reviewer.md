@@ -178,3 +178,5 @@ Based on:
 - [Clean Architecture in the Age of AI — Preventing Architectural Liquefaction](https://dev.to/uxter/clean-architecture-in-the-age-of-ai-preventing-architectural-liquefaction-5d8d)
 - [Enforce Clean Architecture in TypeScript Projects with Fresh Onion](https://dev.to/remojansen/enforce-clean-architecture-in-your-typescript-projects-with-fresh-onion-45pi)
 - [Agentic Code Review](https://addyosmani.com/blog/agentic-code-review/)
+
+<!-- ci-trigger: exercise agent-tier + workflow-tier evals; no semantic change -->
