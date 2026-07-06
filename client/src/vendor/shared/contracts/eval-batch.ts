@@ -99,6 +99,10 @@ export const EvalBatchCaseOutcome = z.object({
   matched_count: z.number().int(),
   findings_count: z.number().int(),
   cost_usd: z.number().nullable(),
+  // Concise cause string for an errored run (per-case runtime failure), so a
+  // Degraded batch's cause is visible in the UI drill-down instead of only
+  // server stderr logs. Null for deterministic passed/failed runs.
+  error_message: z.string().nullish(),
 });
 export type EvalBatchCaseOutcome = z.infer<typeof EvalBatchCaseOutcome>;
 

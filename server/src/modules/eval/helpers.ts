@@ -28,6 +28,80 @@ export function expectationsFromJson(raw: unknown): Expectation[] {
   return raw as Expectation[];
 }
 
+/** Cap on the persisted `error_message` string — long provider stack traces
+ *  or response bodies must not bloat the `eval_runs` row. */
+const ERROR_MESSAGE_MAX_LENGTH = 2000;
+
+/**
+ * Build a concise, persistable error message from an unknown thrown value
+ * (a per-case runtime failure in `runOneCase`, or an unexpected fan-out
+ * failure in `executeBatch`) — so a Degraded batch's cause is visible in the
+ * UI drill-down instead of only server stderr logs.
+ *
+ * Shape: `<message>` optionally suffixed with ` (status <code>)` when the
+ * error (or a nested `response`) carries an HTTP status, plus a short tail
+ * of any nested provider detail (`cause`/`response.data`/`response.body`)
+ * when present. Capped at ~2000 chars.
+ */
+export function formatErrorMessage(err: unknown): string {
+  const message = errorMessageOf(err);
+  const status = statusOf(err);
+  const detail = nestedDetailOf(err);
+
+  let result = message;
+  if (status !== undefined) result += ` (status ${status})`;
+  if (detail) result += ` — ${detail}`;
+
+  return result.slice(0, ERROR_MESSAGE_MAX_LENGTH);
+}
+
+function errorMessageOf(err: unknown): string {
+  if (err instanceof Error) return err.message || err.name || 'Unknown error';
+  if (typeof err === 'string') return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
+function statusOf(err: unknown): number | string | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  const direct = (err as { status?: number | string }).status;
+  if (direct !== undefined) return direct;
+  const nested = (err as { response?: { status?: number | string } }).response;
+  return nested?.status;
+}
+
+/** Short tail of a nested provider error's detail — `cause`, `response.data`,
+ *  or `response.body`, whichever is present first, truncated to a snippet. */
+function nestedDetailOf(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  const withExtras = err as {
+    cause?: unknown;
+    response?: { data?: unknown; body?: unknown };
+  };
+
+  const candidate = withExtras.cause ?? withExtras.response?.data ?? withExtras.response?.body;
+  if (candidate === undefined || candidate === null) return undefined;
+
+  const text =
+    typeof candidate === 'string'
+      ? candidate
+      : candidate instanceof Error
+        ? candidate.message
+        : (() => {
+            try {
+              return JSON.stringify(candidate);
+            } catch {
+              return String(candidate);
+            }
+          })();
+
+  const TAIL_LENGTH = 300;
+  return text.length > TAIL_LENGTH ? text.slice(0, TAIL_LENGTH) : text;
+}
+
 /**
  * A case's `last_run_status`/`last_run_summary`, given its most recent run (if
  * any) and whether it is currently flagged as flaked (service-computed).
@@ -135,6 +209,10 @@ export function batchCaseOutcome(
     matched_count: scoreResult?.mustFindMatched ?? 0,
     findings_count: scoreResult?.findingsCount ?? 0,
     cost_usd: run.costUsd,
+    // Persisted at WRITE time by the run-orchestrator's catch sites — read
+    // as-is here, never recomputed (mirrors matched_count/expected_count's
+    // frozen-at-write-time convention above).
+    error_message: run.errorMessage,
   };
 }
 

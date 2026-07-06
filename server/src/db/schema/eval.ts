@@ -69,6 +69,11 @@ export const evalRuns = pgTable(
     // existed have no snapshot to backfill from.
     matchedCount: integer('matched_count'),
     expectedCount: integer('expected_count'),
+    // Concise cause string for a runtime-failed run (per-case catch in
+    // `runOneCase`, or an unexpected `executeBatch` fan-out failure) — makes
+    // a Degraded batch's cause visible in the UI drill-down instead of only
+    // server stderr logs. Null for deterministic passed/failed runs.
+    errorMessage: text('error_message'),
   },
   (t) => ({
     batchIdx: index('eval_runs_batch_id_idx').on(t.batchId),

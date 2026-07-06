@@ -657,8 +657,17 @@ describe('EvalService.runBatch — degraded path', () => {
     expect(insertRunSpy).toHaveBeenCalledTimes(2);
     const errorRunCall = insertRunSpy.mock.calls.find((c) => (c[0] as any).pass === null);
     expect(errorRunCall).toBeDefined();
+    // The per-case runtime failure persists a non-null error_message built
+    // from the thrown error, so the Degraded batch's cause is visible in the
+    // UI drill-down instead of only server stderr logs.
+    expect((errorRunCall![0] as any).errorMessage).toContain('provider timeout');
     const aggArg = updateAggSpy.mock.calls[0]![1];
     expect(aggArg.status).toBe('degraded');
+
+    // The successfully-scored case's insertRun call has NO error_message set.
+    const passedRunCall = insertRunSpy.mock.calls.find((c) => (c[0] as any).pass !== null);
+    expect(passedRunCall).toBeDefined();
+    expect((passedRunCall![0] as any).errorMessage).toBeUndefined();
   });
 
   it('computes aggregate recall/precision from ONLY the successfully-scored case, excluding the errored one (AC-16)', async () => {
@@ -779,6 +788,98 @@ describe('EvalService.runBatch — calibration kind detection', () => {
 
     expect(result.kind).toBe('full');
     expect(insertBatchSpy.mock.calls[0]![0]).toMatchObject({ kind: 'full' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch drill-down — error_message passthrough (Degraded batch cause)
+// ---------------------------------------------------------------------------
+
+describe('EvalService.getBatchDetail', () => {
+  function makeRunRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'run-1',
+      caseId: 'case-1',
+      ranAt: new Date('2026-01-01'),
+      actualOutput: null,
+      pass: null,
+      recall: null,
+      precision: null,
+      citationAccuracy: null,
+      durationMs: 100,
+      costUsd: null,
+      batchId: 'batch-1',
+      matchedCount: null,
+      expectedCount: null,
+      errorMessage: null,
+      ...overrides,
+    };
+  }
+
+  it('surfaces the persisted error_message for an errored run', async () => {
+    const batch = makeBatchRow({ status: 'degraded' });
+    const erroredRun = makeRunRow({ pass: null, errorMessage: 'provider timeout (status 504)' });
+    const caseRow = makeCaseRow({ id: 'case-1' });
+
+    vi.spyOn(EvalRepository.prototype, 'getBatch').mockResolvedValue(batch as any);
+    vi.spyOn(EvalRepository.prototype, 'runsForBatch').mockResolvedValue([erroredRun] as any);
+    vi.spyOn(EvalRepository.prototype, 'getCase').mockResolvedValue(caseRow as any);
+    vi.spyOn(EvalRepository.prototype, 'countSkillOwnedCases').mockResolvedValue(0);
+
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    const detail = await service.getBatchDetail(WS_ID, 'batch-1');
+
+    expect(detail.cases).toHaveLength(1);
+    expect(detail.cases[0]).toMatchObject({
+      status: 'error',
+      error_message: 'provider timeout (status 504)',
+    });
+  });
+
+  it('returns null error_message for a deterministic passed run', async () => {
+    const batch = makeBatchRow({ status: 'clean' });
+    const passedRun = makeRunRow({ pass: true, matchedCount: 1, expectedCount: 1, errorMessage: null });
+    const caseRow = makeCaseRow({ id: 'case-1' });
+
+    vi.spyOn(EvalRepository.prototype, 'getBatch').mockResolvedValue(batch as any);
+    vi.spyOn(EvalRepository.prototype, 'runsForBatch').mockResolvedValue([passedRun] as any);
+    vi.spyOn(EvalRepository.prototype, 'getCase').mockResolvedValue(caseRow as any);
+    vi.spyOn(EvalRepository.prototype, 'countSkillOwnedCases').mockResolvedValue(0);
+
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    const detail = await service.getBatchDetail(WS_ID, 'batch-1');
+
+    expect(detail.cases).toHaveLength(1);
+    expect(detail.cases[0]).toMatchObject({
+      status: 'passed',
+      error_message: null,
+    });
+  });
+
+  it('returns null error_message for a deterministic failed run', async () => {
+    const batch = makeBatchRow({ status: 'clean' });
+    const failedRun = makeRunRow({ pass: false, matchedCount: 0, expectedCount: 1, errorMessage: null });
+    const caseRow = makeCaseRow({ id: 'case-1' });
+
+    vi.spyOn(EvalRepository.prototype, 'getBatch').mockResolvedValue(batch as any);
+    vi.spyOn(EvalRepository.prototype, 'runsForBatch').mockResolvedValue([failedRun] as any);
+    vi.spyOn(EvalRepository.prototype, 'getCase').mockResolvedValue(caseRow as any);
+    vi.spyOn(EvalRepository.prototype, 'countSkillOwnedCases').mockResolvedValue(0);
+
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    const detail = await service.getBatchDetail(WS_ID, 'batch-1');
+
+    expect(detail.cases).toHaveLength(1);
+    expect(detail.cases[0]).toMatchObject({
+      status: 'failed',
+      error_message: null,
+    });
   });
 });
 

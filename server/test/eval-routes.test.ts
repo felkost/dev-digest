@@ -405,6 +405,7 @@ describe('POST /findings/:id/evals/case', () => {
       .fn()
       .mockResolvedValue([{ path: 'src/config.ts', patch: '@@ -10,3 +10,4 @@\n   port: 3000,\n+  stripeKey: "x",\n   redisUrl: x,' }]);
 
+    vi.spyOn(EvalRepository.prototype, 'findCaseBySourceFindingId').mockResolvedValue(null);
     vi.spyOn(EvalRepository.prototype, 'insertCase').mockImplementation(async (data: any) => ({
       id: 'new-case',
       ...data,
@@ -437,6 +438,8 @@ describe('POST /findings/:id/evals/case', () => {
       review: { id: REVIEW_ID, agentId: AGENT_ID, prId: PR_ID },
       pull: { id: PR_ID, workspaceId: OTHER_WS_ID, number: 1 },
     });
+
+    vi.spyOn(EvalRepository.prototype, 'findCaseBySourceFindingId').mockResolvedValue(null);
 
     const app = await buildEvalApp({ reviewRepo: { findingContext } });
     const res = await app.inject({ method: 'POST', url: `/findings/${FINDING_ID}/evals/case` });

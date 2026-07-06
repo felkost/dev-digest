@@ -15,7 +15,7 @@ import {
   computeCitationAccuracy,
   scoreCase,
 } from './scoring.js';
-import { expectationsFromJson } from './helpers.js';
+import { expectationsFromJson, formatErrorMessage } from './helpers.js';
 
 type EvalCaseRow = typeof t.evalCases.$inferSelect;
 type EvalBatchRow = typeof t.evalBatches.$inferSelect;
@@ -164,8 +164,31 @@ export class EvalRunOrchestrator {
     let anyError = false;
 
     await this.runWithConcurrencyCap(targetCases, CONCURRENCY, async (caseRow) => {
-      const outcome = await this.runOneCase(agent, skillBodies, caseRow, batch.id).catch((err: unknown) => {
+      const outcome = await this.runOneCase(agent, skillBodies, caseRow, batch.id).catch(async (err: unknown) => {
         log?.error({ err, caseId: caseRow.id, batchId: batch.id }, 'eval: unexpected case-run failure');
+        // `runOneCase` itself never throws (its own try/catch always resolves
+        // with a CaseRunOutcome) — reaching here means the failure happened
+        // BEFORE/AROUND its own persistence (e.g. a synchronous throw before
+        // the try block), so no eval_runs row exists for this case yet.
+        // Persist one now so the batch's degraded cause is still visible in
+        // the UI drill-down, not just in this log line.
+        await this.repo
+          .insertRun({
+            caseId: caseRow.id,
+            batchId: batch.id,
+            actualOutput: null,
+            pass: null,
+            recall: null,
+            precision: null,
+            citationAccuracy: null,
+            durationMs: 0,
+            costUsd: null,
+            matchedCount: null,
+            expectedCount: null,
+            errorMessage: formatErrorMessage(err),
+          } satisfies EvalRunInsert)
+          .catch(() => undefined);
+
         return {
           caseRow,
           status: 'error' as const,
@@ -321,6 +344,7 @@ export class EvalRunOrchestrator {
           costUsd: null,
           matchedCount: null,
           expectedCount: null,
+          errorMessage: formatErrorMessage(err),
         } satisfies EvalRunInsert)
         .catch(() => undefined);
 

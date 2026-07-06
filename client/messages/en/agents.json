@@ -203,7 +203,8 @@
         "expected": "Expected",
         "matched": "Matched",
         "findings": "Findings",
-        "cost": "Cost"
+        "cost": "Cost",
+        "errorLabel": "Error:"
       }
     },
     "trend": {

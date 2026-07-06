@@ -316,4 +316,57 @@ describe("EvalsTab", () => {
 
     expect(screen.getByRole("button", { name: "Clear history" })).toBeDisabled();
   });
+
+  it("shows the per-case error message in the batch drill-down for an errored outcome, with full text in the title tooltip", async () => {
+    cases = [makeCase()];
+    batches = [
+      { id: "b1", agent_id: "ag1", kind: "full", status: "degraded", agent_snapshot: { display: { model: "gpt-4.1" } }, recall: 0.8, precision: 0.9, citation_accuracy: 0.95, cost_usd: 0.02, ran_at: "2026-07-02T00:00:00.000Z" },
+    ];
+    const errorMessage = "ProviderTimeoutError: upstream request to anthropic timed out after 30000ms";
+    batchDetail = {
+      id: "b1",
+      agent_id: "ag1",
+      kind: "full",
+      status: "degraded",
+      agent_snapshot: {},
+      recall: 0.8,
+      precision: 0.9,
+      citation_accuracy: 0.95,
+      cost_usd: 0.02,
+      ran_at: "2026-07-02T00:00:00.000Z",
+      excluded_skill_owned_count: 0,
+      cases: [
+        {
+          case_id: "case1",
+          case_name: "Case 1",
+          status: "error",
+          expected_count: 1,
+          matched_count: 0,
+          findings_count: 0,
+          cost_usd: null,
+          error_message: errorMessage,
+        },
+        {
+          case_id: "case2",
+          case_name: "Case 2",
+          status: "passed",
+          expected_count: 1,
+          matched_count: 1,
+          findings_count: 1,
+          cost_usd: 0.01,
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderWithIntl(<EvalsTab agent={AGENT} />);
+
+    await user.click(screen.getByText(new Date("2026-07-02T00:00:00.000Z").toLocaleString()));
+
+    const messageEl = screen.getByTitle(errorMessage);
+    expect(messageEl).toBeInTheDocument();
+    expect(messageEl).toHaveTextContent(errorMessage);
+
+    // Passed row is unaffected — no stray error text attached to it.
+    expect(screen.queryByText(/Case 2.*ProviderTimeoutError/)).not.toBeInTheDocument();
+  });
 });

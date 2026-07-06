@@ -149,7 +149,14 @@ export function BatchHistoryTable({ agentId, batches, highlightBatchId }: BatchH
                             <tbody>
                               {detail.data.cases.map((c) => (
                                 <tr key={c.case_id}>
-                                  <td style={s.td}>{c.case_name}</td>
+                                  <td style={s.td}>
+                                    {c.case_name}
+                                    {c.status === "error" && c.error_message && (
+                                      <div style={s.caseErrorMessage} title={c.error_message}>
+                                        {t("evals.history.drilldown.errorLabel")} {c.error_message}
+                                      </div>
+                                    )}
+                                  </td>
                                   <td style={s.td}>{t(`evals.status.${c.status}`)}</td>
                                   <td style={s.td}>{c.expected_count}</td>
                                   <td style={s.td}>{c.matched_count}</td>

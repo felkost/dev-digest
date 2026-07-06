@@ -317,6 +317,43 @@ describe('EvalRepository.insertRun', () => {
     const repo = new EvalRepository(db);
     await expect(repo.insertRun({ caseId: CASE_ID, batchId: null })).rejects.toThrow();
   });
+
+  it('passes an errored run\'s error_message through untouched', async () => {
+    const values = vi.fn();
+    const erroredRow = { ...RUN_ROW, pass: null, errorMessage: 'provider timeout (status 504)' };
+    const db = {
+      insert: () => ({
+        values: (v: unknown) => {
+          values(v);
+          return { returning: () => Promise.resolve([erroredRow]) };
+        },
+      }),
+    } as unknown as Db;
+    const repo = new EvalRepository(db);
+    const row = await repo.insertRun({
+      caseId: CASE_ID,
+      batchId: BATCH_ID,
+      pass: null,
+      errorMessage: 'provider timeout (status 504)',
+    });
+    expect(row.errorMessage).toBe('provider timeout (status 504)');
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({ errorMessage: 'provider timeout (status 504)' }));
+  });
+
+  it('omits error_message (defaults to null) for a deterministic passed/failed run', async () => {
+    const values = vi.fn();
+    const db = {
+      insert: () => ({
+        values: (v: unknown) => {
+          values(v);
+          return { returning: () => Promise.resolve([RUN_ROW]) };
+        },
+      }),
+    } as unknown as Db;
+    const repo = new EvalRepository(db);
+    await repo.insertRun({ caseId: CASE_ID, batchId: BATCH_ID, pass: true });
+    expect(values).toHaveBeenCalledWith(expect.not.objectContaining({ errorMessage: expect.anything() }));
+  });
 });
 
 describe('EvalRepository.runsForBatch', () => {
