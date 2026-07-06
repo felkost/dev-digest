@@ -8,38 +8,59 @@
 
 ## TL;DR стану
 
-- Фіча **реалізована → code-review (29+2 CONFIRMED) → фікс-хвиля застосована → верифіковано**.
-- Гейти зелені: server `verify:l06` **124/124**, client typecheck чисто, client vitest **191** (190 + новий регресійний тест CaseEditor).
-- Plan-verifier: **54 ✅ / 0 ⚠️ / 0 ❌**.
-- **Усе НЕ закоммічено**, гілка `feat/lesson_06`. Коміт робить користувач.
+- Фіча **реалізована → code-review (29+2 CONFIRMED) → фікс-хвиля → друга сесія UX/правок (2026-07-06 веч.)**.
+- **Гілка `feat/lesson_06`, робоче дерево ЧИСТЕ — усе закоммічено** (HEAD `82383ca`). Коміт робить **лише користувач**.
+- Гейти зелені на таргетованих прогонах цієї сесії: server+client typecheck; `eval-routes` **30/30**, `eval-{service,scoring,contracts}`; `EvalsTab` **16/16**; `FindingCard` **9/9**. Прямі `architecture-reviewer` евали **4/4**.
+- ⚠️ **Перед merge:** прогнати повний `verify:l06` + client `vitest` (числа зсунулись від нових тестів) і **re-run CI** (підтвердити workflow-евал після фіксу субагентної моделі).
+- Деталі другої сесії — секція **«Сесія 2»** нижче; відкриті питання — там же + «🐞 Журнал».
 
 ---
 
 ## 📋 Промпт для нової сесії (скопіюй увесь блок)
 
 ```
-Продовжуємо/супроводжуємо L06 Eval Pipeline (гілка feat/lesson_06, усе некоммічено).
+Продовжуємо/супроводжуємо L06 Eval Pipeline (гілка feat/lesson_06; дерево ЧИСТЕ, усе закоммічено до HEAD 82383ca).
 
-Стан: фічу реалізовано, code-review пройдено, фікс-хвилю застосовано, верифіковано зеленим
-(server verify:l06 124/124, client typecheck + vitest зелені, plan-verifier 54✅/0⚠️/0❌).
+Стан: фіча реалізована + code-review + фікс-хвиля + друга сесія UX/правок. Гейти зелені на
+таргетованих прогонах (server+client typecheck; eval-routes 30/30; EvalsTab 16/16; FindingCard 9/9;
+architecture-reviewer евали 4/4). Перед merge варто прогнати повний verify:l06 + client vitest і re-run CI.
 
 Прочитай ПЕРШИМИ (самодостатні):
-1. docs/plans/2026-07-06-l06-eval-handoff.md — цей файл: стан, індекс, журнал багів.
-2. docs/plans/2026-07-05-eval-pipeline.review.md — усі знахідки рев'ю + як їх пофіксили.
+1. docs/plans/2026-07-06-l06-eval-handoff.md — цей файл: стан, індекс, журнал багів, лог «Сесія 2», follow-ups.
+2. docs/plans/2026-07-05-eval-pipeline.review.md — знахідки рев'ю + фікси.
 3. docs/plans/2026-07-05-eval-pipeline.md — план (Implementation Steps / AC / Testing Plan).
 4. docs/feature-requirements/2026-07-05-eval-pipeline.md — специфікація (39 EARS AC).
 
-Код: server/src/modules/eval/**, server/src/db/schema/eval.ts, migrations 0016 & 0018,
-контракти server|client/src/vendor/shared/contracts/eval-batch.ts (byte-identical дзеркала),
-client/src/lib/hooks/eval.ts, client EvalsTab: client/src/app/agents/[id]/_components/
-AgentEditor/_components/EvalsTab/**, FindingCard: .../pulls/[number]/_components/FindingCard/.
+Код: server/src/modules/eval/**, server/src/adapters/llm/anthropic.ts (temperature-retry) + pricing.ts,
+server/src/db/{schema/eval.ts, seed.ts}, migrations 0016/0018(eval_run_counts)/0019(eval_run_error), контракти
+server|client/src/vendor/shared/contracts/{eval-batch.ts, findings.ts} (byte-identical дзеркала; expectation має category),
+reviewer-core/src/llm/structured.ts ($ref-dereference для Gemini), client/src/lib/hooks/eval.ts,
+client EvalsTab: client/src/app/agents/[id]/_components/AgentEditor/_components/
+EvalsTab/** (CaseRow, EvalMetrics, TrendChart, BatchHistoryTable, CaseEditor),
+FindingCard: .../pulls/[number]/_components/FindingCard/, harness: evals/proxy/litellm.config.yaml + evals/**.
 
-insights: server/insights.md + client/insights.md (гуглити по "eval").
+КЛЮЧОВІ ФАКТИ/РІШЕННЯ (НЕ переграй):
+- Моделі агентів: РОБОЧІ (Clean із cost) = claude-haiku-4-5-20251001 / google/gemini-2.5-flash /
+  deepseek/deepseek-v3.1-terminus / gpt-5-2025-08-07. fable-5/sonnet-5 native НЕ працюють — Anthropic
+  forced-tool-use + always-on/adaptive thinking + пінований @anthropic-ai/sdk 0.33 → модель віддає ПОРОЖНІЙ
+  structured-output (усі 4 поля Review Required). СВІДОМО відкладено (рішення користувача). Фікс, якщо треба:
+  мігрувати AnthropicProvider.completeStructured з forced-tool-use на output_config.format + bump SDK
+  (shared-адаптер, впливає на ВСІ Anthropic-рев'ю, поза L06).
+- Review.verdict = .default('comment') — НЕ став .nullable(): дефолт дає omit-grace (haiku/Anthropic часто
+  омітять verdict); .nullable() робить пропуск hard parse-error (регресія haiku 2026-07-06, відкочено).
+  Gemini-фікс живе в reviewer-core/src/llm/structured.ts (dereference $ref), НЕ в findings.ts.
+- Чому Degraded видно в UI: eval_runs.error_message (міграція 0019) + drill-down BatchHistoryTable
+  (клік по батчу → per-case Error-рядок, повний текст у title). stderr-логи не потрібні.
+- contracts/eval-ci.ts (AgentManifest/Provider/CiFailOn) — трек Export-to-CI, НЕ L06; окремий коміт.
+
+insights: server/insights.md + client/insights.md + reviewer-core/insights.md (гуглити по "eval"/"temperature").
 
 Правила: коміт робить лише користувач (давай commit messages, не комінь сам);
 не запускай своїх dev-серверів — у користувача свої :3001/:3000; питання став українською.
+Операційне: рестарт :3001 після pull; re-seed (delete eval_runs/eval_batches/eval_cases → pnpm db:seed)
+якщо seed-дані змінились (onConflictDoNothing не перезаписує наявні кейси).
 
-Якщо є новий баг — він описаний у секції "🐞 Журнал нових багів" цього handoff-файлу; візьми звідти.
+Відкриті питання й нові баги — секції "🐞 Журнал нових багів" + "Сесія 2 / follow-ups" цього файлу.
 ```
 
 ---
@@ -64,6 +85,28 @@ insights: server/insights.md + client/insights.md (гуглити по "eval").
 - UI-баг Select-типу в CaseEditor — знято `<label>`-обгортку (див. журнал нижче, вирішено).
 
 **Свідомо НЕ робили:** #14 strategy, S1 (нешкідливий snapshot-drift 0016/0017), composite index (deferred).
+
+---
+
+## Сесія 2 (2026-07-06, друга половина) — зроблено + follow-ups
+
+**Фікси (усе закоммічено):**
+- **CI-red виправлено:** `eval-routes.test.ts` — 2 тести `POST /findings/:id/evals/case` давали 500 (незамокований `findCaseBySourceFindingId` #12, який `createCaseFromFinding` кличе першим). Замокано → **30/30**. Це реальний баг у **закоміченому** тесті (падав на чистому checkout `dd5cde3`), не робоче-дерево-артефакт.
+- **Workflow-евал:** субагент `architecture-reviewer` брав frontmatter `model: sonnet` → SDK резолвив у голий `claude-sonnet-5` → проксі слав `openrouter/claude-sonnet-5` (невалідний) → субагент падав, оркестратор не читав api-contracts.md. Фікс у `evals/proxy/litellm.config.yaml`: exact-роути `sonnet`/`claude-sonnet-5` → `openrouter/anthropic/claude-haiku-4.5` **перед** wildcard (усі прод-піни агентів лишились). **Треба re-run CI.**
+- **Drill-down FINDINGS завжди 0:** `getBatchDetail` хардкодив `findingsCount: 0` (не серед persisted-лічильників). Тепер рахує з `run.actualOutput` (read-time, ретроактивно — після рестарту :3001 видно на існуючих батчах).
+- **B6 Anthropic `temperature`-deprecation** (fable-5/sonnet-5 → Degraded): `anthropic.ts` retry без `temperature` при 400 + pricing — див. журнал B6.
+- **rubric розфлап:** `architecture-reviewer.cases.ts` «ends with»→«emits» → прямі евали **4/4**.
+
+**UX (усе закоммічено):**
+- **CaseRow під зразок:** моно-назва + бейдж `MUST FIND`/`MUST NOT FLAG` + правий чип `severity · category` / `assert empty`. Додано `category` у `Expectation`-контракт (обидва дзеркала, additive/nullish), `createCaseFromFinding` копіює `finding.category`, seed оновлено (bug/perf/security). **Потрібен re-seed** для seed-кейсів; наявні user-кейси не мають category заднім числом (отримають при пере-створенні з finding).
+- **TrendChart:** прибрано дубль-таблицю під графіком; звʼязано з Batch History (hover точки → підсвітка+скрол відповідного рядка); легенда кольорів (значення показуються на hover); дата в tooltip. `LineChart` отримав опційний `onActiveIndexChange`.
+- **EvalMetrics** — нова інфографіка зверху вкладки (recall/precision/citation + дельти vs попередній full-батч, `traces passed` = passed/total останнього батча) + заголовок «Eval cases N/M passing». «View full dashboard →» — **розміщено, але неактивно** (placeholder).
+
+**Follow-ups (не блокери):**
+- **CaseEditor-форма** не має полів severity/category → **ручні** кейси показують бейдж без чипа (severity/category беруться з finding, не з форми). Додати ці поля, якщо треба чип і для hand-authored.
+- **«TRACES PASSED»** рахує лише останній батч; для «по всій історії» — потрібен серверний агрегат (sum passed runs / total runs).
+- **«View full dashboard»** inert — реалізувати сторінку/лінк, тоді активувати.
+- Re-run повного **CI** (workflow-евал + verify:l06) для підтвердження зеленого.
 
 ---
 
@@ -92,6 +135,8 @@ insights: server/insights.md + client/insights.md (гуглити по "eval").
 1. **Міграції застосовані** (0016 + 0018) до dev-БД — повторно НЕ треба.
 2. **Seed виправлений і пересіяний** (12/20/14/8). Пам'ятай: seed кейсів = `onConflictDoNothing`,
    тож зміна seed-даних вимагає спершу `delete from eval_runs; delete from eval_batches; delete from eval_cases`, тоді `pnpm db:seed`.
+   **Сесія 2:** seed отримав `category` (bug/perf/security) → щоб чип у CaseRow показав категорію на seed-кейсах, потрібен **пере-сід** за цією ж процедурою.
+2b. **Рестарт :3001 після Сесії 2** обовʼязковий — контракт (`Expectation.category`), drill-down FINDINGS-фікс і Anthropic `temperature`-retry живуть у серверному коді.
 3. **Рестарт API :3001** обов'язковий після pull/зміни коду — Fastify реєструє роути на старті.
 4. Перший справжній прогін — кнопка **Run all evals** (реальний LLM-виклик, коштує $).
 
