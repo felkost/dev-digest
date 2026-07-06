@@ -64,15 +64,15 @@ export type Finding = z.infer<typeof Finding>;
 
 /** Review — the consolidated structured output of a single agent run. */
 export const Review = z.object({
-  // `.nullable()` (not `.optional()`) — required-but-nullable is what OpenAI's
-  // strict structured-output mode needs (a `.optional()`-only field without
-  // `.nullable()` triggers an SDK warning, and Gemini/OpenRouter reject
-  // schemas built from it). Some smaller models (e.g. haiku) omit verdict or
-  // emit null; the actual GitHub review event is computed deterministically
-  // from findings (see `output/to-review.ts`), so this field is
-  // stored/displayed only — it never drives the review action, and a null
-  // verdict is always safe downstream.
-  verdict: Verdict.nullable(),
+  // Some smaller models (e.g. haiku) OMIT verdict from structured output;
+  // `.default('comment')` gracefully backfills a neutral value so parsing
+  // doesn't fail. The GitHub review event is computed deterministically from
+  // findings (see `output/to-review.ts`), so this field is stored/displayed
+  // only — it never drives the review action. (Do NOT change to `.nullable()`:
+  // that drops the default and turns verdict omission into a hard parse error —
+  // regressed haiku 2026-07-06. The Gemini `$ref` incompatibility was fixed in
+  // reviewer-core `structured.ts` via dereferencing, not here.)
+  verdict: Verdict.default('comment'),
   summary: z.string(),
   score: z
     .number()

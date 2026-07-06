@@ -69,13 +69,14 @@ describe('toJsonSchema — Gemini-safe fully self-contained schema', () => {
     );
   });
 
-  it('verdict is required-but-nullable (no bare .optional() SDK warning)', () => {
-    const props = schema['properties'] as Record<string, unknown>;
-    const verdict = props['verdict'] as Record<string, unknown>;
-    // Verdict.nullable() on an enum compiles to an anyOf [enum, null] branch.
-    const anyOf = verdict['anyOf'] as Record<string, unknown>[] | undefined;
-    const hasNullBranch = anyOf?.some((b) => b['type'] === 'null') ?? verdict['nullable'] === true;
-    expect(hasNullBranch).toBe(true);
-    expect(schema['required']).toContain('verdict');
+  it('backfills omitted verdict via .default (grace for models that omit it)', () => {
+    // Some models (e.g. haiku, and Anthropic forced-tool-use paths) omit
+    // `verdict` from structured output. `Verdict.default('comment')` backfills
+    // it at Zod-parse time so parsing does NOT fail. Regression guard against
+    // reverting to `.nullable()`, which drops the default and turns omission
+    // into a hard parse error (regressed haiku 2026-07-06).
+    const parsed = Review.safeParse({ summary: 's', score: 90, findings: [] });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.verdict).toBe('comment');
   });
 });

@@ -23,6 +23,9 @@ export const Expectation = z.object({
   line_start: z.number().int(),
   line_end: z.number().int(),
   severity: z.string().nullish(),
+  // Finding category (security/bug/perf/…) — display metadata only, copied from
+  // the source finding; never read by scoring (AC-24). Shown in the case-row chip.
+  category: z.string().nullish(),
   kind: z.string().nullish(),
 });
 export type Expectation = z.infer<typeof Expectation>;

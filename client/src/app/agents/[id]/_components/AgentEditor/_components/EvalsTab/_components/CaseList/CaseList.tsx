@@ -62,7 +62,6 @@ export function CaseList({ cases, runningCaseId, runDisabled, onRunCase, onEditC
           evalCase={evalCase}
           statusLabel={t(`evals.status.${evalCase.last_run_status}`)}
           subtitle={subtitleFor(evalCase, t)}
-          expectationBadgeLabel={t("evals.expectation.countBadge", { count: evalCase.expected_output.length })}
           runLabel={t("evals.case.run")}
           editLabel={t("evals.case.edit")}
           deleteLabel={t("evals.case.delete")}

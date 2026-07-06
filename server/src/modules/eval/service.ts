@@ -115,6 +115,7 @@ export class EvalService {
       line_start: finding.startLine,
       line_end: finding.endLine,
       severity: finding.severity,
+      category: finding.category,
       kind: finding.kind,
     };
 

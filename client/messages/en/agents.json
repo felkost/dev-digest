@@ -120,6 +120,18 @@
   },
   "evals": {
     "title": "Evals",
+    "casesTitle": "Eval cases",
+    "passing": "{passed} / {total} passing",
+    "metrics": {
+      "title": "Eval metrics",
+      "viewDashboard": "View full dashboard",
+      "dashboardSoon": "Full dashboard coming soon",
+      "recall": "Recall",
+      "precision": "Precision",
+      "citationAccuracy": "Citation accuracy",
+      "tracesPassed": "Traces passed",
+      "pt": "pt"
+    },
     "runAll": "Run all evals",
     "newCase": "+ New eval case",
     "excludedSkillOwned": "{count} skill-owned eval case(s) are not shown here — manage them from the owning skill.",
@@ -141,7 +153,8 @@
     "expectation": {
       "must_find": "must find",
       "must_not_flag": "must not flag",
-      "countBadge": "{count} expectation(s)"
+      "countBadge": "{count} expectation(s)",
+      "assertEmpty": "assert empty"
     },
     "case": {
       "run": "Run",

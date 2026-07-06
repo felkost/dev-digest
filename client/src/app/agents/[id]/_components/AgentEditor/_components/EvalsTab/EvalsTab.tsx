@@ -13,6 +13,7 @@ import {
   useEvalBatchHistory,
   useEvalTrend,
   useEvalKpiDelta,
+  useEvalBatchDetail,
   useRunEvalBatch,
   useDeleteEvalCase,
   useEvalRunCompletion,
@@ -23,6 +24,7 @@ import { CaseEditor } from "./_components/CaseEditor/CaseEditor";
 import { BatchHistoryTable } from "./_components/BatchHistoryTable/BatchHistoryTable";
 import { TrendChart } from "./_components/TrendChart/TrendChart";
 import { KpiDeltaStrip } from "./_components/KpiDeltaStrip/KpiDeltaStrip";
+import { EvalMetrics } from "./_components/EvalMetrics/EvalMetrics";
 import { s } from "./styles";
 
 interface EvalsTabProps {
@@ -38,6 +40,10 @@ export function EvalsTab({ agent }: EvalsTabProps) {
   const runBatch = useRunEvalBatch(agent.id);
   const deleteCase = useDeleteEvalCase(agent.id);
   const clearHistory = useClearEvalHistory(agent.id);
+  // Latest sealed full batch — feeds the "traces passed" tile of the metrics
+  // infographic (passed vs total case-runs in that batch).
+  const latestFullBatchId = (batches ?? []).find((b) => b.kind === "full" && b.status != null)?.id ?? null;
+  const latestBatchDetail = useEvalBatchDetail(agent.id, latestFullBatchId);
 
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editingCase, setEditingCase] = React.useState<EvalCaseListItem | null>(null);
@@ -61,6 +67,12 @@ export function EvalsTab({ agent }: EvalsTabProps) {
 
   const cases = caseData?.cases ?? [];
   const excludedCount = caseData?.excluded_skill_owned_count ?? 0;
+  const passedCaseCount = cases.filter((c) => c.last_run_status === "passed").length;
+  const trend = trendPoints ?? [];
+  const latestPoint = trend.length ? trend[trend.length - 1]! : null;
+  const detailCases = latestBatchDetail.data?.cases ?? [];
+  const tracesPassed = latestBatchDetail.data ? detailCases.filter((c) => c.status === "passed").length : null;
+  const tracesTotal = latestBatchDetail.data ? detailCases.length : null;
 
   const openNewCase = () => {
     setEditingCase(null);
@@ -124,16 +136,22 @@ export function EvalsTab({ agent }: EvalsTabProps) {
 
   return (
     <div style={s.wrap}>
+      <EvalMetrics
+        recall={latestPoint?.recall ?? null}
+        precision={latestPoint?.precision ?? null}
+        citation={latestPoint?.citation_accuracy ?? null}
+        delta={kpiDelta}
+        tracesPassed={tracesPassed}
+        tracesTotal={tracesTotal}
+      />
       <div style={s.headerRow}>
         <div style={s.titleRow}>
-          <h2 style={s.title}>{t("evals.title")}</h2>
+          <h2 style={s.title}>{t("evals.casesTitle")}</h2>
+          <span style={s.passingBadge}>{t("evals.passing", { passed: passedCaseCount, total: cases.length })}</span>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <Button kind="secondary" size="sm" onClick={openNewCase}>
-            {t("evals.newCase")}
-          </Button>
           <Button
-            kind="primary"
+            kind="secondary"
             size="sm"
             icon="Play"
             onClick={runAll}
@@ -141,6 +159,9 @@ export function EvalsTab({ agent }: EvalsTabProps) {
             loading={runBatch.isPending && !runningCaseId}
           >
             {t("evals.runAll")}
+          </Button>
+          <Button kind="primary" size="sm" onClick={openNewCase}>
+            {t("evals.newCase")}
           </Button>
         </div>
       </div>

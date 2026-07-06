@@ -19,6 +19,24 @@ const DEFAULT_MAX_TOKENS = 4096;
 // 8192 is the safe ceiling for all current Anthropic models (haiku/sonnet/opus).
 const STRUCTURED_MAX_TOKENS = 8192;
 
+/**
+ * Detect Anthropic's "temperature is deprecated for this model" 400 error.
+ * Newer models (e.g. claude-sonnet-5, claude-fable-5) reject the `temperature`
+ * param entirely; older models (e.g. claude-haiku-4-5) still accept it. We
+ * detect this from the error shape rather than hardcoding a model list so the
+ * adapter self-heals for any future model that deprecates the param.
+ */
+function isTemperatureDeprecatedError(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  if (status !== 400) return false;
+  const body = (err as { error?: unknown })?.error;
+  const message = (err as { message?: unknown })?.message;
+  const haystack = `${typeof message === 'string' ? message : ''} ${
+    body ? JSON.stringify(body) : ''
+  }`;
+  return /temperature/i.test(haystack);
+}
+
 /** Anthropic has no embeddings API; embeddings come from the OpenAI Embedder. */
 function splitSystem(messages: ChatMessage[]): {
   system: string;
@@ -49,6 +67,25 @@ export class AnthropicProvider implements LLMProvider {
     this.client = new Anthropic({ apiKey });
   }
 
+  /**
+   * Wraps `client.messages.create` with a one-shot self-heal retry: if the
+   * API rejects `temperature` as deprecated for the requested model (newer
+   * models like claude-sonnet-5/claude-fable-5 no longer accept it, while
+   * claude-haiku-4-5 still does), strip the param and retry once. Any other
+   * error — or a second failure — is rethrown unchanged.
+   */
+  private async createMessage(
+    params: Anthropic.MessageCreateParamsNonStreaming,
+  ): Promise<Anthropic.Message> {
+    try {
+      return await this.client.messages.create(params);
+    } catch (err) {
+      if (!isTemperatureDeprecatedError(err)) throw err;
+      const { temperature: _temperature, ...retryParams } = params;
+      return await this.client.messages.create(retryParams);
+    }
+  }
+
   async listModels(): Promise<ModelInfo[]> {
     return withRetry(async () => {
       // SDK 0.33 exposes models.list()
@@ -67,7 +104,7 @@ export class AnthropicProvider implements LLMProvider {
 
   private async doComplete(req: CompletionRequest): Promise<CompletionResult> {
     const { system, rest } = splitSystem(req.messages);
-    const res = await this.client.messages.create({
+    const res = await this.createMessage({
       model: req.model,
       system: system || undefined,
       messages: rest,
@@ -103,7 +140,7 @@ export class AnthropicProvider implements LLMProvider {
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
       const res = await withRetry(() =>
         withTimeout(
-          this.client.messages.create({
+          this.createMessage({
             model: req.model,
             system: system || undefined,
             messages,

@@ -815,6 +815,7 @@ If this PR removes or renames something that was never marked deprecated, flag i
             line_start: 12,
             line_end: 12,
             severity: 'CRITICAL',
+            category: 'bug',
             kind: 'finding',
           },
         ],
@@ -846,6 +847,7 @@ If this PR removes or renames something that was never marked deprecated, flag i
             line_start: 20,
             line_end: 22,
             severity: 'WARNING',
+            category: 'perf',
             kind: 'finding',
           },
         ],
@@ -907,6 +909,7 @@ If this PR removes or renames something that was never marked deprecated, flag i
             line_start: 8,
             line_end: 8,
             severity: 'CRITICAL',
+            category: 'security',
             kind: 'finding',
           },
           {

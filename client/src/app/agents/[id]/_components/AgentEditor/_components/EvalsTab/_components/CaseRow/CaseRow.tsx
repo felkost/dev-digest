@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useTranslations } from "next-intl";
 import { Icon, Badge, type IconName } from "@devdigest/ui";
 import type { EvalCaseListItem } from "@devdigest/shared";
 import { s } from "../../styles";
@@ -18,7 +19,6 @@ interface CaseRowProps {
   evalCase: EvalCaseListItem;
   statusLabel: string;
   subtitle: string | null;
-  expectationBadgeLabel: string;
   runLabel: string;
   editLabel: string;
   deleteLabel: string;
@@ -35,7 +35,6 @@ export function CaseRow({
   evalCase,
   statusLabel,
   subtitle,
-  expectationBadgeLabel,
   runLabel,
   editLabel,
   deleteLabel,
@@ -45,17 +44,34 @@ export function CaseRow({
   isRunning,
   runDisabled,
 }: CaseRowProps) {
+  const t = useTranslations("agents");
   const meta = STATUS_META[evalCase.last_run_status];
   const StatusIcon = Icon[meta.icon];
+
+  // Row badge + right-side chip derive from the expectations (display metadata
+  // only — never scored). Prefer a must_find for the badge/chip; a
+  // must_not_flag-only case reads "assert empty".
+  const exps = evalCase.expected_output;
+  const primary = exps.find((e) => e.type === "must_find") ?? exps[0];
+  const typeLabel = primary ? t(`evals.expectation.${primary.type}`).toUpperCase() : null;
+  const typeColor = primary?.type === "must_find" ? "var(--accent)" : "var(--text-muted)";
+  const metaChip = !primary
+    ? null
+    : primary.type === "must_not_flag"
+      ? t("evals.expectation.assertEmpty")
+      : [primary.severity, primary.category].filter(Boolean).join(" · ") || null;
 
   return (
     <div style={s.row} data-testid={`eval-case-row-${evalCase.id}`}>
       <StatusIcon size={16} style={{ color: meta.color, flexShrink: 0 }} aria-label={statusLabel} />
       <div style={s.rowMain}>
-        <div style={s.rowName}>{evalCase.name}</div>
+        <div style={{ ...s.rowName, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)" }}>{evalCase.name}</span>
+          {typeLabel && <Badge color={typeColor}>{typeLabel}</Badge>}
+        </div>
         {subtitle && <div style={s.rowSubtitle}>{subtitle}</div>}
       </div>
-      <Badge color="var(--text-muted)">{expectationBadgeLabel}</Badge>
+      {metaChip && <span style={s.metaChip}>{metaChip}</span>}
       <div style={s.rowActions}>
         <button type="button" style={s.iconAction} title={runLabel} aria-label={runLabel} onClick={onRun} disabled={isRunning || runDisabled}>
           <Icon.Play size={14} />
