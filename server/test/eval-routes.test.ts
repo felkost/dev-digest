@@ -748,6 +748,44 @@ describe('GET /agents/:id/evals/batches', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// DELETE /agents/:id/evals/batches — clear ALL run history for this agent
+// ---------------------------------------------------------------------------
+
+describe('DELETE /agents/:id/evals/batches', () => {
+  it('returns 200 with deleted_batches/deleted_runs counts', async () => {
+    const clearHistorySpy = vi
+      .spyOn(EvalRepository.prototype, 'clearHistory')
+      .mockResolvedValue({ deletedBatches: 3, deletedRuns: 7 });
+
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'DELETE', url: `/agents/${AGENT_ID}/evals/batches` });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ deleted_batches: 3, deleted_runs: 7 });
+    expect(clearHistorySpy).toHaveBeenCalledWith(WS_ID, AGENT_ID);
+  });
+
+  it('returns 404 for an unknown agent', async () => {
+    const clearHistorySpy = vi.spyOn(EvalRepository.prototype, 'clearHistory');
+
+    const app = await buildEvalApp({ agentsRepo: { getById: vi.fn().mockResolvedValue(undefined) } });
+    const res = await app.inject({ method: 'DELETE', url: `/agents/${AGENT_ID}/evals/batches` });
+    await app.close();
+
+    expect(res.statusCode).toBe(404);
+    expect(clearHistorySpy).not.toHaveBeenCalled();
+  });
+
+  it('returns 422 for a non-UUID agent id', async () => {
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'DELETE', url: `/agents/${INVALID_ID}/evals/batches` });
+    await app.close();
+    expect(res.statusCode).toBe(422);
+  });
+});
+
 describe('GET /agents/:id/evals/batches/:batchId', () => {
   it('returns 200 with the batch drill-down (AC-33)', async () => {
     vi.spyOn(EvalRepository.prototype, 'getBatch').mockResolvedValue(makeBatchRow() as any);

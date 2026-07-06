@@ -10,6 +10,8 @@
  * `test/onboarding-repository.test.ts`. No Postgres, no Docker.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { Column } from 'drizzle-orm';
+import type { SQL, SQLChunk } from 'drizzle-orm';
 import { EvalRepository } from '../src/modules/eval/repository.js';
 import type { Db } from '../src/db/client.js';
 
@@ -442,5 +444,244 @@ describe('EvalRepository.previousFullBatch', () => {
     expect(
       await repo.previousFullBatch(WS_ID, AGENT_ID, new Date('2026-07-01T00:00:00Z')),
     ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EvalRepository.clearHistory — genuinely stateful in-memory fake (not a
+// call-recording spy chain): this method's correctness hinges on ACTUAL
+// filtering (which rows survive vs. get deleted, and isolation from a
+// different agent/workspace's rows), which a spy-only chain can't assert.
+// `eq(...)`/`and(...)` produce real drizzle-orm `SQL` objects whose
+// `queryChunks` embed the target `Column` + bound value pairs; `extractEqPairs`
+// walks those chunks to recover `{columnName: value}` so the fake can filter
+// an in-memory row set exactly like a real WHERE clause would.
+// ---------------------------------------------------------------------------
+
+/** Recursively collect `{columnName: value}` pairs out of a real drizzle `eq`/`and` SQL tree. */
+function extractEqPairs(node: unknown): Record<string, unknown> {
+  const pairs: Record<string, unknown> = {};
+
+  function walk(chunks: SQLChunk[]): void {
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      if (chunk instanceof Column) {
+        // eq() emits: sql`${column} = ${value}` → queryChunks are
+        // [RawSql(''), column, RawSql(' = '), value-wrapper, RawSql('')].
+        // The bound value is wrapped; drizzle exposes it as a Param-like
+        // object with a `.value` field, OR (for simple JS primitives passed
+        // through bindIfParam) as the SQL chunk immediately following.
+        const maybeValueChunk = chunks[i + 2] as unknown;
+        const value = extractBoundValue(maybeValueChunk);
+        if (value !== undefined) pairs[chunk.name] = value;
+      } else if (isSqlLike(chunk)) {
+        walk((chunk as SQL).queryChunks);
+      }
+    }
+  }
+
+  function isSqlLike(x: unknown): x is SQL {
+    return !!x && typeof x === 'object' && Array.isArray((x as SQL).queryChunks);
+  }
+
+  function extractBoundValue(x: unknown): unknown {
+    if (x && typeof x === 'object' && 'value' in (x as Record<string, unknown>)) {
+      return (x as { value: unknown }).value;
+    }
+    return x;
+  }
+
+  if (isSqlLike(node)) walk((node as SQL).queryChunks);
+  return pairs;
+}
+
+interface FakeRow {
+  [key: string]: unknown;
+}
+
+/**
+ * A genuinely stateful fake `Db` for `clearHistory`: holds in-memory
+ * `evalCases`/`evalRuns`/`evalBatches` arrays and implements just the
+ * `transaction/select/delete/where/returning` surface the method calls,
+ * filtering by the REAL eq-pairs extracted from the condition passed to
+ * `where()` (not a hardcoded resolve — genuine predicate evaluation).
+ */
+function makeStatefulEvalDb(seed: { cases: FakeRow[]; runs: FakeRow[]; batches: FakeRow[] }) {
+  const state = {
+    cases: [...seed.cases],
+    runs: [...seed.runs],
+    batches: [...seed.batches],
+  };
+
+  /** `extractEqPairs` keys are the real DB column names (snake_case, e.g.
+   *  `workspace_id`); the in-memory fixture rows use the Drizzle JS field
+   *  names (camelCase, e.g. `workspaceId`) — convert before comparing. */
+  function snakeToCamel(s: string): string {
+    return s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+  }
+
+  function matches(row: FakeRow, pairs: Record<string, unknown>): boolean {
+    return Object.entries(pairs).every(([k, v]) => row[snakeToCamel(k)] === v);
+  }
+
+  function makeTx() {
+    // `clearHistory` issues its two `delete()` calls in a FIXED order —
+    // eval_runs first (via the eval_cases subquery), then eval_batches — so a
+    // simple call-order counter distinguishes them without needing to compare
+    // table object identity (this fake never imports the real schema module).
+    let deleteCallCount = 0;
+
+    return {
+      select: (_cols: { id: unknown }) => ({
+        from: (table: { [k: string]: unknown }) => {
+          // Only ever called against evalCases in clearHistory.
+          void table;
+          return {
+            where: (cond: unknown) => {
+              const pairs = extractEqPairs(cond);
+              const rows = state.cases.filter((r) => matches(r, pairs));
+              // Returned value is used as an `inArray` subquery arg (awaited
+              // indirectly by the fake `delete().where()` below) AND must
+              // itself be thenable, mirroring a real Drizzle query builder.
+              const result = rows.map((r) => ({ id: r.id }));
+              return Object.assign(Promise.resolve(result), {
+                then: (onF?: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
+                  Promise.resolve(result).then(onF, onR),
+              });
+            },
+          };
+        },
+      }),
+      delete: (_table: unknown) => {
+        const isRuns = deleteCallCount === 0;
+        deleteCallCount++;
+        return {
+          where: (cond: unknown) => ({
+            returning: async (_sel: unknown) => {
+              if (isRuns) {
+                // The condition here is `inArray(evalRuns.caseId, <subquery promise>)`.
+                // Resolve the embedded subquery promise to get the allowed case ids.
+                const caseIds = await resolveInArraySubquery(cond);
+                const toDelete = state.runs.filter((r) => caseIds.includes(r.caseId as string));
+                state.runs = state.runs.filter((r) => !caseIds.includes(r.caseId as string));
+                return toDelete.map((r) => ({ id: r.id }));
+              }
+              const pairs = extractEqPairs(cond);
+              const toDelete = state.batches.filter((r) => matches(r, pairs));
+              state.batches = state.batches.filter((r) => !matches(r, pairs));
+              return toDelete.map((r) => ({ id: r.id }));
+            },
+          }),
+        };
+      },
+    };
+  }
+
+  async function resolveInArraySubquery(cond: unknown): Promise<string[]> {
+    // inArray(column, subqueryPromise) wraps the subquery in a `Param` chunk
+    // (`{value: <the promise>}`), not a directly-thenable queryChunk — probed
+    // via a real `inArray()` call against a fake thenable subquery.
+    const sqlCond = cond as SQL;
+    for (const chunk of sqlCond.queryChunks) {
+      const candidate = chunk && typeof chunk === 'object' && 'value' in (chunk as Record<string, unknown>)
+        ? (chunk as { value: unknown }).value
+        : chunk;
+      if (candidate && typeof (candidate as Promise<unknown>).then === 'function') {
+        const rows = (await (candidate as Promise<{ id: string }[]>)) ?? [];
+        return rows.map((r) => r.id);
+      }
+    }
+    return [];
+  }
+
+  const db = {
+    transaction: async (fn: (tx: ReturnType<typeof makeTx>) => Promise<unknown>) => fn(makeTx()),
+  } as unknown as Db;
+
+  return { db, state };
+}
+
+describe('EvalRepository.clearHistory', () => {
+  const CASE_A_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
+  const CASE_B_ID = 'aaaaaaaa-0000-0000-0000-000000000002';
+  const OTHER_AGENT_CASE_ID = 'bbbbbbbb-0000-0000-0000-000000000001';
+  const OTHER_WS_CASE_ID = 'cccccccc-0000-0000-0000-000000000001';
+
+  const OTHER_AGENT_ID = 'dddddddd-0000-0000-0000-000000000001';
+
+  function seedData() {
+    return {
+      cases: [
+        { id: CASE_A_ID, workspaceId: WS_ID, ownerKind: 'agent', ownerId: AGENT_ID, name: 'a' },
+        { id: CASE_B_ID, workspaceId: WS_ID, ownerKind: 'agent', ownerId: AGENT_ID, name: 'b' },
+        // Different agent, SAME workspace — must survive + its runs/batches untouched.
+        { id: OTHER_AGENT_CASE_ID, workspaceId: WS_ID, ownerKind: 'agent', ownerId: OTHER_AGENT_ID, name: 'c' },
+        // Different workspace entirely.
+        { id: OTHER_WS_CASE_ID, workspaceId: OTHER_WS_ID, ownerKind: 'agent', ownerId: AGENT_ID, name: 'd' },
+      ],
+      runs: [
+        { id: 'run-1', caseId: CASE_A_ID, batchId: BATCH_ID, pass: true },
+        { id: 'run-2', caseId: CASE_B_ID, batchId: BATCH_ID, pass: false },
+        { id: 'run-3', caseId: OTHER_AGENT_CASE_ID, batchId: 'batch-other-agent', pass: true },
+        { id: 'run-4', caseId: OTHER_WS_CASE_ID, batchId: 'batch-other-ws', pass: true },
+      ],
+      batches: [
+        { id: BATCH_ID, workspaceId: WS_ID, agentId: AGENT_ID, kind: 'full' },
+        { id: 'batch-other-agent', workspaceId: WS_ID, agentId: OTHER_AGENT_ID, kind: 'full' },
+        { id: 'batch-other-ws', workspaceId: OTHER_WS_ID, agentId: AGENT_ID, kind: 'full' },
+      ],
+    };
+  }
+
+  it('deletes all batches + runs for the agent, returning accurate counts', async () => {
+    const { db, state } = makeStatefulEvalDb(seedData());
+    const repo = new EvalRepository(db);
+
+    const result = await repo.clearHistory(WS_ID, AGENT_ID);
+
+    expect(result).toEqual({ deletedBatches: 1, deletedRuns: 2 });
+    expect(state.batches.some((b) => b.agentId === AGENT_ID && b.workspaceId === WS_ID)).toBe(false);
+    expect(state.runs.some((r) => r.caseId === CASE_A_ID || r.caseId === CASE_B_ID)).toBe(false);
+  });
+
+  it('preserves the eval_cases rows themselves — case definitions survive', async () => {
+    const { db, state } = makeStatefulEvalDb(seedData());
+    const repo = new EvalRepository(db);
+
+    await repo.clearHistory(WS_ID, AGENT_ID);
+
+    // clearHistory never deletes from `cases` — all 4 seeded cases remain,
+    // including the target agent's own two.
+    expect(state.cases).toHaveLength(4);
+    expect(state.cases.some((c) => c.id === CASE_A_ID)).toBe(true);
+    expect(state.cases.some((c) => c.id === CASE_B_ID)).toBe(true);
+  });
+
+  it('does not touch a different agent\'s batches/runs in the SAME workspace (isolation)', async () => {
+    const { db, state } = makeStatefulEvalDb(seedData());
+    const repo = new EvalRepository(db);
+
+    await repo.clearHistory(WS_ID, AGENT_ID);
+
+    expect(state.batches.some((b) => b.id === 'batch-other-agent')).toBe(true);
+    expect(state.runs.some((r) => r.id === 'run-3')).toBe(true);
+  });
+
+  it('does not touch a different workspace\'s batches/runs for the SAME agent id (isolation)', async () => {
+    const { db, state } = makeStatefulEvalDb(seedData());
+    const repo = new EvalRepository(db);
+
+    await repo.clearHistory(WS_ID, AGENT_ID);
+
+    expect(state.batches.some((b) => b.id === 'batch-other-ws')).toBe(true);
+    expect(state.runs.some((r) => r.id === 'run-4')).toBe(true);
+  });
+
+  it('returns zero counts when the agent has no history yet', async () => {
+    const { db } = makeStatefulEvalDb({ cases: [], runs: [], batches: [] });
+    const repo = new EvalRepository(db);
+
+    const result = await repo.clearHistory(WS_ID, AGENT_ID);
+    expect(result).toEqual({ deletedBatches: 0, deletedRuns: 0 });
   });
 });

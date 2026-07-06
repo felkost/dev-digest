@@ -182,6 +182,30 @@ export function useEvalRunCompletion(agentId: string, batchId: string | null) {
   return detail;
 }
 
+/**
+ * "Clear history" (destructive) — `DELETE /agents/:id/evals/batches` wipes all
+ * eval batches (and their per-case runs) for this agent; eval CASES themselves
+ * are untouched. Response body is `{ deleted_batches, deleted_runs }` but the
+ * caller only needs the success signal, so it's loosely typed here. On
+ * success, invalidate every query the batch history feeds: batch history and
+ * trend chart both render off `eval_batches` directly; KPI delta is derived
+ * from batch history; and per-case `last_run_status`/`last_run_summary` must
+ * reset back to their pre-run state once the runs are gone.
+ */
+export function useClearEvalHistory(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.del<{ deleted_batches: number; deleted_runs: number }>(`/agents/${agentId}/evals/batches`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["eval-batches", agentId] });
+      qc.invalidateQueries({ queryKey: ["eval-trend", agentId] });
+      qc.invalidateQueries({ queryKey: ["eval-kpi-delta", agentId] });
+      qc.invalidateQueries({ queryKey: ["eval-cases", agentId] });
+    },
+  });
+}
+
 export function useEvalTrend(agentId: string | null | undefined) {
   return useQuery({
     queryKey: ["eval-trend", agentId],

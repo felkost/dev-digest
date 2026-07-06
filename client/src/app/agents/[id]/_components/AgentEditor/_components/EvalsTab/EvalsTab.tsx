@@ -7,6 +7,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Button, EmptyState, Skeleton } from "@devdigest/ui";
 import type { Agent, EvalCaseListItem } from "@devdigest/shared";
+import { ConfirmModal } from "@/components/confirm-modal";
 import {
   useEvalCases,
   useEvalBatchHistory,
@@ -15,6 +16,7 @@ import {
   useRunEvalBatch,
   useDeleteEvalCase,
   useEvalRunCompletion,
+  useClearEvalHistory,
 } from "@/lib/hooks/eval";
 import { CaseList } from "./_components/CaseList/CaseList";
 import { CaseEditor } from "./_components/CaseEditor/CaseEditor";
@@ -35,10 +37,15 @@ export function EvalsTab({ agent }: EvalsTabProps) {
   const { data: kpiDelta, isLoading: loadingKpiDelta } = useEvalKpiDelta(agent.id);
   const runBatch = useRunEvalBatch(agent.id);
   const deleteCase = useDeleteEvalCase(agent.id);
+  const clearHistory = useClearEvalHistory(agent.id);
 
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editingCase, setEditingCase] = React.useState<EvalCaseListItem | null>(null);
   const [runningCaseId, setRunningCaseId] = React.useState<string | null>(null);
+  const [clearHistoryConfirmOpen, setClearHistoryConfirmOpen] = React.useState(false);
+  // Batch id hovered on the trend chart — highlights + scrolls its Batch
+  // History row (chart ⇄ table link, instead of a duplicate list under the chart).
+  const [highlightedBatchId, setHighlightedBatchId] = React.useState<string | null>(null);
   // #9 — the run mutation only returns `{ batch_id }` (202 Accepted); track it
   // here and let `useEvalRunCompletion` poll + invalidate the right queries
   // once the batch actually finishes (status leaves null), then stop polling
@@ -151,14 +158,39 @@ export function EvalsTab({ agent }: EvalsTabProps) {
         onDeleteCase={(caseId) => deleteCase.mutate(caseId)}
       />
 
-      <div style={s.sectionLabel}>{t("evals.history.title")}</div>
-      <BatchHistoryTable agentId={agent.id} batches={batches ?? []} />
+      <div style={s.headerRow}>
+        <div style={s.sectionLabel}>{t("evals.history.title")}</div>
+        <Button
+          kind="danger"
+          size="sm"
+          onClick={() => setClearHistoryConfirmOpen(true)}
+          disabled={clearHistory.isPending || (batches ?? []).length === 0}
+        >
+          {t("evals.history.clearHistory")}
+        </Button>
+      </div>
+      <BatchHistoryTable agentId={agent.id} batches={batches ?? []} highlightBatchId={highlightedBatchId} />
 
       <div style={s.sectionLabel}>{t("evals.trend.title")}</div>
       <KpiDeltaStrip delta={kpiDelta} isLoading={loadingKpiDelta} />
-      <TrendChart points={trendPoints ?? []} />
+      <TrendChart points={trendPoints ?? []} onHighlightBatch={setHighlightedBatchId} />
 
       {editorOpen && <CaseEditor agentId={agent.id} initialCase={editingCase} onClose={closeEditor} />}
+
+      {clearHistoryConfirmOpen && (
+        <ConfirmModal
+          title={t("evals.history.clearHistoryConfirmTitle")}
+          body={t("evals.history.clearHistoryConfirmBody")}
+          confirmLabel={t("evals.history.clearHistoryConfirmConfirm")}
+          cancelLabel={t("evals.history.clearHistoryConfirmCancel")}
+          danger
+          onConfirm={() => {
+            clearHistory.mutate();
+            setClearHistoryConfirmOpen(false);
+          }}
+          onCancel={() => setClearHistoryConfirmOpen(false)}
+        />
+      )}
     </div>
   );
 }

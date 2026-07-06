@@ -22,6 +22,8 @@ const createCaseMutate = vi.fn();
 let createCaseIsPending = false;
 const updateCaseMutate = vi.fn();
 let updateCaseIsPending = false;
+const clearHistoryMutate = vi.fn();
+let clearHistoryIsPending = false;
 
 vi.mock("@/lib/hooks/eval", () => ({
   useEvalCases: () => ({ data: { cases, excluded_skill_owned_count: excludedSkillOwnedCount }, isLoading: false }),
@@ -35,6 +37,7 @@ vi.mock("@/lib/hooks/eval", () => ({
   useDeleteEvalCase: () => ({ mutate: deleteCaseMutate }),
   useCreateEvalCase: () => ({ mutate: createCaseMutate, isPending: createCaseIsPending }),
   useUpdateEvalCase: () => ({ mutate: updateCaseMutate, isPending: updateCaseIsPending }),
+  useClearEvalHistory: () => ({ mutate: clearHistoryMutate, isPending: clearHistoryIsPending }),
 }));
 
 import { EvalsTab } from "./EvalsTab";
@@ -95,6 +98,8 @@ afterEach(() => {
   createCaseIsPending = false;
   updateCaseMutate.mockClear();
   updateCaseIsPending = false;
+  clearHistoryMutate.mockClear();
+  clearHistoryIsPending = false;
 });
 
 describe("EvalsTab", () => {
@@ -175,10 +180,8 @@ describe("EvalsTab", () => {
     ];
     renderWithIntl(<EvalsTab agent={AGENT} />);
 
-    const degradedPoint = screen.getByTestId("trend-point-b2");
-    const cleanPoint = screen.getByTestId("trend-point-b1");
-    expect(degradedPoint.getAttribute("data-degraded")).toBe("true");
-    expect(cleanPoint.getAttribute("data-degraded")).toBe("false");
+    // Degraded batches are flagged via the chart's degraded legend (AC-30);
+    // per-point markers were removed in favour of linking to Batch History.
     expect(screen.getByText("Degraded batch")).toBeInTheDocument();
   });
 
@@ -208,20 +211,18 @@ describe("EvalsTab", () => {
     expect(within(panel).getByText("-5%")).toBeInTheDocument();
   });
 
-  it("trend point hover shows a tooltip with agent snapshot and cost (AC-29)", async () => {
+  it("trend no longer duplicates per-run snapshot/cost under the chart (linked to batch history)", () => {
     cases = [makeCase()];
     trendPoints = [
       { batch_id: "b1", ran_at: "2026-07-01T00:00:00.000Z", recall: 1, precision: 1, citation_accuracy: 1, is_degraded: false, agent_snapshot: { display: { model: "gpt-4.1" } }, cost_usd: 0.034 },
     ];
-    const user = userEvent.setup();
     renderWithIntl(<EvalsTab agent={AGENT} />);
 
+    // The old per-batch marker row + floating tooltip are gone — snapshot/cost
+    // live only in Batch History, which the chart highlights on hover.
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    await user.hover(screen.getByTestId("trend-point-b1"));
-
-    const tooltip = await screen.findByRole("tooltip");
-    expect(within(tooltip).getByText(/gpt-4.1/)).toBeInTheDocument();
-    expect(within(tooltip).getByText(/\$0\.034/)).toBeInTheDocument();
+    expect(screen.queryByTestId("trend-point-b1")).not.toBeInTheDocument();
+    expect(screen.getByText(/Hover a point to highlight/)).toBeInTheDocument();
   });
 
   it("a never-run case shows no outcome text while a scored case shows its summary (AC-25/AC-26)", () => {
@@ -285,5 +286,34 @@ describe("EvalsTab", () => {
     expect(screen.getByTestId("kpi-delta-empty")).toBeInTheDocument();
     expect(screen.getByText(/No baseline yet/)).toBeInTheDocument();
     expect(screen.queryByTestId("kpi-delta-strip")).not.toBeInTheDocument();
+  });
+
+  it("clear history requires confirmation before the clear-history mutation fires", async () => {
+    cases = [makeCase()];
+    batches = [
+      { id: "b1", agent_id: "ag1", kind: "full", status: "clean", agent_snapshot: { display: { model: "gpt-4.1" } }, recall: 1, precision: 1, citation_accuracy: 1, cost_usd: 0.01, ran_at: "2026-07-01T00:00:00.000Z" },
+    ];
+    const user = userEvent.setup();
+    renderWithIntl(<EvalsTab agent={AGENT} />);
+
+    await user.click(screen.getByRole("button", { name: "Clear history" }));
+
+    // Mutation must NOT fire yet — confirm modal must appear first.
+    expect(clearHistoryMutate).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByText("This deletes all batch history and trend for this agent. Cases are kept."),
+    ).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Clear history" }));
+    expect(clearHistoryMutate).toHaveBeenCalled();
+  });
+
+  it("disables the clear-history button when there are no batches to clear", () => {
+    cases = [makeCase()];
+    batches = [];
+    renderWithIntl(<EvalsTab agent={AGENT} />);
+
+    expect(screen.getByRole("button", { name: "Clear history" })).toBeDisabled();
   });
 });

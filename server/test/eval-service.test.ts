@@ -861,3 +861,42 @@ describe('EvalService.deleteCase', () => {
     expect(deleteSpy).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// clearHistory — workspace/agent-scoped existence guard + repo delegation
+// ---------------------------------------------------------------------------
+
+describe('EvalService.clearHistory', () => {
+  it('verifies the agent exists in the workspace, then delegates to the repo and maps counts', async () => {
+    const container = buildContainer({ agent: AGENT_ROW });
+    const clearHistorySpy = vi
+      .spyOn(EvalRepository.prototype, 'clearHistory')
+      .mockResolvedValue({ deletedBatches: 3, deletedRuns: 7 });
+
+    const service = new EvalService(container);
+    const result = await service.clearHistory(WS_ID, AGENT_ID);
+
+    expect(container.agentsRepo.getById).toHaveBeenCalledWith(WS_ID, AGENT_ID);
+    expect(clearHistorySpy).toHaveBeenCalledWith(WS_ID, AGENT_ID);
+    expect(result).toEqual({ deleted_batches: 3, deleted_runs: 7 });
+  });
+
+  it('throws NotFoundError for an unknown agent, without touching the repo', async () => {
+    const container = buildContainer({ agent: undefined });
+    const clearHistorySpy = vi.spyOn(EvalRepository.prototype, 'clearHistory');
+
+    const service = new EvalService(container);
+    await expect(service.clearHistory(WS_ID, 'missing-agent')).rejects.toThrow(NotFoundError);
+    expect(clearHistorySpy).not.toHaveBeenCalled();
+  });
+
+  it('returns zero counts when the agent has no history yet', async () => {
+    const container = buildContainer({ agent: AGENT_ROW });
+    vi.spyOn(EvalRepository.prototype, 'clearHistory').mockResolvedValue({ deletedBatches: 0, deletedRuns: 0 });
+
+    const service = new EvalService(container);
+    const result = await service.clearHistory(WS_ID, AGENT_ID);
+
+    expect(result).toEqual({ deleted_batches: 0, deleted_runs: 0 });
+  });
+});

@@ -14,6 +14,7 @@ import { EvalService } from './service.js';
  *   POST   /findings/:id/evals/case                → promote an accepted/dismissed finding into a case (AC-1)
  *   DELETE /agents/:id/evals/cases/:caseId         → delete a case (confirmation is client-side, AC-10)
  *   POST   /agents/:id/evals/run                   {EvalRunBatchRequest} → 202 Accepted, fan-out detached (AC-11/AC-14, #9)
+ *   DELETE /agents/:id/evals/batches                → clear ALL run history (batches + runs) for this agent; cases survive
  *   GET    /agents/:id/evals/batches                → batch history (AC-33)
  *   GET    /agents/:id/evals/batches/:batchId       → batch drill-down (AC-33) — client polls this for run completion
  *   GET    /agents/:id/evals/trend                  → trend points, full batches only (AC-28–AC-30)
@@ -129,6 +130,12 @@ export default async function evalRoutes(appBase: FastifyInstance): Promise<void
   app.get('/agents/:id/evals/batches', { schema: { params: IdParams } }, async (req) => {
     const { workspaceId } = await getContext(container, req);
     return service.listBatchHistory(workspaceId, req.params.id);
+  });
+
+  // ---- Clear ALL run history for this agent (batches + runs); cases survive -
+  app.delete('/agents/:id/evals/batches', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    return service.clearHistory(workspaceId, req.params.id);
   });
 
   // ---- Batch drill-down (AC-33) ---------------------------------------------

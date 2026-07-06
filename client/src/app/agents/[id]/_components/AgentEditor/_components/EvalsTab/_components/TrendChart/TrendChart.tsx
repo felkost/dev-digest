@@ -1,24 +1,36 @@
 "use client";
 
 /* TrendChart — one point per full batch, chronological (calibration batches
-   already excluded by the trend endpoint, AC-28). Tooltip shows
-   agent-snapshot + cost (AC-29); degraded points are visually distinct via a
-   separate marker row rendered on top of the line chart (AC-30).
+   already excluded by the trend endpoint, AC-28). The chart is LINKED to the
+   Batch History table above rather than carrying its own per-batch list:
+   hovering a point reports its batch_id up (onHighlightBatch) so the parent
+   highlights + scrolls the matching Batch History row, which already shows the
+   run's snapshot / cost / status. Degraded points stay visually distinct via
+   the degraded-legend row (AC-30).
 
-   Reuses the existing `LineChart` (Recharts-backed) vendored UI primitive —
-   no new charting dependency added. */
+   Reuses the existing `LineChart` (Recharts-backed) vendored UI primitive. */
 
 import React from "react";
 import { useTranslations } from "next-intl";
 import { LineChart, Icon } from "@devdigest/ui";
 import type { EvalTrendPointV2 } from "@devdigest/shared";
-import { formatCost } from "@/lib/format";
-import { snapshotLabel } from "../../helpers";
-import { s } from "../../styles";
+import { pct } from "../../helpers";
 
-export function TrendChart({ points }: { points: EvalTrendPointV2[] }) {
+export function TrendChart({
+  points,
+  onHighlightBatch,
+}: {
+  points: EvalTrendPointV2[];
+  /** Report the batch_id under the cursor (or null on leave) so a parent can
+   *  highlight + scroll the matching Batch History row — the chart links to
+   *  that table instead of duplicating its per-batch snapshot/cost details. */
+  onHighlightBatch?: (batchId: string | null) => void;
+}) {
   const t = useTranslations("agents");
-  const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
+  // Index of the point under the cursor — drives the per-metric values shown in
+  // the legend so they sync with whichever batch you hover (names always show;
+  // values only while hovering).
+  const [activeIdx, setActiveIdx] = React.useState<number | null>(null);
 
   if (points.length === 0) {
     return <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("evals.trend.empty")}</div>;
@@ -30,57 +42,39 @@ export function TrendChart({ points }: { points: EvalTrendPointV2[] }) {
     { name: t("evals.history.citationAccuracy"), color: "var(--warn)", data: points.map((p) => p.citation_accuracy) },
   ];
 
-  const degradedPoints = points
-    .map((p, i) => ({ p, i }))
-    .filter(({ p }) => p.is_degraded);
+  const hasDegraded = points.some((p) => p.is_degraded);
+
+  const onActive = (i: number | null) => {
+    setActiveIdx(i);
+    onHighlightBatch?.(i != null && points[i] ? points[i].batch_id : null);
+  };
 
   return (
     <div>
-      <LineChart series={series} yMin={0} yMax={1} />
-      {degradedPoints.length > 0 && (
+      {/* Colour legend — names always; each metric's value appears only while a
+          point is hovered, and reflects THAT batch (no static clutter). */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 10 }}>
+        {series.map((sr) => (
+          <span
+            key={sr.name}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-secondary)" }}
+          >
+            <span aria-hidden style={{ width: 16, borderTop: `2px solid ${sr.color}`, display: "inline-block" }} />
+            {sr.name}
+            {activeIdx != null && sr.data[activeIdx] != null && (
+              <span style={{ color: "var(--text-muted)" }}>{pct(sr.data[activeIdx] ?? null)}</span>
+            )}
+          </span>
+        ))}
+      </div>
+      <LineChart series={series} yMin={0} yMax={1} showDots onActiveIndexChange={onActive} />
+      {hasDegraded && (
         <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, fontSize: 11, color: "var(--crit)" }}>
           <Icon.AlertTriangle size={12} />
           {t("evals.trend.degradedLegend")}
         </div>
       )}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          marginTop: 10,
-        }}
-      >
-        {points.map((p, i) => (
-          <button
-            key={p.batch_id}
-            type="button"
-            onMouseEnter={() => setHoverIdx(i)}
-            onMouseLeave={() => setHoverIdx(null)}
-            data-testid={`trend-point-${p.batch_id}`}
-            data-degraded={p.is_degraded ? "true" : "false"}
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: p.is_degraded ? 2 : 99,
-              background: p.is_degraded ? "var(--crit)" : "var(--accent)",
-              border: "none",
-              cursor: "pointer",
-              padding: 0,
-            }}
-            aria-label={new Date(p.ran_at).toLocaleString()}
-          />
-        ))}
-      </div>
-      {hoverIdx != null && points[hoverIdx] && (
-        <div style={{ ...s.note, marginTop: 8 }} role="tooltip">
-          {/* #11 — snapshotLabel includes the fingerprint prefix (e.g.
-              "gpt-4.1 @ 1a2b3c4d5e6f"), not just the model, so config changes
-              between batches with the same model are visible in the tooltip. */}
-          <div>{t("evals.trend.tooltipSnapshot")}: {snapshotLabel(points[hoverIdx].agent_snapshot)}</div>
-          <div>{t("evals.trend.tooltipCost")}: {formatCost(points[hoverIdx].cost_usd)}</div>
-        </div>
-      )}
+      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>{t("evals.trend.linkHint")}</div>
     </div>
   );
 }

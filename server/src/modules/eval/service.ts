@@ -300,7 +300,19 @@ export class EvalService {
           run.pass === null
             ? null
             : run.matchedCount !== null && run.expectedCount !== null
-              ? { mustFindMatched: run.matchedCount, mustFindTotal: run.expectedCount, mustNotFlagViolations: 0, findingsCount: 0 }
+              ? {
+                  mustFindMatched: run.matchedCount,
+                  mustFindTotal: run.expectedCount,
+                  mustNotFlagViolations: 0,
+                  // findings_count is NOT among the frozen counts (only
+                  // matched/expected are persisted), so count the run's OWN
+                  // persisted findings here — `actualOutput` is the model's
+                  // kept-findings array at write time, never re-scored, so this
+                  // is both correct and stable (previously hardcoded 0, which
+                  // made the drill-down FINDINGS column always read 0 even when
+                  // MATCHED was 1).
+                  findingsCount: Array.isArray(run.actualOutput) ? run.actualOutput.length : 0,
+                }
               : scoreCase(
                   expectationsFromJson(caseRow.expectedOutput),
                   Array.isArray(run.actualOutput)
@@ -381,6 +393,26 @@ export class EvalService {
     // line, so it must not render as a fake 0%/0%/0% dip.
     const withRealMetrics = rows.filter((r) => r.recall !== null && r.precision !== null && r.citationAccuracy !== null);
     return withRealMetrics.slice().reverse().map(trendPoint);
+  }
+
+  /**
+   * Clear ALL run history (batches + runs) for one agent, workspace-scoped —
+   * the case DEFINITIONS themselves are preserved (only their run history
+   * resets: Batch History empties, Trend empties, every case's last-run
+   * status reverts to never-run). Guarded identically to the other
+   * agent-scoped eval methods: verify the agent exists in this workspace via
+   * `container.agentsRepo.getById` (the cross-cutting facade already used by
+   * `EvalRunOrchestrator.startBatch`), else 404.
+   */
+  async clearHistory(
+    workspaceId: string,
+    agentId: string,
+  ): Promise<{ deleted_batches: number; deleted_runs: number }> {
+    const agent = await this.container.agentsRepo.getById(workspaceId, agentId);
+    if (!agent) throw new NotFoundError('Agent not found');
+
+    const { deletedBatches, deletedRuns } = await this.repo.clearHistory(workspaceId, agentId);
+    return { deleted_batches: deletedBatches, deleted_runs: deletedRuns };
   }
 
   /**

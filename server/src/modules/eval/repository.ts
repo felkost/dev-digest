@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import { ConfigError } from '../../platform/errors.js';
@@ -278,6 +278,50 @@ export class EvalRepository {
       )
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  /**
+   * Clear ALL run history (eval_batches + eval_runs) for one agent, workspace-
+   * scoped, in a SINGLE transaction — eval_cases (the case definitions) are
+   * NEVER touched, only their run history. `eval_runs.batch_id → eval_batches`
+   * is `ON DELETE SET NULL` (schema/eval.ts), so deleting batches alone would
+   * NOT remove the agent's runs — they must be deleted explicitly via the
+   * `eval_cases.id` subquery (eval_runs has no workspace_id/agent_id of its
+   * own; scope flows transitively through eval_cases.owner_id/owner_kind).
+   * Runs deleted first, then batches, inside one transaction so a mid-way
+   * failure leaves neither partially cleared.
+   */
+  async clearHistory(
+    workspaceId: string,
+    agentId: string,
+  ): Promise<{ deletedBatches: number; deletedRuns: number }> {
+    return this.db.transaction(async (tx) => {
+      const deletedRuns = await tx
+        .delete(t.evalRuns)
+        .where(
+          inArray(
+            t.evalRuns.caseId,
+            tx
+              .select({ id: t.evalCases.id })
+              .from(t.evalCases)
+              .where(
+                and(
+                  eq(t.evalCases.workspaceId, workspaceId),
+                  eq(t.evalCases.ownerId, agentId),
+                  eq(t.evalCases.ownerKind, 'agent'),
+                ),
+              ),
+          ),
+        )
+        .returning({ id: t.evalRuns.id });
+
+      const deletedBatches = await tx
+        .delete(t.evalBatches)
+        .where(and(eq(t.evalBatches.workspaceId, workspaceId), eq(t.evalBatches.agentId, agentId)))
+        .returning({ id: t.evalBatches.id });
+
+      return { deletedBatches: deletedBatches.length, deletedRuns: deletedRuns.length };
+    });
   }
 }
 

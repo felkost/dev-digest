@@ -130,3 +130,10 @@ insights: server/insights.md + client/insights.md (гуглити по "eval").
   Регресійний тест у `CaseEditor.test.tsx`. Деталі — `client/insights.md` (2026-07-06).
 
 <!-- Нові баги додавай нижче цього рядка -->
+
+### B6 Anthropic model-access: `claude-sonnet-5` / `claude-fable-5` → усі кейси Error, Degraded — 🔧 config (діагноз; точний лог fable-5 очікується)
+- Симптом: батч із bare Anthropic-id (`model=claude-sonnet-5` або `claude-fable-5`, `provider=anthropic`) → усі кейси **Error**, метрики/cost «—», **Degraded**. `claude-haiku-4-5-20251001` (той самий Anthropic-ключ) — **Clean**; gemini-2.5-flash / deepseek / gpt-5 — Clean.
+- Де: вкладка Evals → Batch history. Код-шлях: `runOneCase` → `reviewPullRequest` → `container.buildLlm('anthropic')` → `AnthropicProvider` (`@anthropic-ai/sdk`, прямий Anthropic API). Помилка **лише в логах :3001** (`eval_runs` тексту помилки не зберігає).
+- Діагноз: bare-id іде напряму в Anthropic API. haiku (валідний датований снапшот) працює → **ключ валідний**; отже `claude-sonnet-5`/`claude-fable-5` **відхиляються самим Anthropic API** (нема доступу до моделі / невірний alias для цього ключа). Це **не** `$ref`-баг (Anthropic резолвить `$ref`, до того ж схема тепер інлайнова — див. B5-fix) і **не** eval. **Точний err для fable-5 — очікується paste (expected `404 not_found_error` / `invalid model`).**
+- Фікс (config, поза кодом): (1) використати доступний Anthropic-id (датований снапшот, як haiku); АБО (2) через OpenRouter — `provider=openrouter`, `model=anthropic/claude-sonnet-5` / `anthropic/claude-fable-5` (якщо доступні); АБО (3) лишити робочі моделі (haiku / gpt-5 / gemini-2.5-flash / deepseek).
+- Побічно: `claude-sonnet-5`/`claude-fable-5` відсутні в `server/src/adapters/llm/pricing.ts` `PRICING` → COST=«—» навіть за успішного прогону (додати ціни + синк із backfill-міграцією за конвенцією файлу).

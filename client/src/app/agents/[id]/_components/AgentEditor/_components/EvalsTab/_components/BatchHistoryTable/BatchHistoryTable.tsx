@@ -18,12 +18,22 @@ import { s } from "../../styles";
 interface BatchHistoryTableProps {
   agentId: string;
   batches: EvalBatch[];
+  /** Batch id to highlight + scroll into view — driven by TrendChart hover so
+   *  the chart links to THIS table instead of duplicating its details. */
+  highlightBatchId?: string | null;
 }
 
-export function BatchHistoryTable({ agentId, batches }: BatchHistoryTableProps) {
+export function BatchHistoryTable({ agentId, batches, highlightBatchId }: BatchHistoryTableProps) {
   const t = useTranslations("agents");
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<string[]>([]);
+  const rowRefs = React.useRef<Map<string, HTMLTableRowElement>>(new Map());
+
+  // Scroll the chart-hovered batch into view. `?.()` on the method — jsdom
+  // (tests) doesn't implement scrollIntoView, so it no-ops there.
+  React.useEffect(() => {
+    if (highlightBatchId) rowRefs.current.get(highlightBatchId)?.scrollIntoView?.({ block: "nearest" });
+  }, [highlightBatchId]);
 
   const detail = useEvalBatchDetail(agentId, expandedId);
 
@@ -91,7 +101,14 @@ export function BatchHistoryTable({ agentId, batches }: BatchHistoryTableProps) 
             const selectable = batch.kind === "full";
             return (
               <React.Fragment key={batch.id}>
-                <tr style={s.batchRow} onClick={() => setExpandedId(isExpanded ? null : batch.id)}>
+                <tr
+                  ref={(el) => {
+                    if (el) rowRefs.current.set(batch.id, el);
+                    else rowRefs.current.delete(batch.id);
+                  }}
+                  style={{ ...s.batchRow, background: batch.id === highlightBatchId ? "var(--bg-hover)" : undefined }}
+                  onClick={() => setExpandedId(isExpanded ? null : batch.id)}
+                >
                   <td style={s.td} onClick={(e) => e.stopPropagation()}>
                     {selectable ? (
                       <Checkbox checked={selected.includes(batch.id)} onChange={() => toggleSelected(batch.id)} />

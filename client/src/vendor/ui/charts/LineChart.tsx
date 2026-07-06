@@ -6,6 +6,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  Tooltip,
   ResponsiveContainer,
 } from "recharts";
 
@@ -21,12 +22,21 @@ export function LineChart({
   h = 200,
   yMin = 0.6,
   yMax = 1.0,
+  showDots = false,
+  onActiveIndexChange,
 }: {
   series: ChartSeries[];
   w?: number;
   h?: number;
   yMin?: number;
   yMax?: number;
+  /** Draw a marker at each data point (off by default to keep existing
+   *  consumers unchanged). */
+  showDots?: boolean;
+  /** Fired with the hovered point's data-index (or null on leave). Lets a
+   *  consumer link the chart to an external list. When provided, a vertical
+   *  cursor is shown so the hovered x is visible. Off by default. */
+  onActiveIndexChange?: (index: number | null) => void;
 }) {
   const n = series[0]?.data.length ?? 0;
   const rows = Array.from({ length: n }, (_, i) => {
@@ -39,8 +49,18 @@ export function LineChart({
   return (
     <div style={{ width: "100%", maxWidth: w, height: h }}>
       <ResponsiveContainer width="100%" height="100%">
-        <RLineChart data={rows} margin={{ top: 14, right: 14, bottom: 8, left: -10 }}>
+        <RLineChart
+          data={rows}
+          margin={{ top: 14, right: 14, bottom: 8, left: -10 }}
+          onMouseMove={(st: { activeTooltipIndex?: number | null } | null) =>
+            onActiveIndexChange?.(typeof st?.activeTooltipIndex === "number" ? st.activeTooltipIndex : null)
+          }
+          onMouseLeave={() => onActiveIndexChange?.(null)}
+        >
           <CartesianGrid stroke="var(--border)" vertical={false} />
+          {onActiveIndexChange && (
+            <Tooltip content={() => null} cursor={{ stroke: "var(--text-muted)", strokeDasharray: "3 3" }} />
+          )}
           <XAxis dataKey="i" hide />
           <YAxis
             domain={[yMin, yMax]}
@@ -57,7 +77,7 @@ export function LineChart({
               dataKey={s.name}
               stroke={s.color}
               strokeWidth={2}
-              dot={false}
+              dot={showDots ? { r: 3, fill: s.color, strokeWidth: 0 } : false}
               isAnimationActive={false}
             />
           ))}
