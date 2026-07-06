@@ -8,6 +8,10 @@ vi.mock("@/lib/hooks/reviews", () => ({
   useFindingAction: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
+vi.mock("@/lib/hooks/eval", () => ({
+  useCreateEvalCaseFromFinding: () => ({ mutate: vi.fn(), isPending: false, isSuccess: false }),
+}));
+
 import { FindingsPanel } from "./FindingsPanel";
 
 afterEach(cleanup);

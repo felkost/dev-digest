@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
-    "verify:l03": "pnpm typecheck && pnpm exec vitest run test/smart-diff-rules.test.ts"
+    "verify:l03": "pnpm typecheck && pnpm exec vitest run test/smart-diff-rules.test.ts",
+    "verify:l06": "pnpm typecheck && pnpm exec vitest run test/eval-scoring.test.ts test/eval-repository.test.ts test/eval-service.test.ts test/eval-routes.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.33.1",

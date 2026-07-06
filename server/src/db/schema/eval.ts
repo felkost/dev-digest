@@ -1,6 +1,7 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, doublePrecision } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, doublePrecision, index } from 'drizzle-orm/pg-core';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
+import { agents } from './agents';
 
 // ============================================================ Eval / Conformance / Compose
 
@@ -19,20 +20,60 @@ export const evalCases = pgTable('eval_cases', {
   notes: text('notes'),
 });
 
-export const evalRuns = pgTable('eval_runs', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  caseId: uuid('case_id')
-    .notNull()
-    .references(() => evalCases.id, { onDelete: 'cascade' }),
-  ranAt: timestamp('ran_at', { withTimezone: true }).defaultNow().notNull(),
-  actualOutput: jsonb('actual_output'),
-  pass: boolean('pass'),
-  recall: doublePrecision('recall'),
-  precision: doublePrecision('precision'),
-  citationAccuracy: doublePrecision('citation_accuracy'),
-  durationMs: integer('duration_ms'),
-  costUsd: doublePrecision('cost_usd'),
-});
+export const evalBatches = pgTable(
+  'eval_batches',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['full', 'calibration'] }).notNull(),
+    // nullable — calibration batches use a comparable per-case status without this label
+    status: text('status', { enum: ['clean', 'degraded'] }),
+    agentSnapshot: jsonb('agent_snapshot').notNull(),
+    recall: doublePrecision('recall'),
+    precision: doublePrecision('precision'),
+    citationAccuracy: doublePrecision('citation_accuracy'),
+    costUsd: doublePrecision('cost_usd'),
+    ranAt: timestamp('ran_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    agentIdx: index('eval_batches_agent_id_idx').on(t.agentId),
+    workspaceIdx: index('eval_batches_workspace_id_idx').on(t.workspaceId),
+  }),
+);
+
+export const evalRuns = pgTable(
+  'eval_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    caseId: uuid('case_id')
+      .notNull()
+      .references(() => evalCases.id, { onDelete: 'cascade' }),
+    ranAt: timestamp('ran_at', { withTimezone: true }).defaultNow().notNull(),
+    actualOutput: jsonb('actual_output'),
+    pass: boolean('pass'),
+    recall: doublePrecision('recall'),
+    precision: doublePrecision('precision'),
+    citationAccuracy: doublePrecision('citation_accuracy'),
+    durationMs: integer('duration_ms'),
+    costUsd: doublePrecision('cost_usd'),
+    batchId: uuid('batch_id').references(() => evalBatches.id, { onDelete: 'set null' }),
+    // Persisted at WRITE time (#4) — the drill-down view must render the
+    // matched/expected counts AS THEY WERE when the run happened, not
+    // re-scored against the case's CURRENT expected_output (which may have
+    // been edited since). Nullable: existing rows written before this column
+    // existed have no snapshot to backfill from.
+    matchedCount: integer('matched_count'),
+    expectedCount: integer('expected_count'),
+  },
+  (t) => ({
+    batchIdx: index('eval_runs_batch_id_idx').on(t.batchId),
+  }),
+);
 
 export const conformanceChecks = pgTable('conformance_checks', {
   id: uuid('id').primaryKey().defaultRandom(),

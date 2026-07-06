@@ -22,6 +22,7 @@ import type { FindingRecord, FindingActionKind } from "@devdigest/shared";
 import { SEV_COLOR, SEV_COLOR_FALLBACK } from "./constants";
 import { lineLabel } from "./helpers";
 import { githubBlobUrl } from "@/lib/github-urls";
+import { useCreateEvalCaseFromFinding } from "@/lib/hooks/eval";
 import { s } from "./styles";
 
 export function FindingCard({
@@ -32,6 +33,7 @@ export function FindingCard({
   pending,
   repoFullName,
   headSha,
+  agentId,
 }: {
   f: FindingRecord;
   focused?: boolean;
@@ -40,11 +42,13 @@ export function FindingCard({
   pending?: boolean;
   repoFullName?: string | null;
   headSha?: string | null;
+  agentId?: string | null;
 }) {
   const t = useTranslations("prReview");
   const [expanded, setExpanded] = React.useState(defaultExpanded ?? false);
   const params = useSearchParams();
   const cardRef = useRef<HTMLDivElement>(null);
+  const createEvalCase = useCreateEvalCaseFromFinding();
 
   useEffect(() => {
     if (params?.get('findingId') === f.id) {
@@ -121,6 +125,20 @@ export function FindingCard({
             >
               {t("finding.dismiss")}
             </Button>
+            {muted && (
+              <Button
+                kind="ghost"
+                size="sm"
+                icon="FlaskConical"
+                disabled={createEvalCase.isPending || createEvalCase.isSuccess}
+                onClick={() => createEvalCase.mutate({ findingId: f.id, agentId })}
+              >
+                {t("finding.addToEvals")}
+              </Button>
+            )}
+            {createEvalCase.isSuccess && (
+              <span style={s.acceptedTag}>{t("finding.addedToEvals")}</span>
+            )}
           </div>
         </div>
       )}

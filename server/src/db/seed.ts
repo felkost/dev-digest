@@ -765,6 +765,187 @@ If this PR removes or renames something that was never marked deprecated, flag i
     }
   }
 
+  // ---- demo eval cases for the General Reviewer (idempotent) ----
+  // L06 eval pipeline: 5 hand-authored cases against the primary demo agent
+  // (General Reviewer — the first-listed built-in reviewer, reviews for bugs/
+  // correctness/clarity). Each `input_diff` is a small, valid unified diff
+  // so the diff-parser and citation-grounding gate both have real hunks to
+  // work against; every expectation's file/line has been hand-traced through
+  // `parseUnifiedDiff`'s new-side numbering rule (server/src/adapters/git/
+  // diff-parser.ts): a hunk's new-side cursor starts at `@@ -a,b +c,d @@`'s
+  // `c`, advances by 1 for every context line AND every added (`+`) line, and
+  // does NOT advance for deleted (`-`) lines. Every expectation below falls
+  // inside its hunk's new-side line numbers under that rule.
+  // Fixed UUID literals + `.onConflictDoNothing()` keyed on `id` keep re-runs
+  // of `pnpm db:seed` from duplicating rows (AC-39).
+  //
+  // These 5 cases are the demo-repo half of AC-38's >=8-case bar for the
+  // primary agent. The other half ("at least 3 authored from real
+  // accept/dismiss decisions") is satisfied at demo time via the FindingCard
+  // accept/dismiss action against real seeded PR findings — not by this
+  // script; do not expect this seed alone to reach 8 cases.
+  let [generalReviewer] = await db
+    .select()
+    .from(t.agents)
+    .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, 'General Reviewer')));
+  if (generalReviewer) {
+    const evalCaseSeeds: Array<typeof t.evalCases.$inferInsert> = [
+      {
+        id: '11111111-1111-4111-a111-000000000001',
+        workspaceId,
+        ownerKind: 'agent',
+        ownerId: generalReviewer.id,
+        name: 'missing await drops usage report',
+        inputDiff: `diff --git a/src/jobs/sync-usage.ts b/src/jobs/sync-usage.ts
+--- a/src/jobs/sync-usage.ts
++++ b/src/jobs/sync-usage.ts
+@@ -10,7 +10,7 @@ export async function syncUsage(workspaceId: string): Promise<void> {
+   const rows = await repo.listUsageRows(workspaceId);
+   for (const row of rows) {
+-    await billingClient.reportUsage(row);
++    billingClient.reportUsage(row);
+   }
+   logger.info('usage sync complete');
+ }
+`,
+        expectedOutput: [
+          {
+            type: 'must_find',
+            file: 'src/jobs/sync-usage.ts',
+            line_start: 12,
+            line_end: 12,
+            severity: 'CRITICAL',
+            kind: 'finding',
+          },
+        ],
+        notes: 'Dropped `await` turns the loop fire-and-forget: unhandled rejections and no guaranteed completion before the sync is logged as done.',
+      },
+      {
+        id: '11111111-1111-4111-a111-000000000002',
+        workspaceId,
+        ownerKind: 'agent',
+        ownerId: generalReviewer.id,
+        name: 'N+1 query in notification fan-out',
+        inputDiff: `diff --git a/src/modules/notifications/service.ts b/src/modules/notifications/service.ts
+--- a/src/modules/notifications/service.ts
++++ b/src/modules/notifications/service.ts
+@@ -20,8 +20,10 @@ export async function fanOutNotifications(userIds: string[]): Promise<void> {
+-  const users = await db.select().from(t.users).where(inArray(t.users.id, userIds));
+-  for (const user of users) {
++  for (const userId of userIds) {
++    const [user] = await db.select().from(t.users).where(eq(t.users.id, userId));
++    if (!user) continue;
+     await notifyClient.send(user.email, 'digest_ready');
+   }
+ }
+`,
+        expectedOutput: [
+          {
+            type: 'must_find',
+            file: 'src/modules/notifications/service.ts',
+            line_start: 20,
+            line_end: 22,
+            severity: 'WARNING',
+            kind: 'finding',
+          },
+        ],
+        notes: 'Replacing a single batched query with one query per user in the loop introduces an N+1 that scales with fan-out size.',
+      },
+      {
+        id: '11111111-1111-4111-a111-000000000003',
+        workspaceId,
+        ownerKind: 'agent',
+        ownerId: generalReviewer.id,
+        name: 'safe guard clause addition (must not flag)',
+        inputDiff: `diff --git a/src/modules/settings/service.ts b/src/modules/settings/service.ts
+--- a/src/modules/settings/service.ts
++++ b/src/modules/settings/service.ts
+@@ -14,6 +14,9 @@ export async function updateTheme(workspaceId: string, theme: string): Promise<void> {
++  if (!ALLOWED_THEMES.includes(theme)) {
++    throw new ValidationError('invalid theme');
++  }
+   await repo.setSetting(workspaceId, 'theme', theme);
+ }
+`,
+        expectedOutput: [
+          {
+            type: 'must_not_flag',
+            file: 'src/modules/settings/service.ts',
+            line_start: 14,
+            line_end: 16,
+            severity: null,
+            kind: null,
+          },
+        ],
+        notes: 'Zero-must_find-denominator path: only a must_not_flag expectation, exercising precision scoring when there is nothing to recall.',
+      },
+      {
+        id: '11111111-1111-4111-a111-000000000004',
+        workspaceId,
+        ownerKind: 'agent',
+        ownerId: generalReviewer.id,
+        name: 'SQL string concat plus safe rename',
+        inputDiff: `diff --git a/src/modules/search/repository.ts b/src/modules/search/repository.ts
+--- a/src/modules/search/repository.ts
++++ b/src/modules/search/repository.ts
+@@ -8,7 +8,7 @@ export async function findByTitle(term: string) {
+-  const query = 'SELECT * FROM documents WHERE title = ?';
++  const query = "SELECT * FROM documents WHERE title = '" + term + "'";
+   return db.execute(query);
+ }
+@@ -20,6 +20,6 @@ export async function countDocuments(): Promise<number> {
+-  const totalCount = await db.select({ count: sql\`count(*)\` }).from(t.documents);
+-  return totalCount[0].count;
++  const documentCount = await db.select({ count: sql\`count(*)\` }).from(t.documents);
++  return documentCount[0].count;
+ }
+`,
+        expectedOutput: [
+          {
+            type: 'must_find',
+            file: 'src/modules/search/repository.ts',
+            line_start: 8,
+            line_end: 8,
+            severity: 'CRITICAL',
+            kind: 'finding',
+          },
+          {
+            type: 'must_not_flag',
+            file: 'src/modules/search/repository.ts',
+            line_start: 20,
+            line_end: 21,
+            severity: null,
+            kind: null,
+          },
+        ],
+        notes: 'Mixed case: SQL injection via string concatenation (must_find) alongside a purely cosmetic local variable rename in an unrelated hunk (must_not_flag).',
+      },
+      {
+        id: '11111111-1111-4111-a111-000000000005',
+        workspaceId,
+        ownerKind: 'agent',
+        ownerId: generalReviewer.id,
+        name: 'clean diff — comment-only change',
+        inputDiff: `diff --git a/src/modules/health/routes.ts b/src/modules/health/routes.ts
+--- a/src/modules/health/routes.ts
++++ b/src/modules/health/routes.ts
+@@ -5,6 +5,7 @@ export async function healthRoutes(app: FastifyInstance) {
+   app.get('/health', async () => {
++    // liveness probe: no DB dependency, always cheap
+     return { status: 'ok' };
+   });
+ }
+`,
+        expectedOutput: [],
+        notes: 'AC-9 empty-set path: a clean diff with no expectations at all — scoring must treat this as a valid case, not a special-cased branch.',
+      },
+    ];
+
+    for (const c of evalCaseSeeds) {
+      await db.insert(t.evalCases).values(c).onConflictDoNothing({ target: t.evalCases.id });
+    }
+  }
+
   return { workspaceId, userId };
 }
 

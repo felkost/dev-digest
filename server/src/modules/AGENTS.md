@@ -18,15 +18,13 @@ No auto-discovery — if it's not in `index.ts`, it does not load.
 - A module imports only from: its own files · `@devdigest/shared` · `../../platform/container`
 - Adding a module that uses an already-existing table does not require a new migration
 
-## Currently registered (L01)
+## Currently registered
 
-`agents` · `repos` · `pulls` · `reviews` · `repo-intel` · `settings` · `polling` · `workspace`
+`settings` · `repos` · `pulls` · `polling` · `workspace` · `agents` · `reviews` · `repo-intel` · `skills` · `conventions` · `smart-diff` · `blast` · `context-docs` · `onboarding` · `eval`
 
-## Currently registered (L04)
+Source of truth is the `modules` record in [index.ts](index.ts) — check there, not this list, when in doubt.
 
-`blast`
-
-L02–L03 and L05–L08 modules: tables exist in the schema, modules not yet registered.
+L07–L08 modules: tables exist in the schema, modules not yet registered.
 
 ## See also
 

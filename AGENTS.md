@@ -52,7 +52,7 @@ cd client && pnpm dev                                     # web only (:3000)
 - `POST /repos/:id/review-all` — fan-out over open PRs; concurrency cap 3; rate-limit 2/min; detached child logger for background tasks
 
 **`pr_brief` is composed live since L04.** After every successful review run, `run-executor` upserts a deterministic `PrBrief` (intent ← `pr_intent` · blast+history ← `container.blast.getBlast()` · risks ← mechanical CRITICAL/WARNING findings mapping in `reviews/brief-composer.ts`) — zero LLM calls, non-fatal on failure.
-Tables for L02–L08 exist in the schema but their modules are **not registered** — they are inert.
+L02–L06 modules are now registered (`skills`, `conventions`, `smart-diff`, `blast`, `context-docs`, `onboarding`, `eval` — see `server/src/modules/index.ts`); only L07–L08 tables remain inert (schema present, modules unregistered).
 
 ## Active features (L04) — Blast Radius
 

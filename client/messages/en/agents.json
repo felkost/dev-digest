@@ -117,5 +117,106 @@
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."
+  },
+  "evals": {
+    "title": "Evals",
+    "runAll": "Run all evals",
+    "newCase": "+ New eval case",
+    "excludedSkillOwned": "{count} skill-owned eval case(s) are not shown here — manage them from the owning skill.",
+    "empty": {
+      "title": "No eval cases yet",
+      "hint": "Accept or dismiss a finding on a PR, then use \"Add to evals\" on its card to turn it into a regression case — or author one by hand.",
+      "cta": "+ New eval case"
+    },
+    "status": {
+      "never_run": "Never run",
+      "passed": "Passed",
+      "failed": "Failed",
+      "error": "Error",
+      "flaked": "Flaked"
+    },
+    "summary": {
+      "emptyExpectedOutput": "Clean diff — no findings expected"
+    },
+    "expectation": {
+      "must_find": "must find",
+      "must_not_flag": "must not flag",
+      "countBadge": "{count} expectation(s)"
+    },
+    "case": {
+      "run": "Run",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteConfirmTitle": "Delete eval case",
+      "deleteConfirmBody": "Delete \"{name}\"? This cannot be undone.",
+      "deleteConfirmConfirm": "Delete",
+      "deleteConfirmCancel": "Cancel"
+    },
+    "editor": {
+      "titleNew": "New eval case",
+      "titleEdit": "Edit eval case",
+      "name": "Name",
+      "namePlaceholder": "Case name",
+      "diff": "Diff fragment",
+      "diffRequired": "A diff fragment is required.",
+      "diffPlaceholder": "Paste a unified diff fragment…",
+      "expectationType": "Expectation type",
+      "file": "File",
+      "filePlaceholder": "path/to/file.ts",
+      "lineStart": "Line start",
+      "lineEnd": "Line end",
+      "notes": "Notes",
+      "notesPlaceholder": "Optional notes",
+      "addExpectation": "+ Add expectation",
+      "removeExpectation": "Remove",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel"
+    },
+    "history": {
+      "title": "Batch history",
+      "empty": "No batches run yet.",
+      "timestamp": "Ran at",
+      "agentSnapshot": "Agent snapshot",
+      "model": "Model",
+      "recall": "Recall",
+      "precision": "Precision",
+      "citationAccuracy": "Citation accuracy",
+      "cost": "Cost",
+      "status": "Status",
+      "statusClean": "Clean",
+      "statusDegraded": "Degraded",
+      "statusCalibration": "Calibration",
+      "statusRunning": "Running…",
+      "compare": "Compare selected",
+      "selectTwoHint": "Select exactly two batches to compare.",
+      "compareFullOnly": "Only full-batch runs can be compared.",
+      "drilldown": {
+        "case": "Case",
+        "outcome": "Outcome",
+        "expected": "Expected",
+        "matched": "Matched",
+        "findings": "Findings",
+        "cost": "Cost"
+      }
+    },
+    "trend": {
+      "title": "Trend",
+      "empty": "Not enough full-batch runs yet to plot a trend.",
+      "degradedLegend": "Degraded batch",
+      "tooltipSnapshot": "Snapshot",
+      "tooltipCost": "Cost"
+    },
+    "kpiDelta": {
+      "label": "vs. previous batch",
+      "noBaseline": "No baseline yet — needs at least 2 full batches to show a KPI delta."
+    },
+    "compare": {
+      "title": "Batch comparison",
+      "metric": "Metric",
+      "batchA": "Batch A",
+      "batchB": "Batch B",
+      "delta": "Delta"
+    }
   }
 }

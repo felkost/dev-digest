@@ -1,7 +1,7 @@
 # Spec: Eval Pipeline
 
 **Spec ID:** SPEC-2026-07-05-eval-pipeline
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-07-05
 **Affects:** full-stack (server: new `eval` module registering existing `eval_cases`/`eval_runs` tables + one new batch table · client: new Evals tab inside the existing AgentEditor + a new action on FindingCard)
 **Supersedes:** —
