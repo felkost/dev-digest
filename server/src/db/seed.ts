@@ -31,6 +31,98 @@ const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
 export const DEFAULT_WORKSPACE_NAME = 'default';
 export const SYSTEM_USER_EMAIL = 'you@local';
 
+/**
+ * Seed a synthetic "provenance" PR + review + findings so a hand-authored eval
+ * case can be linked to a real finding (populating its PR-meta tab: Source,
+ * Source PR, Source finding). The PR is upserted by (repoId, number) so several
+ * agents can share one fixture PR; the review + findings use deterministic ids
+ * + onConflictDoNothing for idempotency. Findings are marked accepted (→ the
+ * case's must_find expectation) or dismissed (→ must_not_flag), mirroring the
+ * real "Add to evals" flow (createCaseFromFinding).
+ */
+async function seedEvalProvenance(
+  db: Db,
+  opts: {
+    workspaceId: string;
+    repoId: string;
+    agentId: string;
+    prNumber: number;
+    prTitle: string;
+    reviewId: string;
+    findings: Array<{
+      id: string;
+      file: string;
+      startLine: number;
+      endLine: number;
+      severity: string;
+      category: string;
+      kind?: string;
+      title: string;
+      rationale: string;
+      decision: 'accepted' | 'dismissed';
+    }>;
+  },
+): Promise<void> {
+  let [pr] = await db
+    .select()
+    .from(t.pullRequests)
+    .where(and(eq(t.pullRequests.repoId, opts.repoId), eq(t.pullRequests.number, opts.prNumber)));
+  if (!pr) {
+    [pr] = await db
+      .insert(t.pullRequests)
+      .values({
+        workspaceId: opts.workspaceId,
+        repoId: opts.repoId,
+        number: opts.prNumber,
+        title: opts.prTitle,
+        author: 'eval-fixtures',
+        branch: `eval/fixtures-${opts.prNumber}`,
+        base: 'main',
+        headSha: `evalfixtures${opts.prNumber}`,
+        status: 'needs_review',
+        body: 'Synthetic PR hosting the seeded findings that back hand-authored eval cases (provenance only — not a real review target).',
+      })
+      .returning();
+  }
+  if (!pr) return;
+
+  await db
+    .insert(t.reviews)
+    .values({
+      id: opts.reviewId,
+      workspaceId: opts.workspaceId,
+      prId: pr.id,
+      agentId: opts.agentId,
+      kind: 'review',
+      verdict: 'request_changes',
+      summary: "Seeded review backing this agent's eval-case provenance.",
+      model: 'seed',
+    })
+    .onConflictDoNothing({ target: t.reviews.id });
+
+  const now = new Date();
+  await db
+    .insert(t.findings)
+    .values(
+      opts.findings.map((f) => ({
+        id: f.id,
+        reviewId: opts.reviewId,
+        file: f.file,
+        startLine: f.startLine,
+        endLine: f.endLine,
+        severity: f.severity,
+        category: f.category,
+        title: f.title,
+        rationale: f.rationale,
+        confidence: 0.9,
+        kind: f.kind ?? 'finding',
+        acceptedAt: f.decision === 'accepted' ? now : null,
+        dismissedAt: f.decision === 'dismissed' ? now : null,
+      })),
+    )
+    .onConflictDoNothing({ target: t.findings.id });
+}
+
 export async function seed(db: Db): Promise<{ workspaceId: string; userId: string }> {
   // ---- workspace + user (no-auth defaults) ----
   let [ws] = await db
@@ -946,6 +1038,252 @@ If this PR removes or renames something that was never marked deprecated, flag i
 
     for (const c of evalCaseSeeds) {
       await db.insert(t.evalCases).values(c).onConflictDoNothing({ target: t.evalCases.id });
+    }
+
+    // Provenance backfill (Option A): seed a fixture PR + findings and link each
+    // finding-derived case's PR-meta to a real finding. A plain UPDATE (not the
+    // onConflictDoNothing insert above) so a re-seed backfills EXISTING rows too.
+    // The clean-diff case (…0005) has no source finding by definition and stays
+    // hand-authored. Findings: accepted → must_find case; dismissed → must_not_flag.
+    const EVAL_FIXTURE_PR = 9001;
+    const genF = {
+      c1: 'aa000000-0000-4000-8000-000000000011',
+      c2: 'aa000000-0000-4000-8000-000000000012',
+      c3: 'aa000000-0000-4000-8000-000000000013',
+      c4: 'aa000000-0000-4000-8000-000000000014',
+    };
+    await seedEvalProvenance(db, {
+      workspaceId,
+      repoId,
+      agentId: generalReviewer.id,
+      prNumber: EVAL_FIXTURE_PR,
+      prTitle: 'Eval fixtures (provenance)',
+      reviewId: 'aa000000-0000-4000-8000-000000000001',
+      findings: [
+        { id: genF.c1, file: 'src/jobs/sync-usage.ts', startLine: 12, endLine: 12, severity: 'CRITICAL', category: 'bug', title: 'missing await drops usage report', rationale: 'Dropped `await` makes the loop fire-and-forget.', decision: 'accepted' },
+        { id: genF.c2, file: 'src/modules/notifications/service.ts', startLine: 20, endLine: 22, severity: 'WARNING', category: 'perf', title: 'N+1 query in notification fan-out', rationale: 'One query per user issued inside the loop.', decision: 'accepted' },
+        { id: genF.c3, file: 'src/modules/settings/service.ts', startLine: 14, endLine: 16, severity: 'WARNING', category: 'style', title: 'guard clause flagged as over-restrictive', rationale: 'Raised, then dismissed — the added guard is safe input validation, not an issue.', decision: 'dismissed' },
+        { id: genF.c4, file: 'src/modules/search/repository.ts', startLine: 8, endLine: 8, severity: 'CRITICAL', category: 'security', title: 'SQL injection via string concatenation', rationale: 'User input concatenated directly into the SQL string.', decision: 'accepted' },
+      ],
+    });
+    const genLinks: Array<[string, string]> = [
+      ['11111111-1111-4111-a111-000000000001', genF.c1],
+      ['11111111-1111-4111-a111-000000000002', genF.c2],
+      ['11111111-1111-4111-a111-000000000003', genF.c3],
+      ['11111111-1111-4111-a111-000000000004', genF.c4],
+    ];
+    for (const [caseId, findingId] of genLinks) {
+      await db
+        .update(t.evalCases)
+        .set({ inputMeta: { source: 'finding', source_finding_id: findingId, source_pr_number: EVAL_FIXTURE_PR } })
+        .where(eq(t.evalCases.id, caseId));
+    }
+  }
+
+  // ---- demo eval cases for the Security Reviewer (idempotent) ----
+  // Same shape/rules as the General Reviewer set above (hand-traced new-side
+  // line numbers, fixed UUIDs + onConflictDoNothing), but themed to this
+  // agent's domain — secrets, injection, SSRF (see its description). Structure
+  // mirrors the General set: 2x must_find, 1x must_not_flag, 1x mixed, 1x
+  // clean-diff. New `2222…` UUIDs → a plain `pnpm db:seed` inserts these
+  // without touching the existing General cases.
+  const [securityReviewer] = await db
+    .select()
+    .from(t.agents)
+    .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, 'Security Reviewer')));
+  if (securityReviewer) {
+    const securityEvalCaseSeeds: Array<typeof t.evalCases.$inferInsert> = [
+      {
+        id: '22222222-2222-4222-a222-000000000001',
+        workspaceId,
+        ownerKind: 'agent',
+        ownerId: securityReviewer.id,
+        name: 'hardcoded Stripe secret key in config',
+        inputDiff: `diff --git a/src/config.ts b/src/config.ts
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -10,4 +10,5 @@
+ export const config = {
+   port: Number(process.env.PORT ?? 3000),
++  stripeKey: "sk_live_51H8xq2Ka9Vn3PqLm7Rd0bZ4Xc",
+   redisUrl: process.env.REDIS_URL,
+ };
+`,
+        expectedOutput: [
+          {
+            type: 'must_find',
+            file: 'src/config.ts',
+            line_start: 12,
+            line_end: 12,
+            severity: 'CRITICAL',
+            category: 'security',
+            kind: 'secret_leak',
+          },
+        ],
+        notes: 'A literal `sk_live_` Stripe secret committed in plaintext — must be flagged and the key rotated. Mirrors the seeded PR #482 finding.',
+      },
+      {
+        id: '22222222-2222-4222-a222-000000000002',
+        workspaceId,
+        ownerKind: 'agent',
+        ownerId: securityReviewer.id,
+        name: 'SSRF via unvalidated webhook URL',
+        inputDiff: `diff --git a/src/modules/webhooks/service.ts b/src/modules/webhooks/service.ts
+--- a/src/modules/webhooks/service.ts
++++ b/src/modules/webhooks/service.ts
+@@ -15,3 +15,6 @@ export async function deliverWebhook(payload: WebhookPayload): Promise<void> {
+   const target = payload.callbackUrl;
++  // POST the payload to whatever URL the caller supplied
++  const res = await fetch(target, { method: 'POST', body: JSON.stringify(payload) });
++  if (!res.ok) throw new Error('delivery failed');
+   logger.info('webhook delivered', { target });
+ }
+`,
+        expectedOutput: [
+          {
+            type: 'must_find',
+            file: 'src/modules/webhooks/service.ts',
+            line_start: 16,
+            line_end: 18,
+            severity: 'CRITICAL',
+            category: 'security',
+            kind: 'finding',
+          },
+        ],
+        notes: 'User-controlled callbackUrl passed straight to fetch() → server-side request forgery; the destination must be validated / allow-listed.',
+      },
+      {
+        id: '22222222-2222-4222-a222-000000000003',
+        workspaceId,
+        ownerKind: 'agent',
+        ownerId: securityReviewer.id,
+        name: 'parameterized query is safe (must not flag)',
+        inputDiff: `diff --git a/src/modules/auth/repository.ts b/src/modules/auth/repository.ts
+--- a/src/modules/auth/repository.ts
++++ b/src/modules/auth/repository.ts
+@@ -22,3 +22,7 @@ export async function findUserByEmail(email: string) {
+   const normalized = email.trim().toLowerCase();
++  const rows = await db
++    .select()
++    .from(users)
++    .where(eq(users.email, normalized));
+   return rows[0] ?? null;
+ }
+`,
+        expectedOutput: [
+          {
+            type: 'must_not_flag',
+            file: 'src/modules/auth/repository.ts',
+            line_start: 23,
+            line_end: 26,
+            severity: null,
+            kind: null,
+          },
+        ],
+        notes: 'A bound-parameter query via eq() is NOT injection — the Security Reviewer must not raise a false positive here (exercises precision).',
+      },
+      {
+        id: '22222222-2222-4222-a222-000000000004',
+        workspaceId,
+        ownerKind: 'agent',
+        ownerId: securityReviewer.id,
+        name: 'command injection plus safe rename',
+        inputDiff: `diff --git a/src/modules/export/service.ts b/src/modules/export/service.ts
+--- a/src/modules/export/service.ts
++++ b/src/modules/export/service.ts
+@@ -8,3 +8,3 @@ export async function exportReport(name: string): Promise<string> {
+-  const file = await renderReport(name);
++  const file = execSync('generate-report --name ' + name).toString();
+   return file;
+ }
+@@ -30,3 +30,3 @@ export function reportPath(id: string): string {
+-  const dir = resolveBaseDir();
+-  return join(dir, id + '.pdf');
++  const baseDir = resolveBaseDir();
++  return join(baseDir, id + '.pdf');
+ }
+`,
+        expectedOutput: [
+          {
+            type: 'must_find',
+            file: 'src/modules/export/service.ts',
+            line_start: 8,
+            line_end: 8,
+            severity: 'CRITICAL',
+            category: 'security',
+            kind: 'finding',
+          },
+          {
+            type: 'must_not_flag',
+            file: 'src/modules/export/service.ts',
+            line_start: 30,
+            line_end: 31,
+            severity: null,
+            kind: null,
+          },
+        ],
+        notes: 'Mixed case: unsanitized input concatenated into execSync (command injection, must_find) alongside a purely cosmetic dir→baseDir rename in an unrelated hunk (must_not_flag).',
+      },
+      {
+        id: '22222222-2222-4222-a222-000000000005',
+        workspaceId,
+        ownerKind: 'agent',
+        ownerId: securityReviewer.id,
+        name: 'clean diff — auth comment only',
+        inputDiff: `diff --git a/src/modules/auth/middleware.ts b/src/modules/auth/middleware.ts
+--- a/src/modules/auth/middleware.ts
++++ b/src/modules/auth/middleware.ts
+@@ -12,4 +12,5 @@ export function requireAuth(req: Request, res: Response, next: Next) {
+   const token = req.headers.authorization?.split(' ')[1];
++  // NOTE: tokens are verified in verifyJwt below; nothing sensitive is logged here
+   if (!token) return res.status(401).end();
+   return verifyJwt(token, req, res, next);
+ }
+`,
+        expectedOutput: [],
+        notes: 'AC-9 empty-set path for the Security Reviewer: a comment-only change with no security impact — any finding here would be a false positive.',
+      },
+    ];
+
+    for (const c of securityEvalCaseSeeds) {
+      await db.insert(t.evalCases).values(c).onConflictDoNothing({ target: t.evalCases.id });
+    }
+
+    // Provenance backfill (Option A) — mirrors the General block; shares the
+    // same fixture PR (9001), its own review + findings. Clean-diff case (…0005)
+    // stays hand-authored (no source finding).
+    const SEC_FIXTURE_PR = 9001;
+    const secF = {
+      c1: 'bb000000-0000-4000-8000-000000000011',
+      c2: 'bb000000-0000-4000-8000-000000000012',
+      c3: 'bb000000-0000-4000-8000-000000000013',
+      c4: 'bb000000-0000-4000-8000-000000000014',
+    };
+    await seedEvalProvenance(db, {
+      workspaceId,
+      repoId,
+      agentId: securityReviewer.id,
+      prNumber: SEC_FIXTURE_PR,
+      prTitle: 'Eval fixtures (provenance)',
+      reviewId: 'bb000000-0000-4000-8000-000000000001',
+      findings: [
+        { id: secF.c1, file: 'src/config.ts', startLine: 12, endLine: 12, severity: 'CRITICAL', category: 'security', kind: 'secret_leak', title: 'hardcoded Stripe secret key in config', rationale: 'A literal `sk_live_` secret committed in plaintext.', decision: 'accepted' },
+        { id: secF.c2, file: 'src/modules/webhooks/service.ts', startLine: 16, endLine: 18, severity: 'CRITICAL', category: 'security', title: 'SSRF via unvalidated webhook URL', rationale: 'User-controlled callbackUrl passed straight to fetch().', decision: 'accepted' },
+        { id: secF.c3, file: 'src/modules/auth/repository.ts', startLine: 23, endLine: 26, severity: 'WARNING', category: 'security', title: 'possible SQL injection in user lookup', rationale: 'Raised, then dismissed — the query is parameterized via eq(), not injectable.', decision: 'dismissed' },
+        { id: secF.c4, file: 'src/modules/export/service.ts', startLine: 8, endLine: 8, severity: 'CRITICAL', category: 'security', title: 'command injection via execSync', rationale: 'Unsanitized input concatenated into a shell command.', decision: 'accepted' },
+      ],
+    });
+    const secLinks: Array<[string, string]> = [
+      ['22222222-2222-4222-a222-000000000001', secF.c1],
+      ['22222222-2222-4222-a222-000000000002', secF.c2],
+      ['22222222-2222-4222-a222-000000000003', secF.c3],
+      ['22222222-2222-4222-a222-000000000004', secF.c4],
+    ];
+    for (const [caseId, findingId] of secLinks) {
+      await db
+        .update(t.evalCases)
+        .set({ inputMeta: { source: 'finding', source_finding_id: findingId, source_pr_number: SEC_FIXTURE_PR } })
+        .where(eq(t.evalCases.id, caseId));
     }
   }
 

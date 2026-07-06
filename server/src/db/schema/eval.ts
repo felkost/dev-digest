@@ -31,7 +31,11 @@ export const evalBatches = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: 'cascade' }),
     kind: text('kind', { enum: ['full', 'calibration'] }).notNull(),
-    // nullable — calibration batches use a comparable per-case status without this label
+    // Null ONLY while a batch is unsealed (the row is inserted before its cases
+    // run). Once sealed, EVERY batch — full AND calibration — gets clean/degraded:
+    // the client uses `status != null` as the run-completion signal, so leaving
+    // calibration null made single-case runs appear to hang. The full-vs-
+    // calibration distinction is carried by `kind`, not by a null status.
     status: text('status', { enum: ['clean', 'degraded'] }),
     agentSnapshot: jsonb('agent_snapshot').notNull(),
     recall: doublePrecision('recall'),

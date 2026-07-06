@@ -223,11 +223,17 @@ export class EvalRunOrchestrator {
     const totalCost = outcomes.reduce((sum, o) => sum + (o.costUsd ?? 0), 0);
     const costUsd = outcomes.some((o) => o.costUsd !== null) ? totalCost : null;
 
-    // Calibration batches store status=null (documented in the schema comment
-    // at `db/schema/eval.ts` — a comparable per-case status without the
-    // clean/degraded label). Full batches: 'clean' unless any case errored.
-    const status: 'clean' | 'degraded' | null =
-      batch.kind === 'calibration' ? null : anyError ? 'degraded' : 'clean';
+    // Seal EVERY batch — full AND calibration — with a real clean/degraded
+    // status. Calibration was previously sealed as `null`, but the client keys
+    // run-completion off `status != null` (it polls batch-detail while status
+    // is null, per hooks/eval.ts). A null-sealed calibration batch therefore
+    // looked like it never finished: single-case ("Run case" / per-row ▷) runs
+    // appeared to hang forever, the pending state never cleared, and the case
+    // list / trend were never invalidated. Safe because the "Calibration" UI
+    // label comes from `kind` (BatchHistoryTable) and the trend/KPI queries
+    // filter by `kind='full'` (repository.ts) — a non-null status here never
+    // leaks a calibration batch into the trend (AC-28) nor changes its pill.
+    const status: 'clean' | 'degraded' = anyError ? 'degraded' : 'clean';
 
     await this.repo.updateBatchAggregate(batch.id, {
       recall,

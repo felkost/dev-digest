@@ -763,6 +763,10 @@ describe('EvalService.runBatch — calibration kind detection', () => {
 
     expect(result.kind).toBe('calibration');
     expect(insertBatchSpy.mock.calls[0]![0]).toMatchObject({ kind: 'calibration' });
+    // A calibration batch now seals with a real clean/degraded status (not
+    // null) — the client keys run-completion off `status != null`, so a
+    // null-sealed calibration batch made single-case runs appear to hang.
+    expect(result.status).not.toBeNull();
   });
 
   it('treats a single-case case set run as a full batch (not a strict subset)', async () => {

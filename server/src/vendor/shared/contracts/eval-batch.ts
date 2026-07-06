@@ -46,6 +46,10 @@ export const EvalCaseListItem = z.object({
   expected_output: z.array(Expectation),
   last_run_status: z.enum(['never_run', 'passed', 'failed', 'error', 'flaked']),
   last_run_summary: z.string().nullish(),
+  // Latest run's duration/cost — additive (nullish for never_run and for rows
+  // written before these were surfaced). Feeds the Case Editor "Last run" strip.
+  last_run_duration_ms: z.number().int().nullish(),
+  last_run_cost_usd: z.number().nullish(),
   notes: z.string().nullish(),
 });
 export type EvalCaseListItem = z.infer<typeof EvalCaseListItem>;

@@ -142,6 +142,10 @@ export function caseListItem(
     expected_output,
     last_run_status,
     last_run_summary,
+    // Duration/cost of the most recent run — surfaced for the Case Editor
+    // "Last run" strip. Null when the case was never run.
+    last_run_duration_ms: latestRun?.durationMs ?? null,
+    last_run_cost_usd: latestRun?.costUsd ?? null,
     notes: row.notes,
   };
 }

@@ -129,7 +129,16 @@ export function EvalsTab({ agent }: EvalsTabProps) {
           cta={t("evals.empty.cta")}
           onCta={openNewCase}
         />
-        {editorOpen && <CaseEditor agentId={agent.id} initialCase={editingCase} onClose={closeEditor} />}
+        {editorOpen && (
+          <CaseEditor
+            agentId={agent.id}
+            agentName={agent.name}
+            initialCase={editingCase}
+            onClose={closeEditor}
+            onRunCase={runCase}
+            runDisabled={runBatch.isPending}
+          />
+        )}
       </div>
     );
   }
@@ -196,7 +205,16 @@ export function EvalsTab({ agent }: EvalsTabProps) {
       <KpiDeltaStrip delta={kpiDelta} isLoading={loadingKpiDelta} />
       <TrendChart points={trendPoints ?? []} onHighlightBatch={setHighlightedBatchId} />
 
-      {editorOpen && <CaseEditor agentId={agent.id} initialCase={editingCase} onClose={closeEditor} />}
+      {editorOpen && (
+          <CaseEditor
+            agentId={agent.id}
+            agentName={agent.name}
+            initialCase={editingCase}
+            onClose={closeEditor}
+            onRunCase={runCase}
+            runDisabled={runBatch.isPending}
+          />
+        )}
 
       {clearHistoryConfirmOpen && (
         <ConfirmModal
