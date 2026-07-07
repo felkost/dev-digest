@@ -127,6 +127,15 @@ describe('SkillEvalRepository.getCase', () => {
     const row = await repo.getCase(WS_ID, CASE_ID);
     expect(row).toEqual(CASE_ROW);
     expect(calls.where.length).toBe(1);
+
+    // Assert the actual scoping eq-pairs, not just that a WHERE was called —
+    // otherwise the `owner_kind = 'skill'` literal is untested (a
+    // StringLiteral mutant `'skill' → ''` survives, since the fake db returns
+    // the seeded row regardless of the condition). Mirrors listTrendBatches.
+    const pairs = extractEqPairs(calls.where[0]![0]);
+    expect(pairs.id).toBe(CASE_ID);
+    expect(pairs.workspace_id).toBe(WS_ID);
+    expect(pairs.owner_kind).toBe('skill');
   });
 
   it('returns null for a cross-workspace / nonexistent case', async () => {
@@ -176,7 +185,9 @@ describe('SkillEvalRepository.insertRun', () => {
       insert: () => ({ values: () => ({ returning: () => Promise.resolve([]) }) }),
     } as unknown as Db;
     const repo = new SkillEvalRepository(db);
-    await expect(repo.insertRun({ caseId: CASE_ID, skillBatchId: BATCH_ID })).rejects.toThrow();
+    await expect(repo.insertRun({ caseId: CASE_ID, skillBatchId: BATCH_ID })).rejects.toThrow(
+      'insertRun: insert returned no row',
+    );
   });
 });
 
@@ -220,7 +231,7 @@ describe('SkillEvalRepository.insertBatch', () => {
         snapshotIdentity: {},
         model: 'claude-haiku-4-5',
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow('insertBatch: insert returned no row');
   });
 });
 
