@@ -48,14 +48,28 @@ export interface RunOptions {
 /** Run one headless Claude turn-loop and extract what it ACTUALLY did (not its prose). */
 export async function runClaude(prompt: string, opts: RunOptions = {}): Promise<Result> {
   const allowedTools = opts.allowedTools ?? [];
-  // With no tools, a subagent/skill prompt that says "read files" will loop on denied tool
-  // calls until max-turns. For these content-only evals the input is already in the prompt,
-  // so tell the model to answer directly.
+  const cwd = opts.cwd ?? REPO_ROOT;
+  // The SDK is handed the artifact as a bare-string system prompt, so — unlike a real Claude Code
+  // session — it gets NO environment block telling it where it is running. A tool-using agent then
+  // guesses an absolute prefix for its Read paths (`/root/...`, `/home/user/...`); when the guess
+  // misses it declares the repo "inaccessible" and gives up, tanking the case. Inject the working
+  // directory the way production always does, so path resolution is deterministic, not a lottery.
   let systemPrompt = opts.systemPrompt;
   if (allowedTools.length === 0) {
+    // With no tools, a subagent/skill prompt that says "read files" will loop on denied tool
+    // calls until max-turns. For these content-only evals the input is already in the prompt,
+    // so tell the model to answer directly.
     const directive =
       "\n\nYou have NO tools available in this session. Do not attempt any tool calls. " +
       "Answer directly and completely from the information given in the prompt.";
+    systemPrompt = (systemPrompt ?? "") + directive;
+  } else {
+    const directive =
+      `\n\nYour working directory is the repository root at \`${cwd}\`. Reference every file by its ` +
+      "repo-relative path from there (e.g. `reviewer-core/CLAUDE.md`, `server/CLAUDE.md`) — do NOT " +
+      "prepend `/root`, `/home/...`, or any other guessed absolute prefix. If a Read returns " +
+      "'file not found', locate the file with Glob before concluding it is absent: you are running " +
+      "inside the repository and it is fully readable. Never claim you lack access to the repository.";
     systemPrompt = (systemPrompt ?? "") + directive;
   }
 
@@ -82,7 +96,7 @@ export async function runClaude(prompt: string, opts: RunOptions = {}): Promise<
     systemPrompt,
     allowedTools,
     disallowedTools,
-    cwd: opts.cwd ?? REPO_ROOT,
+    cwd,
     // Default: do NOT load on-disk config — isolates the injected artifact. workflowTask overrides.
     settingSources: opts.settingSources ?? [],
     env: subscriptionEnv(),
