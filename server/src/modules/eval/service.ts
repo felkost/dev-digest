@@ -1,18 +1,29 @@
 import type { Container } from '../../platform/container.js';
 import { NotFoundError, ValidationError } from '../../platform/errors.js';
 import type {
+  EvalAgentSummary,
   EvalBatchCompareResult,
   EvalBatchDetail,
   EvalCaseCreateInput,
   EvalCaseListItem,
+  EvalRecentBatchRow,
+  EvalRunAllResult,
   EvalTrendPointV2,
   Expectation,
 } from '@devdigest/shared';
 import { parseUnifiedDiff } from '../../adapters/git/diff-parser.js';
 import { EvalRepository } from './repository.js';
-import { EvalRunOrchestrator } from './run-orchestrator.js';
+import { EvalRunOrchestrator, type Logger } from './run-orchestrator.js';
 import { computeFlakedStatus, scoreCase } from './scoring.js';
 import { batchCaseOutcome, batchDetailDto, batchDto, caseListItem, expectationsFromJson, trendPoint } from './helpers.js';
+
+/** Recent-batches feed row cap (Step 4 / AC-9) — server-fixed, never
+ *  client-supplied and never unbounded. */
+const RECENT_BATCHES_CAP = 25;
+
+/** Sparkline point count per agent card (Step 4) — deliberately small; the
+ *  full trend history is a separate, agent-scoped read (`getTrend`). */
+const SPARKLINE_POINTS_CAP = 8;
 
 /**
  * EvalService — case CRUD + read-side batch/trend/compare composition. Batch
@@ -371,7 +382,9 @@ export class EvalService {
         recall: b.recall - a.recall,
         precision: b.precision - a.precision,
         citation_accuracy: b.citation_accuracy - a.citation_accuracy,
+        cost_usd: a.cost_usd != null && b.cost_usd != null ? b.cost_usd - a.cost_usd : null,
       },
+      prompt_diff_available: a.system_prompt_snapshot != null && b.system_prompt_snapshot != null,
     };
   }
 
@@ -446,5 +459,134 @@ export class EvalService {
       precision: latest.precision - previous.precision,
       citation_accuracy: latest.citationAccuracy - previous.citationAccuracy,
     };
+  }
+
+  // ----------------------------------------------- cross-agent eval dashboard
+
+  /**
+   * One row per eval-configured agent in the workspace (AC-3): agent id/name/
+   * model, its latest sealed full batch (or null if it has cases but has
+   * never completed a full run), a small recall sparkline (last
+   * `SPARKLINE_POINTS_CAP` sealed full batches, chronological order — same
+   * reversal convention as `getTrend`), and its case_count. Returns `[]` when
+   * no agent qualifies (AC-5) — the empty-state rendering is entirely the
+   * client's concern.
+   */
+  async getOverview(workspaceId: string): Promise<EvalAgentSummary[]> {
+    const summaries = await this.repo.listEvalConfiguredAgentSummaries(workspaceId);
+
+    return Promise.all(
+      summaries.map(async (summary) => {
+        const recentBatches = await this.repo.recentTrendPointsForAgent(
+          workspaceId,
+          summary.agentId,
+          SPARKLINE_POINTS_CAP,
+        );
+        // recentTrendPointsForAgent returns newest-first; the sparkline reads
+        // left-to-right chronologically, same reversal convention as getTrend.
+        const sparklinePoints = recentBatches
+          .slice()
+          .reverse()
+          .filter((b) => b.recall !== null)
+          .map((b) => ({ ran_at: b.ranAt.toISOString(), recall: b.recall as number }));
+
+        return {
+          agent_id: summary.agentId,
+          agent_name: summary.agentName,
+          model: summary.model,
+          latest_batch: summary.latestBatch ? batchDto(summary.latestBatch) : null,
+          latest_version: summary.latestVersion,
+          sparkline_points: sparklinePoints,
+          case_count: summary.caseCount,
+        } satisfies EvalAgentSummary;
+      }),
+    );
+  }
+
+  /**
+   * Recent batches (any kind) across ALL agents in the workspace, newest
+   * first, capped at the server-fixed `RECENT_BATCHES_CAP` (25) — never a
+   * client-supplied limit (AC-9's resolved NEEDS-CLARIFICATION).
+   */
+  async getRecentAcrossAgents(workspaceId: string): Promise<EvalRecentBatchRow[]> {
+    const rows = await this.repo.listRecentBatchesAcrossAgents(workspaceId, RECENT_BATCHES_CAP);
+    return rows.map((r) => ({
+      batch: batchDto(r.batch),
+      agent_id: r.agentId,
+      agent_name: r.agentName,
+      version: r.version,
+      pass_count: r.passCount,
+      total_count: r.totalCount,
+    }));
+  }
+
+  /**
+   * Fan-out trigger (AC-11/AC-12): starts a batch for EVERY eval-configured
+   * agent in the workspace via the orchestrator's existing per-agent
+   * `startBatch` (zero new LLM call types) and returns immediately —
+   * insert-only, mirrors `startEvalRun`'s fast synchronous pattern. Does NOT
+   * execute the batches; the caller must fan out `executeRunAll` separately,
+   * detached from the request/response cycle (same convention as
+   * `startEvalRun`/`executeEvalRun`).
+   *
+   * An agent whose case set became empty between page load and click (last
+   * case deleted concurrently) has `startBatch` throw `ValidationError` —
+   * that one agent is caught, logged, and skipped so it doesn't 500 the
+   * whole fan-out; its `{agent_id, batch_id}` pair is simply omitted from
+   * `started`. Any OTHER per-agent failure (e.g. the agent itself was
+   * deleted between the summary query and this loop, which surfaces as
+   * `NotFoundError` from `startBatch`'s own `agentsRepo.getById` lookup) is
+   * caught and skipped the same way — a single bad agent must never abort
+   * the whole run-all fan-out (the plan's stated intent). `log` is optional
+   * (defaults to no-op) so existing callers/tests that omit it keep working;
+   * the route should pass a `req.log.child({...})` taken before responding,
+   * the same convention `executeRunAll`/`executeEvalRun` already use.
+   */
+  async startRunAll(
+    workspaceId: string,
+    log?: Logger,
+  ): Promise<{ result: EvalRunAllResult; started: Awaited<ReturnType<EvalRunOrchestrator['startBatch']>>[] }> {
+    const summaries = await this.repo.listEvalConfiguredAgentSummaries(workspaceId);
+
+    const started: Awaited<ReturnType<EvalRunOrchestrator['startBatch']>>[] = [];
+    for (const summary of summaries) {
+      try {
+        const startedBatch = await this.orchestrator.startBatch(workspaceId, summary.agentId);
+        started.push(startedBatch);
+      } catch (err) {
+        // Skip ANY per-agent failure here — e.g. "Agent has no eval cases to
+        // run" (ValidationError) or the agent having been deleted concurrently
+        // (NotFoundError) — and continue the fan-out for the remaining agents.
+        log?.warn(
+          { err, workspaceId, agentId: summary.agentId },
+          'eval: skipping agent in run-all (startBatch failed)',
+        );
+        continue;
+      }
+    }
+
+    return {
+      result: { started: started.map((s) => ({ agent_id: s.agent.id, batch_id: s.batch.id })) },
+      started,
+    };
+  }
+
+  /**
+   * Fan out + seal every batch already started via `startRunAll`, bounded at
+   * the orchestrator's CONCURRENCY cap (3, AC-13) — detached, see
+   * `startRunAll`'s and `executeEvalRun`'s doc comments for the full
+   * rationale (must not be awaited from within the route handler).
+   *
+   * Deliberately omits the explicit `concurrency` arg so it inherits
+   * `runManyBatchesWithCap`'s own default (`CONCURRENCY = 3`,
+   * `run-orchestrator.ts`) rather than duplicating the literal `3` here —
+   * passing a hardcoded `3` would silently diverge from the single-agent
+   * path if `CONCURRENCY` is ever tuned.
+   */
+  async executeRunAll(
+    started: Awaited<ReturnType<EvalRunOrchestrator['startBatch']>>[],
+    log?: Logger,
+  ): Promise<void> {
+    await this.orchestrator.runManyBatchesWithCap(started, undefined, log);
   }
 }

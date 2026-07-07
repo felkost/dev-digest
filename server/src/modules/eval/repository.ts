@@ -1,7 +1,33 @@
-import { and, count, desc, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import { ConfigError } from '../../platform/errors.js';
+
+/** Per-agent summary row for the cross-agent eval dashboard (Step 4, AC-3). */
+export interface EvalConfiguredAgentSummaryRow {
+  agentId: string;
+  agentName: string;
+  model: string;
+  latestBatch: EvalBatchRow | null;
+  /** 1-based version of the latest full batch = total count of this agent's
+   *  full batches (the newest one is the highest ordinal). Null when the agent
+   *  has no sealed full batch yet. Derived (never a stored column) so it
+   *  renumbers automatically when history is cleared. */
+  latestVersion: number | null;
+  caseCount: number;
+}
+
+/** One row in the cross-agent "recent batches" feed (Step 4, AC-9). */
+export interface RecentBatchAcrossAgentsRow {
+  batch: EvalBatchRow;
+  agentId: string;
+  agentName: string;
+  /** 1-based chronological ordinal of this batch among its agent's full
+   *  batches (v1 = oldest). Derived via a window function. */
+  version: number;
+  passCount: number;
+  totalCount: number;
+}
 
 // Row shapes (Drizzle's inferred select/insert types for the eval tables).
 type EvalCaseRow = typeof t.evalCases.$inferSelect;
@@ -257,6 +283,184 @@ export class EvalRepository {
         ),
       )
       .orderBy(desc(t.evalBatches.ranAt), desc(t.evalBatches.id))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  // ----------------------------------------------- cross-agent eval dashboard
+
+  /**
+   * Per-agent summary for every agent in the workspace that has ≥1 agent-owned
+   * eval case (AC-3): the agent's id/name/model, its latest SEALED full batch
+   * (or null if it has cases but has never completed a full run), and its
+   * case_count. Mirrors `listTrendBatches`/`previousFullBatch`'s filter
+   * conventions (`kind='full' AND status IS NOT NULL`) for "latest batch".
+   *
+   * Sparkline points are intentionally a SEPARATE, later query
+   * (`recentTrendPointsForAgents`) capped to a small N — this method never
+   * fetches full trend history for the dashboard card.
+   */
+  async listEvalConfiguredAgentSummaries(workspaceId: string): Promise<EvalConfiguredAgentSummaryRow[]> {
+    const caseCounts = await this.db
+      .select({
+        agentId: t.evalCases.ownerId,
+        caseCount: sql<number>`count(*)::int`,
+      })
+      .from(t.evalCases)
+      .where(and(eq(t.evalCases.workspaceId, workspaceId), eq(t.evalCases.ownerKind, 'agent')))
+      .groupBy(t.evalCases.ownerId);
+
+    if (caseCounts.length === 0) return [];
+
+    const agentIds = caseCounts.map((c) => c.agentId);
+
+    const agentRows = await this.db
+      .select({ id: t.agents.id, name: t.agents.name, model: t.agents.model })
+      .from(t.agents)
+      .where(and(eq(t.agents.workspaceId, workspaceId), inArray(t.agents.id, agentIds)))
+      // Deterministic dashboard grid order: without an ORDER BY these rows
+      // come back in whatever order Postgres happens to return them, which
+      // is not guaranteed stable across requests. Sort by name ascending —
+      // user-friendly and stable.
+      .orderBy(asc(t.agents.name));
+
+    // Latest sealed full batch per qualifying agent — one query, filtered to
+    // the qualifying agent id set, then reduced client-side to the newest row
+    // per agent (same tie-break as listTrendBatches: desc(ran_at), desc(id)).
+    const batchRows = await this.db
+      .select()
+      .from(t.evalBatches)
+      .where(
+        and(
+          eq(t.evalBatches.workspaceId, workspaceId),
+          inArray(t.evalBatches.agentId, agentIds),
+          eq(t.evalBatches.kind, 'full'),
+          isNotNull(t.evalBatches.status),
+        ),
+      )
+      .orderBy(desc(t.evalBatches.ranAt), desc(t.evalBatches.id));
+
+    const latestBatchByAgent = new Map<string, EvalBatchRow>();
+    // Total full-batch count per agent = the newest batch's version ordinal
+    // (v1 = oldest, so the latest full batch is v{count}).
+    const fullBatchCountByAgent = new Map<string, number>();
+    for (const row of batchRows) {
+      if (!latestBatchByAgent.has(row.agentId)) latestBatchByAgent.set(row.agentId, row);
+      fullBatchCountByAgent.set(row.agentId, (fullBatchCountByAgent.get(row.agentId) ?? 0) + 1);
+    }
+
+    const caseCountByAgent = new Map(caseCounts.map((c) => [c.agentId, c.caseCount]));
+
+    return agentRows.map((agent) => ({
+      agentId: agent.id,
+      agentName: agent.name,
+      model: agent.model,
+      latestBatch: latestBatchByAgent.get(agent.id) ?? null,
+      latestVersion: fullBatchCountByAgent.get(agent.id) ?? null,
+      caseCount: caseCountByAgent.get(agent.id) ?? 0,
+    }));
+  }
+
+  /**
+   * Recent sealed full batches for ONE agent, newest first, capped to `limit`
+   * (small — feeds a dashboard-card sparkline, not the full trend chart).
+   * Same `kind='full' AND status IS NOT NULL` filter as `listTrendBatches`.
+   */
+  async recentTrendPointsForAgent(
+    workspaceId: string,
+    agentId: string,
+    limit: number,
+  ): Promise<EvalBatchRow[]> {
+    return this.db
+      .select()
+      .from(t.evalBatches)
+      .where(
+        and(
+          eq(t.evalBatches.workspaceId, workspaceId),
+          eq(t.evalBatches.agentId, agentId),
+          eq(t.evalBatches.kind, 'full'),
+          isNotNull(t.evalBatches.status),
+        ),
+      )
+      .orderBy(desc(t.evalBatches.ranAt), desc(t.evalBatches.id))
+      .limit(limit);
+  }
+
+  /**
+   * Recent batches (any kind) across ALL agents in the workspace, newest
+   * first, capped at `limit` (server-fixed cap — never unbounded, AC-9).
+   * `pass_count`/`total_count` are aggregated from `eval_runs` grouped by
+   * `batch_id`, joined in as a second query (Drizzle doesn't cleanly express
+   * "join + group-by + limit-outer-rows-only" in one query without a lateral
+   * join, and `eval_batches` rows are already capped by `limit` before the
+   * runs aggregate is computed, so this stays bounded).
+   */
+  async listRecentBatchesAcrossAgents(
+    workspaceId: string,
+    limit: number,
+  ): Promise<RecentBatchAcrossAgentsRow[]> {
+    const rows = await this.db
+      .select({
+        batch: t.evalBatches,
+        agentName: t.agents.name,
+        // 1-based chronological ordinal among THIS agent's full batches
+        // (v1 = oldest). Window functions run over the full filtered set
+        // before ORDER BY/LIMIT, so this is the true historical version even
+        // though the outer query keeps only the most recent `limit` rows.
+        version: sql<number>`(row_number() over (partition by ${t.evalBatches.agentId} order by ${t.evalBatches.ranAt} asc, ${t.evalBatches.id} asc))::int`.as('version'),
+      })
+      .from(t.evalBatches)
+      .innerJoin(t.agents, eq(t.evalBatches.agentId, t.agents.id))
+      // Dashboard shows real test attempts only — calibration (subset) batches
+      // are excluded from the cross-agent feed and from version numbering.
+      .where(and(eq(t.evalBatches.workspaceId, workspaceId), eq(t.evalBatches.kind, 'full')))
+      .orderBy(desc(t.evalBatches.ranAt), desc(t.evalBatches.id))
+      .limit(limit);
+
+    if (rows.length === 0) return [];
+
+    const batchIds = rows.map((r) => r.batch.id);
+    const passCountRows = await this.db
+      .select({
+        batchId: t.evalRuns.batchId,
+        passCount: sql<number>`count(*) filter (where ${t.evalRuns.pass} = true)::int`,
+        totalCount: sql<number>`count(*)::int`,
+      })
+      .from(t.evalRuns)
+      .where(inArray(t.evalRuns.batchId, batchIds))
+      .groupBy(t.evalRuns.batchId);
+
+    const passCountByBatch = new Map(
+      passCountRows.filter((r) => r.batchId != null).map((r) => [r.batchId as string, r]),
+    );
+
+    return rows.map((r) => {
+      const counts = passCountByBatch.get(r.batch.id);
+      return {
+        batch: r.batch,
+        agentId: r.batch.agentId,
+        agentName: r.agentName,
+        version: r.version,
+        passCount: counts?.passCount ?? 0,
+        totalCount: counts?.totalCount ?? 0,
+      };
+    });
+  }
+
+  /**
+   * A batch's owning agent id + frozen prompt snapshot, workspace-scoped —
+   * the ONE method `container.evalRepo` exposes outside the `eval` module
+   * (used by `agents/service.ts`'s promote flow to read the snapshot without
+   * importing `eval/repository.js` directly, R6).
+   */
+  async getBatchPromptSnapshot(
+    workspaceId: string,
+    batchId: string,
+  ): Promise<{ agentId: string; systemPromptSnapshot: string | null } | null> {
+    const rows = await this.db
+      .select({ agentId: t.evalBatches.agentId, systemPromptSnapshot: t.evalBatches.systemPromptSnapshot })
+      .from(t.evalBatches)
+      .where(and(eq(t.evalBatches.id, batchId), eq(t.evalBatches.workspaceId, workspaceId)))
       .limit(1);
     return rows[0] ?? null;
   }

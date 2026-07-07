@@ -26,6 +26,7 @@ import { ConfigError } from './errors.js';
 import { AgentsRepository } from '../modules/agents/repository.js';
 import { ReviewRepository } from '../modules/reviews/repository.js';
 import { SkillsRepository } from '../modules/skills/repository.js';
+import { EvalRepository } from '../modules/eval/repository.js';
 import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { BlastService } from '../modules/blast/service.js';
@@ -80,6 +81,7 @@ export class Container {
   private _agentsRepo?: AgentsRepository;
   private _reviewRepo?: ReviewRepository;
   private _skillsRepo?: SkillsRepository;
+  private _evalRepo?: EvalRepository;
   private _repoIntel?: RepoIntel;
   private _blast?: BlastService;
   private _contextDocs?: ContextDocsService;
@@ -112,6 +114,16 @@ export class Container {
 
   get skillsRepo(): SkillsRepository {
     return (this._skillsRepo ??= new SkillsRepository(this.db));
+  }
+
+  /**
+   * Eval batches/cases (L06). Exposed on the container — like `agentsRepo`/
+   * `reviewRepo` — so the `agents` module's promote flow can read a batch's
+   * frozen prompt snapshot (`getBatchPromptSnapshot`) without importing
+   * `eval/repository.js` directly (module isolation, R6).
+   */
+  get evalRepo(): EvalRepository {
+    return (this._evalRepo ??= new EvalRepository(this.db));
   }
 
   get codeIndex(): CodeIndex {

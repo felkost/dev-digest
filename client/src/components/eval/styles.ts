@@ -1,6 +1,31 @@
 import type { CSSProperties } from "react";
 
-/** Co-located styles for the EvalsTab and its sub-components. */
+/** Vertical padding (top + bottom, in px) applied by the shared `td` token
+ *  below — kept as a standalone numeric constant (rather than parsing the
+ *  `padding` string at runtime) so consumers that need to derive a row
+ *  height (e.g. `RecentRunsFeed`'s "10 visible rows" viewport) can compute
+ *  it from the SAME source as the actual rendered cell padding, instead of
+ *  an independent hand-tuned guess that can silently drift from the real
+ *  style. Keep this in sync with `td.padding` above/below whenever it
+ *  changes. */
+const TD_VERTICAL_PADDING_PX = 16; // "8px 10px" → 8 + 8
+
+/** Approximate line-height (px) of the table's body text at `table.fontSize`
+ *  (12.5px), matching the browser default `normal` line-height (~1.2×) for
+ *  the font stack used here. Combined with `TD_VERTICAL_PADDING_PX` this
+ *  gives a realistic single-row height for viewport-sizing table rows
+ *  without introducing a disconnected literal. */
+const TD_TEXT_LINE_HEIGHT_PX = 15;
+
+/** A single table body row's rendered height (px): text line-height + the
+ *  cell's own vertical padding. Exported so any consumer that needs to size
+ *  a scrollable viewport to a fixed number of visible rows (e.g.
+ *  `RecentRunsFeed`) derives it from these tokens instead of a hardcoded
+ *  guess — see the `td`/`table` tokens this is computed from. */
+export const TABLE_ROW_HEIGHT_PX = TD_TEXT_LINE_HEIGHT_PX + TD_VERTICAL_PADDING_PX;
+
+/** Co-located styles for the eval-display components (shared across the
+ *  per-agent Evals tab and the cross-agent Eval Dashboard). */
 export const s = {
   wrap: { padding: "24px 28px" } satisfies CSSProperties,
   headerRow: {
@@ -80,12 +105,14 @@ export const s = {
     textTransform: "uppercase",
     color: "var(--text-muted)",
   } satisfies CSSProperties,
-  dashboardLinkDisabled: {
+  dashboardLink: {
     fontSize: 12,
-    color: "var(--text-muted)",
-    opacity: 0.5,
-    cursor: "not-allowed",
-    userSelect: "none",
+    color: "var(--accent)",
+    background: "none",
+    border: "none",
+    padding: 0,
+    cursor: "pointer",
+    fontWeight: 600,
   } satisfies CSSProperties,
   metricsGrid: {
     display: "grid",
@@ -137,6 +164,26 @@ export const s = {
     verticalAlign: "middle",
   } satisfies CSSProperties,
   batchRow: { cursor: "pointer" } satisfies CSSProperties,
+  // Always-visible header above the dashboard Recent-Runs table: section
+  // title + selection hint on the left, the Compare button pinned right.
+  compareHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+  } satisfies CSSProperties,
+  compareHeaderLeft: { display: "flex", alignItems: "center", gap: 12 } satisfies CSSProperties,
+  compareHeaderTitle: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 11,
+    color: "var(--text-muted)",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+  } satisfies CSSProperties,
+  compareHeaderHint: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
   drilldownWrap: {
     padding: "12px 14px",
     background: "var(--bg-hover)",

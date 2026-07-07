@@ -1,7 +1,14 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { EvalCaseCreateInput, EvalRunAcceptedResponse, EvalRunBatchRequest } from '@devdigest/shared';
+import {
+  EvalAgentSummary,
+  EvalCaseCreateInput,
+  EvalRecentBatchRow,
+  EvalRunAcceptedResponse,
+  EvalRunAllResult,
+  EvalRunBatchRequest,
+} from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { EvalService } from './service.js';
@@ -20,6 +27,9 @@ import { EvalService } from './service.js';
  *   GET    /agents/:id/evals/trend                  → trend points, full batches only (AC-28–AC-30)
  *   GET    /agents/:id/evals/compare?a=&b=          → side-by-side batch comparison (AC-32)
  *   GET    /agents/:id/evals/kpi-delta?batch_id=     → KPI delta vs. previous full batch (AC-31, S5)
+ *   GET    /evals/overview                          → cross-agent dashboard cards (AC-3–AC-6)
+ *   GET    /evals/recent                            → cross-agent recent-batches feed, server-capped at 25 (AC-8/AC-9)
+ *   POST   /evals/run-all                           → fan-out a batch for every eval-configured agent (AC-11–AC-13)
  */
 const CaseIdParams = z.object({ id: z.string().uuid(), caseId: z.string().uuid() });
 const BatchIdParams = z.object({ id: z.string().uuid(), batchId: z.string().uuid() });
@@ -173,6 +183,70 @@ export default async function evalRoutes(appBase: FastifyInstance): Promise<void
     async (req) => {
       const { workspaceId } = await getContext(container, req);
       return service.getKpiDelta(workspaceId, req.params.id, req.query.batch_id);
+    },
+  );
+
+  // ---- Cross-agent dashboard: overview cards (AC-3–AC-6) --------------------
+  app.get(
+    '/evals/overview',
+    { schema: { response: { 200: z.array(EvalAgentSummary) } } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return service.getOverview(workspaceId);
+    },
+  );
+
+  // ---- Cross-agent dashboard: recent-batches feed (AC-8/AC-9) ----------------
+  // Server-side cap of 25 is applied inside `EvalService.getRecentAcrossAgents`
+  // — no client-supplied `limit` query param, per the spec's resolved
+  // NEEDS-CLARIFICATION (this plan's §8 Out of Scope).
+  app.get(
+    '/evals/recent',
+    { schema: { response: { 200: z.array(EvalRecentBatchRow) } } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return service.getRecentAcrossAgents(workspaceId);
+    },
+  );
+
+  // ---- Cross-agent dashboard: run every eval-configured agent (AC-11–AC-13) -
+  // Same 202-Accepted + detached-fan-out shape as `POST /agents/:id/evals/run`
+  // above: `startRunAll` resolves + inserts every agent's batch row
+  // synchronously (fast, no LLM calls yet), then returns immediately.
+  // `executeRunAll` runs detached via `void ... .catch(...)` with a
+  // `req.log.child({...})` captured BEFORE responding — Fastify recycles
+  // `req.log` once the response is sent (server/insights.md's "recycled
+  // req.log" entry), so the fan-out below must use a logger taken now.
+  //
+  // Rate-limited PER-WORKSPACE (AC-12), matching this file's existing
+  // `eval-run:${workspaceId}` keying convention for `/agents/:id/evals/run` —
+  // not `review-all`'s default IP-keying.
+  app.post(
+    '/evals/run-all',
+    {
+      schema: { response: { 202: EvalRunAllResult } },
+      config: {
+        rateLimit: {
+          max: 2,
+          timeWindow: '1 minute',
+          keyGenerator: async (req: FastifyRequest) => {
+            const { workspaceId } = await getContext(container, req);
+            return `eval-run-all:${workspaceId}`;
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const ctx = await getContext(container, req);
+      const log = req.log.child({ route: 'evals/run-all', workspaceId: ctx.workspaceId });
+      const { result, started } = await service.startRunAll(ctx.workspaceId, log);
+
+      void service.executeRunAll(started, log).catch((err: Error) => {
+        log.error({ err }, 'eval run-all: batch execution failed');
+      });
+
+      reply.code(202);
+      return result;
     },
   );
 }

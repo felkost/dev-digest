@@ -195,6 +195,7 @@ export function batchDto(row: EvalBatchRow): EvalBatch {
     citation_accuracy: row.citationAccuracy,
     cost_usd: row.costUsd,
     ran_at: row.ranAt.toISOString(),
+    system_prompt_snapshot: row.systemPromptSnapshot,
   };
 }
 

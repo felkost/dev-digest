@@ -322,5 +322,12 @@ export const AgentVersion = z.object({
   version: z.number().int(),
   config: AgentVersionConfig,
   created_at: z.string(),
+  // Metadata ABOUT this version row (not part of the frozen config snapshot):
+  // how it came to exist — a manual edit, or promoted from an eval batch's
+  // agent_snapshot (Agent Eval Dashboard). `source_batch_id` is the promoting
+  // batch's id when `source === 'eval_promote'`. Both `.nullish()` — absent on
+  // any version row written before this feature existed.
+  source: z.enum(['manual', 'eval_promote']).nullish(),
+  source_batch_id: z.string().nullish(),
 });
 export type AgentVersion = z.infer<typeof AgentVersion>;

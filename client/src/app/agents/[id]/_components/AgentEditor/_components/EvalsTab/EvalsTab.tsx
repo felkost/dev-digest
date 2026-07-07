@@ -21,11 +21,8 @@ import {
 } from "@/lib/hooks/eval";
 import { CaseList } from "./_components/CaseList/CaseList";
 import { CaseEditor } from "./_components/CaseEditor/CaseEditor";
-import { BatchHistoryTable } from "./_components/BatchHistoryTable/BatchHistoryTable";
-import { TrendChart } from "./_components/TrendChart/TrendChart";
 import { KpiDeltaStrip } from "./_components/KpiDeltaStrip/KpiDeltaStrip";
-import { EvalMetrics } from "./_components/EvalMetrics/EvalMetrics";
-import { s } from "./styles";
+import { BatchHistoryTable, TrendChart, EvalMetrics, evalStyles as s } from "@/components/eval";
 
 interface EvalsTabProps {
   agent: Agent;
@@ -152,6 +149,7 @@ export function EvalsTab({ agent }: EvalsTabProps) {
         delta={kpiDelta}
         tracesPassed={tracesPassed}
         tracesTotal={tracesTotal}
+        agentId={agent.id}
       />
       <div style={s.headerRow}>
         <div style={s.titleRow}>
@@ -203,7 +201,7 @@ export function EvalsTab({ agent }: EvalsTabProps) {
 
       <div style={s.sectionLabel}>{t("evals.trend.title")}</div>
       <KpiDeltaStrip delta={kpiDelta} isLoading={loadingKpiDelta} />
-      <TrendChart points={trendPoints ?? []} onHighlightBatch={setHighlightedBatchId} />
+      <TrendChart points={trendPoints ?? []} onHighlightBatch={setHighlightedBatchId} fillWidth />
 
       {editorOpen && (
           <CaseEditor

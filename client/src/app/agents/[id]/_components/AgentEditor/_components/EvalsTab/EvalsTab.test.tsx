@@ -7,6 +7,11 @@ import agentsMessages from "../../../../../../../../messages/en/agents.json";
 
 // ---- Mocks -----------------------------------------------------------------
 
+const routerPush = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPush }),
+}));
+
 let cases: EvalCaseListItem[] = [];
 let excludedSkillOwnedCount = 0;
 let batches: EvalBatch[] = [];
@@ -84,6 +89,7 @@ function makeCase(overrides: Partial<EvalCaseListItem> = {}): EvalCaseListItem {
 
 afterEach(() => {
   cleanup();
+  routerPush.mockClear();
   cases = [];
   excludedSkillOwnedCount = 0;
   batches = [];
@@ -188,13 +194,14 @@ describe("EvalsTab", () => {
   it("compare panel renders when two batch rows are selected", async () => {
     cases = [makeCase()];
     batches = [
-      { id: "b1", agent_id: "ag1", kind: "full", status: "clean", agent_snapshot: { display: { model: "gpt-4.1" } }, recall: 1, precision: 1, citation_accuracy: 1, cost_usd: 0.01, ran_at: "2026-07-01T00:00:00.000Z" },
-      { id: "b2", agent_id: "ag1", kind: "full", status: "degraded", agent_snapshot: { display: { model: "gpt-4.1" } }, recall: 0.8, precision: 0.9, citation_accuracy: 0.95, cost_usd: 0.02, ran_at: "2026-07-02T00:00:00.000Z" },
+      { id: "b1", agent_id: "ag1", kind: "full", status: "clean", agent_snapshot: { display: { model: "gpt-4.1" } }, recall: 1, precision: 1, citation_accuracy: 1, cost_usd: 0.01, ran_at: "2026-07-01T00:00:00.000Z", system_prompt_snapshot: null },
+      { id: "b2", agent_id: "ag1", kind: "full", status: "degraded", agent_snapshot: { display: { model: "gpt-4.1" } }, recall: 0.8, precision: 0.9, citation_accuracy: 0.95, cost_usd: 0.02, ran_at: "2026-07-02T00:00:00.000Z", system_prompt_snapshot: null },
     ];
     compareResult = {
-      a: { id: "b1", agent_id: "ag1", kind: "full", status: "clean", agent_snapshot: {}, recall: 1, precision: 1, citation_accuracy: 1, cost_usd: 0.01, ran_at: "2026-07-01T00:00:00.000Z", cases: [], excluded_skill_owned_count: 0 },
-      b: { id: "b2", agent_id: "ag1", kind: "full", status: "degraded", agent_snapshot: {}, recall: 0.8, precision: 0.9, citation_accuracy: 0.95, cost_usd: 0.02, ran_at: "2026-07-02T00:00:00.000Z", cases: [], excluded_skill_owned_count: 0 },
-      deltas: { recall: -0.2, precision: -0.1, citation_accuracy: -0.05 },
+      a: { id: "b1", agent_id: "ag1", kind: "full", status: "clean", agent_snapshot: {}, recall: 1, precision: 1, citation_accuracy: 1, cost_usd: 0.01, ran_at: "2026-07-01T00:00:00.000Z", system_prompt_snapshot: null, cases: [], excluded_skill_owned_count: 0 },
+      b: { id: "b2", agent_id: "ag1", kind: "full", status: "degraded", agent_snapshot: {}, recall: 0.8, precision: 0.9, citation_accuracy: 0.95, cost_usd: 0.02, ran_at: "2026-07-02T00:00:00.000Z", system_prompt_snapshot: null, cases: [], excluded_skill_owned_count: 0 },
+      deltas: { recall: -0.2, precision: -0.1, citation_accuracy: -0.05, cost_usd: null },
+      prompt_diff_available: false,
     };
     const user = userEvent.setup();
     renderWithIntl(<EvalsTab agent={AGENT} />);
@@ -291,7 +298,7 @@ describe("EvalsTab", () => {
   it("clear history requires confirmation before the clear-history mutation fires", async () => {
     cases = [makeCase()];
     batches = [
-      { id: "b1", agent_id: "ag1", kind: "full", status: "clean", agent_snapshot: { display: { model: "gpt-4.1" } }, recall: 1, precision: 1, citation_accuracy: 1, cost_usd: 0.01, ran_at: "2026-07-01T00:00:00.000Z" },
+      { id: "b1", agent_id: "ag1", kind: "full", status: "clean", agent_snapshot: { display: { model: "gpt-4.1" } }, recall: 1, precision: 1, citation_accuracy: 1, cost_usd: 0.01, ran_at: "2026-07-01T00:00:00.000Z", system_prompt_snapshot: null },
     ];
     const user = userEvent.setup();
     renderWithIntl(<EvalsTab agent={AGENT} />);
@@ -317,10 +324,19 @@ describe("EvalsTab", () => {
     expect(screen.getByRole("button", { name: "Clear history" })).toBeDisabled();
   });
 
+  it("'View full dashboard' navigates to this agent's dashboard detail page (Step 14)", async () => {
+    cases = [makeCase()];
+    const user = userEvent.setup();
+    renderWithIntl(<EvalsTab agent={AGENT} />);
+
+    await user.click(screen.getByRole("button", { name: "View full dashboard" }));
+    expect(routerPush).toHaveBeenCalledWith("/evals/ag1");
+  });
+
   it("shows the per-case error message in the batch drill-down for an errored outcome, with full text in the title tooltip", async () => {
     cases = [makeCase()];
     batches = [
-      { id: "b1", agent_id: "ag1", kind: "full", status: "degraded", agent_snapshot: { display: { model: "gpt-4.1" } }, recall: 0.8, precision: 0.9, citation_accuracy: 0.95, cost_usd: 0.02, ran_at: "2026-07-02T00:00:00.000Z" },
+      { id: "b1", agent_id: "ag1", kind: "full", status: "degraded", agent_snapshot: { display: { model: "gpt-4.1" } }, recall: 0.8, precision: 0.9, citation_accuracy: 0.95, cost_usd: 0.02, ran_at: "2026-07-02T00:00:00.000Z", system_prompt_snapshot: null },
     ];
     const errorMessage = "ProviderTimeoutError: upstream request to anthropic timed out after 30000ms";
     batchDetail = {
@@ -334,6 +350,7 @@ describe("EvalsTab", () => {
       citation_accuracy: 0.95,
       cost_usd: 0.02,
       ran_at: "2026-07-02T00:00:00.000Z",
+      system_prompt_snapshot: null,
       excluded_skill_owned_count: 0,
       cases: [
         {

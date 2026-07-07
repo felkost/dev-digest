@@ -7,6 +7,9 @@
  *   GET        /agents/:id/evals/batches[/:batchId]
  *   GET        /agents/:id/evals/trend
  *   GET        /agents/:id/evals/compare
+ *   GET        /evals/overview
+ *   GET        /evals/recent
+ *   POST       /evals/run-all
  *
  * Hermetic: no Postgres, no Docker.
  *
@@ -880,5 +883,293 @@ describe('GET /agents/:id/evals/compare', () => {
     });
     await app.close();
     expect(res.statusCode).toBe(422);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /evals/overview
+// ---------------------------------------------------------------------------
+
+describe('GET /evals/overview', () => {
+  it('returns [] for a workspace with zero eval-configured agents (AC-5)', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([]);
+
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'GET', url: '/evals/overview' });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+
+  it('returns 200 with one card per eval-configured agent (AC-3, AC-4)', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
+      {
+        agentId: AGENT_ID,
+        agentName: 'Test Agent',
+        model: 'gpt-4.1',
+        latestBatch: makeBatchRow({ systemPromptSnapshot: null }),
+        latestVersion: 3,
+        caseCount: 3,
+      },
+    ] as any);
+    vi.spyOn(EvalRepository.prototype, 'recentTrendPointsForAgent').mockResolvedValue([
+      makeBatchRow({ ranAt: new Date('2026-01-02'), systemPromptSnapshot: null }),
+    ] as any);
+
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'GET', url: '/evals/overview' });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].agent_id).toBe(AGENT_ID);
+    expect(body[0].case_count).toBe(3);
+    expect(body[0].latest_batch.id).toBe(BATCH_ID);
+    expect(body[0].sparkline_points).toHaveLength(1);
+  });
+
+  it('never surfaces another workspace agent — repository is called with THIS workspace only', async () => {
+    const summariesSpy = vi
+      .spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries')
+      .mockResolvedValue([]);
+
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'GET', url: '/evals/overview' });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+    expect(summariesSpy).toHaveBeenCalledWith(WS_ID);
+    expect(summariesSpy).not.toHaveBeenCalledWith(OTHER_WS_ID);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /evals/recent
+// ---------------------------------------------------------------------------
+
+describe('GET /evals/recent', () => {
+  it('returns [] for a workspace with zero batches', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listRecentBatchesAcrossAgents').mockResolvedValue([]);
+
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'GET', url: '/evals/recent' });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+
+  it('returns 200 with agent-attributed recent batch rows (AC-8)', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listRecentBatchesAcrossAgents').mockResolvedValue([
+      {
+        batch: makeBatchRow({ systemPromptSnapshot: null }),
+        agentId: AGENT_ID,
+        agentName: 'Test Agent',
+        version: 1,
+        passCount: 4,
+        totalCount: 5,
+      },
+    ] as any);
+
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'GET', url: '/evals/recent' });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].agent_id).toBe(AGENT_ID);
+    expect(body[0].agent_name).toBe('Test Agent');
+    expect(body[0].pass_count).toBe(4);
+    expect(body[0].total_count).toBe(5);
+  });
+
+  it('never requests more than the server-fixed cap regardless of workspace (AC-9)', async () => {
+    const recentSpy = vi
+      .spyOn(EvalRepository.prototype, 'listRecentBatchesAcrossAgents')
+      .mockResolvedValue([]);
+
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'GET', url: '/evals/recent' });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(recentSpy).toHaveBeenCalledWith(WS_ID, 25);
+    expect(recentSpy).not.toHaveBeenCalledWith(OTHER_WS_ID, expect.anything());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /evals/run-all
+// ---------------------------------------------------------------------------
+
+describe('POST /evals/run-all', () => {
+  it('returns 202 with a started entry per eval-configured agent, and the fan-out completes detached (AC-11)', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
+      { agentId: AGENT_ID, agentName: 'Test Agent', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+    ] as any);
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([makeCaseRow()] as any);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockResolvedValue(makeBatchRow({ status: null }) as any);
+    vi.spyOn(EvalRepository.prototype, 'insertRun').mockResolvedValue({} as any);
+    const updateAggSpy = vi.spyOn(EvalRepository.prototype, 'updateBatchAggregate').mockResolvedValue(undefined);
+
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'POST', url: '/evals/run-all' });
+
+    expect(res.statusCode).toBe(202);
+    const body = res.json();
+    expect(body.started).toEqual([{ agent_id: AGENT_ID, batch_id: BATCH_ID }]);
+
+    // Detached fan-out — give the microtask queue a turn before asserting the
+    // background execution ran, mirroring the /agents/:id/evals/run precedent.
+    await new Promise((resolve) => setImmediate(resolve));
+    await app.close();
+
+    expect(updateAggSpy).toHaveBeenCalledOnce();
+  });
+
+  it('returns 202 with an empty started list when no agent is eval-configured', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([]);
+
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'POST', url: '/evals/run-all' });
+    await app.close();
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ started: [] });
+  });
+
+  it('never triggers a run for another workspace\'s agents — resolution is scoped to THIS workspace', async () => {
+    const summariesSpy = vi
+      .spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries')
+      .mockResolvedValue([]);
+
+    const app = await buildEvalApp();
+    const res = await app.inject({ method: 'POST', url: '/evals/run-all' });
+    await app.close();
+
+    expect(res.statusCode).toBe(202);
+    expect(summariesSpy).toHaveBeenCalledWith(WS_ID);
+    expect(summariesSpy).not.toHaveBeenCalledWith(OTHER_WS_ID);
+  });
+});
+
+describe('POST /evals/run-all — registered rate-limit config (static assertion)', () => {
+  it('the route is registered with { max: 2, timeWindow: "1 minute" } and a per-workspace keyGenerator (AC-12)', async () => {
+    // Same constraint as /agents/:id/evals/run's precedent above:
+    // @fastify/rate-limit is disabled under nodeEnv==='test', so app.inject()
+    // via buildApp() can never produce a real 429. Inspect the route's own
+    // registered config via the `onRoute` hook instead.
+    const raw = Fastify();
+    raw.setValidatorCompiler(validatorCompiler);
+    raw.setSerializerCompiler(serializerCompiler);
+    raw.decorate('container', {
+      db: {},
+      agentsRepo: { getById: vi.fn(), linkedSkills: vi.fn() },
+      reviewRepo: { findingContext: vi.fn(), getPrFiles: vi.fn() },
+      llm: vi.fn(),
+    } as unknown as Container);
+
+    let capturedConfig: Record<string, unknown> | undefined;
+    raw.addHook('onRoute', (routeOptions) => {
+      if (routeOptions.method === 'POST' && routeOptions.url === '/evals/run-all') {
+        capturedConfig = routeOptions.config as Record<string, unknown>;
+      }
+    });
+
+    await raw.register(evalRoutes);
+    await raw.ready();
+    await raw.close();
+
+    expect(capturedConfig).toBeDefined();
+    const rateLimit = capturedConfig?.rateLimit as
+      | { max: number; timeWindow: string; keyGenerator?: unknown }
+      | undefined;
+    expect(rateLimit).toBeDefined();
+    expect(rateLimit?.max).toBe(2);
+    expect(rateLimit?.timeWindow).toBe('1 minute');
+    expect(typeof rateLimit?.keyGenerator).toBe('function');
+  });
+
+  it('keyGenerator resolves to a per-workspace key distinct from /agents/:id/evals/run\'s (AC-12)', async () => {
+    const raw = Fastify();
+    raw.setValidatorCompiler(validatorCompiler);
+    raw.setSerializerCompiler(serializerCompiler);
+    const mockAuth = new MockAuthProvider(
+      { id: 'u1', email: 'you@local', name: 'You' },
+      { id: WS_ID, name: 'default' },
+    );
+    raw.decorate('container', {
+      db: {},
+      auth: mockAuth,
+      agentsRepo: { getById: vi.fn(), linkedSkills: vi.fn() },
+      reviewRepo: { findingContext: vi.fn(), getPrFiles: vi.fn() },
+      llm: vi.fn(),
+    } as unknown as Container);
+
+    let capturedConfig: Record<string, unknown> | undefined;
+    raw.addHook('onRoute', (routeOptions) => {
+      if (routeOptions.method === 'POST' && routeOptions.url === '/evals/run-all') {
+        capturedConfig = routeOptions.config as Record<string, unknown>;
+      }
+    });
+
+    await raw.register(evalRoutes);
+    await raw.ready();
+
+    const rateLimit = capturedConfig?.rateLimit as
+      | { keyGenerator: (req: unknown) => Promise<string> }
+      | undefined;
+    const key = await rateLimit!.keyGenerator({} as never);
+    await raw.close();
+
+    expect(key).toBe(`eval-run-all:${WS_ID}`);
+  });
+
+  it('fires a burst of 3 rapid requests against a REAL rate-limited Fastify instance and asserts the 3rd is throttled', async () => {
+    const rateLimitPlugin = (await import('@fastify/rate-limit')).default;
+
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([]);
+
+    const raw = Fastify();
+    raw.setValidatorCompiler(validatorCompiler);
+    raw.setSerializerCompiler(serializerCompiler);
+    await raw.register(rateLimitPlugin, { max: 120, timeWindow: '1 minute' });
+
+    const mockAuth = new MockAuthProvider(
+      { id: 'u1', email: 'you@local', name: 'You' },
+      { id: WS_ID, name: 'default' },
+    );
+    raw.decorate('container', {
+      db: {},
+      auth: mockAuth,
+      agentsRepo: { getById: vi.fn().mockResolvedValue(AGENT_ROW), linkedSkills: vi.fn().mockResolvedValue([]) },
+      reviewRepo: { findingContext: vi.fn(), getPrFiles: vi.fn().mockResolvedValue([]) },
+      llm: vi.fn().mockResolvedValue(
+        new MockLLMProvider('openai', {
+          structured: { verdict: 'comment', summary: 'ok', score: 90, findings: [] },
+        }),
+      ),
+    } as unknown as Container);
+
+    await raw.register(evalRoutes);
+    await raw.ready();
+
+    const fire = () => raw.inject({ method: 'POST', url: '/evals/run-all' });
+
+    // Sequential (not Promise.all) — the rate-limit counter must observe each
+    // call complete before the next fires, matching the /agents/:id/evals/run
+    // burst test's precedent above.
+    const first = await fire();
+    const second = await fire();
+    const third = await fire();
+    await raw.close();
+
+    expect(first.statusCode).toBe(202);
+    expect(second.statusCode).toBe(202);
+    expect(third.statusCode).toBe(429);
   });
 });

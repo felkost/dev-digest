@@ -17,6 +17,9 @@ import type {
   EvalCaseListResponse,
   EvalRunAcceptedResponse,
   EvalKpiDeltaResponse,
+  EvalAgentSummary,
+  EvalRecentBatchRow,
+  EvalRunAllResult,
 } from "@devdigest/shared";
 
 export type { EvalCaseListResponse };
@@ -227,5 +230,41 @@ export function useEvalCompare(
         { signal }
       ),
     enabled: !!batchIdA && !!batchIdB,
+  });
+}
+
+// ===========================================================================
+// Cross-Agent Eval Dashboard — overview grid, recent-batches feed, run-all
+// ===========================================================================
+
+/** Dashboard agent grid — one row per agent (latest batch + recall sparkline). */
+export function useEvalOverview() {
+  return useQuery({
+    queryKey: ["eval-overview"],
+    queryFn: ({ signal }) => api.get<EvalAgentSummary[]>("/evals/overview", { signal }),
+  });
+}
+
+/** Dashboard "recent batches" feed, across all agents. */
+export function useEvalRecentAcrossAgents() {
+  return useQuery({
+    queryKey: ["eval-recent"],
+    queryFn: ({ signal }) => api.get<EvalRecentBatchRow[]>("/evals/recent", { signal }),
+  });
+}
+
+/**
+ * "Run all" (dashboard) — fires a full batch for every enabled agent at once.
+ * On success, invalidate both dashboard queries so the grid and recent feed
+ * pick up the newly-started (in-flight) batches right away.
+ */
+export function useRunAllAgents() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<EvalRunAllResult>("/evals/run-all"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["eval-overview"] });
+      qc.invalidateQueries({ queryKey: ["eval-recent"] });
+    },
   });
 }

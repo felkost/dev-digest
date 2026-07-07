@@ -94,6 +94,9 @@ export const EvalBatch = z.object({
   citation_accuracy: z.number().nullable(),
   cost_usd: z.number().nullable(),
   ran_at: z.string(),
+  // Frozen copy of the host agent's system prompt at run time — `null` means
+  // this batch predates the feature (never an empty string for "no prompt").
+  system_prompt_snapshot: z.string().nullable(),
 });
 export type EvalBatch = z.infer<typeof EvalBatch>;
 
@@ -152,7 +155,11 @@ export const EvalBatchCompareResult = z.object({
     recall: z.number(),
     precision: z.number(),
     citation_accuracy: z.number(),
+    cost_usd: z.number().nullable(),
   }),
+  // Whether both batches carry a `system_prompt_snapshot` to diff — false when
+  // either batch predates the feature (see `EvalBatch.system_prompt_snapshot`).
+  prompt_diff_available: z.boolean(),
 });
 export type EvalBatchCompareResult = z.infer<typeof EvalBatchCompareResult>;
 
@@ -204,3 +211,56 @@ export const EvalRunBatchResponse = z.object({
   status: EvalBatchStatus.nullable(),
 });
 export type EvalRunBatchResponse = z.infer<typeof EvalRunBatchResponse>;
+
+// ===========================================================================
+// Cross-Agent Eval Dashboard — per-agent summary, recent-batch row, run-all
+// result, and the eval→agent-version promote request
+// ===========================================================================
+
+/** One row on the dashboard's agent grid — latest batch + a recall sparkline. */
+export const EvalAgentSummary = z.object({
+  agent_id: z.string(),
+  agent_name: z.string(),
+  model: z.string(),
+  latest_batch: EvalBatch.nullable(),
+  // 1-based version of the latest full batch (v1 = oldest); null when the
+  // agent has no sealed full batch yet. Derived server-side (no stored column).
+  latest_version: z.number().int().nullable(),
+  sparkline_points: z.array(
+    z.object({
+      ran_at: z.string(),
+      recall: z.number(),
+    }),
+  ),
+  case_count: z.number().int(),
+});
+export type EvalAgentSummary = z.infer<typeof EvalAgentSummary>;
+
+/** One row in the dashboard's cross-agent "recent batches" feed. */
+export const EvalRecentBatchRow = z.object({
+  batch: EvalBatch,
+  agent_id: z.string(),
+  agent_name: z.string(),
+  // 1-based chronological ordinal among the owning agent's full batches.
+  version: z.number().int(),
+  pass_count: z.number().int(),
+  total_count: z.number().int(),
+});
+export type EvalRecentBatchRow = z.infer<typeof EvalRecentBatchRow>;
+
+/** Result of `POST /evals/run-all` — one entry per agent whose batch started. */
+export const EvalRunAllResult = z.object({
+  started: z.array(
+    z.object({
+      agent_id: z.string(),
+      batch_id: z.string(),
+    }),
+  ),
+});
+export type EvalRunAllResult = z.infer<typeof EvalRunAllResult>;
+
+/** Request body for promoting a batch's agent snapshot into a new `AgentVersion`. */
+export const EvalPromoteRequest = z.object({
+  batch_id: z.string().uuid(),
+});
+export type EvalPromoteRequest = z.infer<typeof EvalPromoteRequest>;

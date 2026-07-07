@@ -4,7 +4,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Icon, Badge, type IconName } from "@devdigest/ui";
 import type { EvalCaseListItem } from "@devdigest/shared";
-import { s } from "../../styles";
+import { evalStyles as s } from "@/components/eval";
 
 /** Status → icon + color, 5 distinct visual states (AC-26/AC-27). */
 const STATUS_META: Record<EvalCaseListItem["last_run_status"], { icon: IconName; color: string }> = {

@@ -39,6 +39,7 @@ export const evalBatches = pgTable(
     // calibration distinction is carried by `kind`, not by a null status.
     status: text('status', { enum: ['clean', 'degraded'] }),
     agentSnapshot: jsonb('agent_snapshot').notNull(),
+    systemPromptSnapshot: text('system_prompt_snapshot'),
     recall: doublePrecision('recall'),
     precision: doublePrecision('precision'),
     citationAccuracy: doublePrecision('citation_accuracy'),

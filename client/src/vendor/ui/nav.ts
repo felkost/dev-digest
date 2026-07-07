@@ -33,6 +33,7 @@ export const NAV: NavGroup[] = [
       { key: "skills", label: "Skills", icon: "Puzzle", href: "/skills", gKey: "s" },
       { key: "agents", label: "Agents", icon: "Cpu", href: "/agents", gKey: "a" },
       { key: "conventions", label: "Conventions", icon: "ListChecks", href: "/repos/:repoId/conventions", gKey: "c" },
+      { key: "evals", label: "Eval Dashboard", icon: "FlaskConical", href: "/evals", gKey: "e" },
     ],
   },
 ];
@@ -65,6 +66,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { keys: "g x", label: "Go to Project Context", group: "Navigation" },
   { keys: "g s", label: "Go to Skills", group: "Navigation" },
   { keys: "g a", label: "Go to Agents", group: "Navigation" },
+  { keys: "g e", label: "Go to Eval Dashboard", group: "Navigation" },
   { keys: "j / k", label: "Next / previous finding", group: "Findings" },
   { keys: "a", label: "Accept finding", group: "Findings" },
   { keys: "d", label: "Dismiss finding", group: "Findings" },

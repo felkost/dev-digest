@@ -29,7 +29,7 @@ An agent author who edits a reviewer agent's system prompt, model, or attached s
 - The agent's Export-to-CI wizard and any CI-runner-side eval integration.
 - Stats and CI tabs on the Agent Editor (adjacent, unrelated tabs).
 - Exposing eval capability as an MCP tool — no `run_eval`-style tool is added to `mcp/` by this feature; adding one later is a small, separate follow-up.
-- A workspace-wide "Eval Dashboard" sidebar page aggregating every agent's evals into one view — **future work**: the same per-agent endpoint/contract this spec introduces is expected to be reusable for such a dashboard later, but it is not built here.
+- A workspace-wide "Eval Dashboard" sidebar page aggregating every agent's evals into one view — this capability is now covered by [SPEC-2026-07-07-agent-eval-dashboard](../docs/feature-requirements/2026-07-07-agent-eval-dashboard.md), which reuses this spec's per-agent endpoint/contract as its foundation.
 - Any eval capability for `owner_kind = 'skill'' cases — the underlying schema/contract already supports a future skill-eval feature, but this spec's routes, UI, and scoring apply to `owner_kind = 'agent'` only; skill-owned cases are never silently mixed into an agent's view (see AC-2).
 - A read-only auditor/viewer permission model distinct from the existing workspace-scoped agent-edit permission — this feature introduces no new permission tier.
 - Populating `eval_cases.input_files` with any required content — left to the implementation planner's discretion.
@@ -158,6 +158,58 @@ sequenceDiagram
 - **AC-37** (Ubiquitous): The Evals tab and all eval capabilities described by this spec SHALL apply uniformly to every agent in the workspace; each agent SHALL have its own isolated case set, its own batches, and its own history/trend, addressed by that agent's own id.
 - **AC-38** (Ubiquitous): The acceptance bar of "at least 8 cases — 5 seeded from the demo repo plus at least 3 authored from real accept/dismiss decisions" SHALL be met for at least one agent in the workspace (the primary demo agent) — it is not a requirement that every agent in the workspace independently meets this bar.
 - **AC-39** (Ubiquitous): The seeded portion of the acceptance-bar case set SHALL be produced by the existing idempotent demo-data seed flow — re-running the seed SHALL NOT duplicate previously seeded cases.
+
+### Sourced from SPEC-2026-07-07-agent-eval-dashboard
+
+The following acceptance criteria (AC-1 through AC-27) are sourced verbatim from [SPEC-2026-07-07-agent-eval-dashboard](../docs/feature-requirements/2026-07-07-agent-eval-dashboard.md) §5, which builds the workspace-wide "Eval Dashboard" this spec deferred as a Non-goal (see §2). They are numbered independently within that spec's own document and are reproduced here unchanged.
+
+#### Sidebar reachability
+
+- **AC-1** (Ubiquitous): The sidebar's existing "SKILLS LAB" section SHALL include exactly one new navigation entry labeled "Eval Dashboard," positioned alongside the existing Skills, Agents, and Conventions entries, with its own keyboard shortcut registered consistently with every other navigation entry's shortcut convention.
+- **AC-2** (Ubiquitous): The Eval Dashboard's landing route SHALL be reachable by clicking its sidebar entry from any page in the app — the feature SHALL NOT be considered complete while any other acceptance criterion in this spec is satisfied but the sidebar entry is missing.
+
+#### Landing page — agent list
+
+- **AC-3** (Ubiquitous): The landing page's agent list SHALL include only agents that have at least one eval case in the requesting workspace; an agent with zero eval cases SHALL NOT appear, regardless of how many real PR reviews that agent has otherwise run.
+- **AC-4** (Event-driven): WHEN the landing page loads and at least one eval-configured agent exists, the system SHALL show, per agent, that agent's latest full batch's recall/precision/citation-accuracy, a recall sparkline built from that agent's own trend history, and a last-run summary (version label, timestamp, pass count out of total cases run in that batch).
+- **AC-5** (Unwanted behavior): IF no agent in the workspace has any eval case, THEN the landing page SHALL show an explicit empty state instead of an empty list with no explanation, and SHALL NOT show a "Run all agents" affordance in a state that would have nothing to run.
+- **AC-6** (Ubiquitous): An eval-configured agent whose latest batch is degraded (per the parent spec's degraded-batch definition) SHALL be visually distinguishable on its landing-page card from an agent whose latest batch is clean.
+- **AC-7** (Event-driven): WHEN the author clicks an agent's card (its chevron affordance), the system SHALL navigate to that agent's detail page.
+
+#### Landing page — recent runs across agents
+
+- **AC-8** (Event-driven): WHEN the landing page loads, the system SHALL show a table of the most recent eval batches across every eval-configured agent, ordered newest-first, each row identifying the owning agent's name, the batch's timestamp, its version label, its recall/precision/citation-accuracy, and its pass count.
+- **AC-9** (Ubiquitous): The recent-runs table SHALL show a fixed number of rows at a time (10) with vertical scrolling to reach any additional rows, and the server response feeding it SHALL be bounded to a fixed limit — the table SHALL NOT attempt to render every batch ever run across every agent unbounded.
+- **AC-10** (Event-driven): WHEN the author clicks a row in the recent-runs table, the system SHALL navigate to that row's owning agent's detail page with that specific batch identifiable (e.g. pre-selected or scrolled into view) on arrival.
+
+#### Landing page — run all agents
+
+- **AC-11** (Event-driven): WHEN the author triggers "Run all agents," the system SHALL start one real eval batch per eval-configured agent in the workspace, each batch using that agent's own already-configured review call (provider, model, system prompt, enabled skills) against that agent's own case set — the same run mechanism a single agent's own "Run eval" already uses, never a distinct or cheaper simulation.
+- **AC-12** (Unwanted behavior): IF the author triggers "Run all agents" while a prior workspace-wide run-all is still in flight, THEN the system SHALL rate-limit or reject the repeated trigger consistent with this codebase's existing fan-out precedent, so that a click-burst does not multiply the number of paid batches started.
+- **AC-13** (Ubiquitous): The "Run all agents" fan-out SHALL apply a concurrency cap across the agents it runs, consistent with this codebase's existing multi-target fan-out precedent, so that it does not saturate the LLM provider by starting every agent's batch simultaneously.
+
+#### Per-agent detail page
+
+- **AC-14** (Ubiquitous): The per-agent detail page SHALL show that agent's name and model, a run count and case-set size in its subtitle, three KPI cards (recall, precision, citation accuracy) each with a value, a sparkline, and a delta versus the previous full batch, a metric-trend chart across full batches, and a recent-runs table scoped to that agent alone.
+- **AC-15** (Event-driven): WHEN the KPI delta versus the previous full batch shows a meaningful change in any of the three metrics, the system SHALL show a warning or notice banner summarizing which metric moved and in which direction; WHERE no previous full batch exists yet, the system SHALL NOT show this banner.
+- **AC-16** (Event-driven): WHEN the author selects an agent from the detail page's agent-switcher dropdown, the system SHALL replace the page's content with the selected agent's own KPI/trend/run data without requiring a return to the landing page; the dropdown's own list of selectable agents SHALL be limited to eval-configured agents (same criterion as AC-3).
+- **AC-17** (Event-driven): WHEN the author triggers "Run eval" on the detail page, the system SHALL start one real batch for that agent alone, using the exact same run mechanism already defined by the parent eval-pipeline spec's full-set run (AC-11 there) — not a new call type.
+- **AC-18** (Event-driven): WHEN the author selects exactly two runs from the detail page's recent-runs table, the system SHALL enable a "Compare" action; WHEN fewer than two or more than two are selected, the system SHALL keep that action disabled.
+
+#### Compare modal
+
+- **AC-19** (Event-driven): WHEN the author opens the compare modal for two selected batches, the system SHALL show, for recall, precision, citation accuracy, and cost, each batch's own value and the delta from the older to the newer of the two.
+- **AC-20** (Ubiquitous): The compare modal SHALL show a word-level diff of the two batches' system-prompt text, with removed text marked distinctly from added text, and a control to toggle between viewing the older and the newer prompt in full.
+- **AC-21** (Event-driven): WHEN the author clicks "Promote" on the newer of the two compared batches, the system SHALL set that batch's snapshot system-prompt text as the agent's current active system prompt, and SHALL show a confirmation that the promotion succeeded.
+- **AC-22** (Unwanted behavior): IF the author attempts to promote a batch whose snapshot does not include full system-prompt text (see AC-23), THEN the system SHALL disable or reject the promote action for that batch with an explanation, rather than silently promoting an empty or truncated prompt.
+- **AC-23** (Ubiquitous): Every eval batch created after this feature ships SHALL persist its agent-snapshot's full system-prompt text (not only an opaque fingerprint or a truncated summary), retrievable by the compare and promote operations; a batch created before this feature shipped, which carries no full-text snapshot, SHALL be treated by the compare/promote flow as a batch with unavailable prompt text (per AC-22), never as an empty-string prompt.
+
+#### Cross-agent aggregation surface (server)
+
+- **AC-24** (Ubiquitous): Every new cross-agent read introduced by this feature (the landing page's agent-summary list and its recent-runs feed) SHALL be scoped to the requesting workspace and SHALL include only agent-owned (`owner_kind='agent'`) eval data, mirroring the same scoping and ownership boundary the parent eval-pipeline spec already established for its per-agent routes.
+- **AC-25** (Ubiquitous): The prompt-promote operation SHALL be scoped to the requesting workspace and SHALL verify that the batch being promoted belongs to the same agent whose system prompt is being changed, before applying the mutation.
+- **AC-26** (Ubiquitous): The prompt-promote operation SHALL reuse the existing agent-versioning mechanism already used whenever an agent's configuration changes (the same mechanism that already snapshots a version on every agent update), so that a promote action is itself undoable through that existing history, not a bypass of it.
+- **AC-27** (Ubiquitous): The agent-config version created by a promote SHALL record its provenance — that it originated from an eval-batch promotion, and which batch it came from — and the agent's config-version history SHALL surface that provenance (e.g. a "Promoted from batch vN" marker) distinctly from a manually-edited version; a manually-authored config version SHALL continue to carry no such marker, and any pre-existing/legacy config version with no recorded provenance SHALL be treated as manual.
 
 ## 6. Edge Cases
 

@@ -1,7 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { CiFailOn, ContextDocAttachment, Provider, ReviewStrategy } from '@devdigest/shared';
+import {
+  CiFailOn,
+  ContextDocAttachment,
+  EvalPromoteRequest,
+  Provider,
+  ReviewStrategy,
+} from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
@@ -31,6 +37,7 @@ const VersionParams = z.object({
  *   POST   /agents/:id/context-docs → set/reorder attached context documents (full replace)
  *   GET    /agents/:id/models       → dynamic model list for the agent's provider
  *   GET    /providers/:id/models    → dynamic model list for a provider (editor)
+ *   POST   /agents/:id/evals/promote → promote an eval batch's prompt snapshot onto the agent
  */
 
 const CreateAgentBody = z.object({
@@ -131,6 +138,15 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
     if (!ok) throw new NotFoundError('Agent not found');
     return { ok: true };
   });
+
+  app.post(
+    '/agents/:id/evals/promote',
+    { schema: { params: IdParams, body: EvalPromoteRequest } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      return service.promoteFromBatch(workspaceId, req.params.id, req.body.batch_id);
+    },
+  );
 
   app.get('/agents/:id/versions', { schema: { params: IdParams } }, async (req) => {
     const { workspaceId } = await getContext(app.container, req);

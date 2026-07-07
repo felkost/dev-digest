@@ -139,6 +139,10 @@ export class EvalRunOrchestrator {
       kind,
       status: null,
       agentSnapshot,
+      // Frozen copy of the host agent's CURRENT system prompt at run time
+      // (AC-23) — populated for every batch (single run, calibration, and
+      // run-all fan-out) since this is the ONE insertBatch call site.
+      systemPromptSnapshot: agent.systemPrompt,
     });
 
     return { batch, agent, skillBodies, targetCases };
@@ -244,6 +248,25 @@ export class EvalRunOrchestrator {
     });
 
     return { status };
+  }
+
+  /**
+   * Fan out `executeBatch(...)` across MULTIPLE already-started batches (one
+   * per agent, from `EvalService.startRunAll`'s per-agent `startBatch` calls),
+   * bounded at `concurrency` (default `CONCURRENCY = 3`, AC-13) — reuses the
+   * SAME bounded-worker-pool (`runWithConcurrencyCap`) `executeBatch` itself
+   * is built on, so the concurrency-cap algorithm is never duplicated at a
+   * second call site. Intended to be called DETACHED from the request/
+   * response cycle, exactly like a single `executeBatch` call (AC-9/AC-12).
+   */
+  async runManyBatchesWithCap(
+    started: { batch: EvalBatchRow; agent: AgentRow; skillBodies: string[]; targetCases: EvalCaseRow[] }[],
+    concurrency: number = CONCURRENCY,
+    log?: Logger,
+  ): Promise<void> {
+    await this.runWithConcurrencyCap(started, concurrency, async (item) => {
+      await this.executeBatch(item.batch, item.agent, item.skillBodies, item.targetCases, log);
+    });
   }
 
   /**

@@ -722,3 +722,290 @@ describe('EvalRepository.clearHistory', () => {
     expect(result).toEqual({ deletedBatches: 0, deletedRuns: 0 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cross-agent eval dashboard methods (Step 4) — `listEvalConfiguredAgentSummaries`
+// issues THREE sequential `select()` calls (case-count groupBy → agents →
+// latest-batch), and `listRecentBatchesAcrossAgents` issues TWO (batches join
+// agents → pass/total aggregate). The existing single-resolve `selectChain`
+// can't express "return a different row set per call", so this section uses
+// a small call-sequenced fake that returns the Nth entry of a provided array
+// of row-sets, in call order — genuinely representing the multi-query shape
+// without needing a real SQL parser.
+// ---------------------------------------------------------------------------
+
+/** A `select()` fake that returns a DIFFERENT row set per call, in the exact
+ *  order the repository method issues them. Each entry also records its own
+ *  `where`/`groupBy`/`innerJoin` calls so tests can assert scoping per query. */
+function makeSequencedSelectDb(rowSets: unknown[][]): {
+  db: Db;
+  callsPerQuery: { where: unknown[]; innerJoin: unknown[]; groupBy: unknown[] }[];
+} {
+  const callsPerQuery: { where: unknown[]; innerJoin: unknown[]; groupBy: unknown[] }[] = [];
+  let callIndex = 0;
+
+  const db = {
+    select: (_cols?: Record<string, unknown>) => {
+      const rows = rowSets[callIndex] ?? [];
+      const calls = { where: [] as unknown[], innerJoin: [] as unknown[], groupBy: [] as unknown[] };
+      callsPerQuery.push(calls);
+      callIndex++;
+
+      const chain: Record<string, unknown> = {
+        from: () => chain,
+        innerJoin: (...args: unknown[]) => {
+          calls.innerJoin.push(args);
+          return chain;
+        },
+        where: (...args: unknown[]) => {
+          calls.where.push(args);
+          return chain;
+        },
+        groupBy: (...args: unknown[]) => {
+          calls.groupBy.push(args);
+          return chain;
+        },
+        orderBy: () => chain,
+        limit: (_n: number) => Promise.resolve(rows),
+        then: (onF?: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
+          Promise.resolve(rows).then(onF, onR),
+      };
+      return chain;
+    },
+  } as unknown as Db;
+
+  return { db, callsPerQuery };
+}
+
+describe('EvalRepository.listEvalConfiguredAgentSummaries', () => {
+  it('returns one summary per agent with ≥1 agent-owned eval case, joined with its latest sealed full batch', async () => {
+    const { db } = makeSequencedSelectDb([
+      // 1. case-count groupBy per agent
+      [{ agentId: AGENT_ID, caseCount: 3 }],
+      // 2. agents row for the qualifying agent id(s)
+      [{ id: AGENT_ID, name: 'Test Agent', model: 'gpt-4.1' }],
+      // 3. latest sealed full batch(es) for the qualifying agent id(s)
+      [BATCH_ROW],
+    ]);
+    const repo = new EvalRepository(db);
+
+    const summaries = await repo.listEvalConfiguredAgentSummaries(WS_ID);
+
+    expect(summaries).toEqual([
+      {
+        agentId: AGENT_ID,
+        agentName: 'Test Agent',
+        model: 'gpt-4.1',
+        latestBatch: BATCH_ROW,
+        latestVersion: 1,
+        caseCount: 3,
+      },
+    ]);
+  });
+
+  it('returns [] when no agent in the workspace has any eval case (no agents/batches query issued)', async () => {
+    const { db, callsPerQuery } = makeSequencedSelectDb([[]]);
+    const repo = new EvalRepository(db);
+
+    const summaries = await repo.listEvalConfiguredAgentSummaries(WS_ID);
+
+    expect(summaries).toEqual([]);
+    // Short-circuits after the empty case-count query — never queries agents/batches.
+    expect(callsPerQuery.length).toBe(1);
+  });
+
+  it('an agent with cases but no sealed full batch yet gets latestBatch: null, not omitted', async () => {
+    const { db } = makeSequencedSelectDb([
+      [{ agentId: AGENT_ID, caseCount: 1 }],
+      [{ id: AGENT_ID, name: 'Test Agent', model: 'gpt-4.1' }],
+      [], // no sealed full batch yet
+    ]);
+    const repo = new EvalRepository(db);
+
+    const summaries = await repo.listEvalConfiguredAgentSummaries(WS_ID);
+
+    expect(summaries).toEqual([
+      { agentId: AGENT_ID, agentName: 'Test Agent', model: 'gpt-4.1', latestBatch: null, latestVersion: null, caseCount: 1 },
+    ]);
+  });
+
+  it('scopes every one of its three queries by workspace_id', async () => {
+    const { db, callsPerQuery } = makeSequencedSelectDb([
+      [{ agentId: AGENT_ID, caseCount: 1 }],
+      [{ id: AGENT_ID, name: 'Test Agent', model: 'gpt-4.1' }],
+      [BATCH_ROW],
+    ]);
+    const repo = new EvalRepository(db);
+
+    await repo.listEvalConfiguredAgentSummaries(WS_ID);
+
+    expect(callsPerQuery).toHaveLength(3);
+    for (const calls of callsPerQuery) {
+      expect(calls.where.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('orders the agents query by name ascending for a deterministic dashboard grid order', async () => {
+    const otherAgentId = 'eeeeeeee-0000-0000-0000-000000000001';
+    let orderByArgs: unknown[] | null = null;
+    const rowSets = [
+      [
+        { agentId: AGENT_ID, caseCount: 1 },
+        { agentId: otherAgentId, caseCount: 1 },
+      ],
+      [
+        { id: otherAgentId, name: 'Zeta Agent', model: 'gpt-4.1' },
+        { id: AGENT_ID, name: 'Alpha Agent', model: 'gpt-4.1' },
+      ],
+      [],
+    ];
+    let callIndex = 0;
+    const db = {
+      select: () => {
+        const rows = rowSets[callIndex] ?? [];
+        const isAgentsQuery = callIndex === 1;
+        callIndex++;
+        const chain: Record<string, unknown> = {
+          from: () => chain,
+          innerJoin: () => chain,
+          where: () => chain,
+          groupBy: () => chain,
+          orderBy: (...args: unknown[]) => {
+            if (isAgentsQuery) orderByArgs = args;
+            return chain;
+          },
+          limit: () => Promise.resolve(rows),
+          then: (onF?: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
+            Promise.resolve(rows).then(onF, onR),
+        };
+        return chain;
+      },
+    } as unknown as Db;
+    const repo = new EvalRepository(db);
+
+    await repo.listEvalConfiguredAgentSummaries(WS_ID);
+
+    // The agents-row query must call `.orderBy(...)` at all (previously it
+    // issued no ORDER BY, leaving grid order nondeterministic across requests).
+    expect(orderByArgs).not.toBeNull();
+    expect(orderByArgs!.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('EvalRepository.recentTrendPointsForAgent', () => {
+  it('scopes by workspace_id + agent_id + kind=full, capped at the requested limit', async () => {
+    const { db, callsPerQuery } = makeSequencedSelectDb([[BATCH_ROW]]);
+    const repo = new EvalRepository(db);
+
+    const rows = await repo.recentTrendPointsForAgent(WS_ID, AGENT_ID, 8);
+
+    expect(rows).toEqual([BATCH_ROW]);
+    expect(callsPerQuery[0]!.where.length).toBe(1);
+  });
+
+  it('returns empty when the agent has no sealed full batches yet', async () => {
+    const { db } = makeSequencedSelectDb([[]]);
+    const repo = new EvalRepository(db);
+    expect(await repo.recentTrendPointsForAgent(WS_ID, AGENT_ID, 8)).toEqual([]);
+  });
+});
+
+describe('EvalRepository.listRecentBatchesAcrossAgents', () => {
+  it('joins batches to agents and aggregates pass/total counts per batch', async () => {
+    const { db } = makeSequencedSelectDb([
+      // 1. batches joined to agents, newest first, capped
+      [{ batch: BATCH_ROW, agentName: 'Test Agent' }],
+      // 2. pass/total aggregate from eval_runs grouped by batch_id
+      [{ batchId: BATCH_ID, passCount: 2, totalCount: 3 }],
+    ]);
+    const repo = new EvalRepository(db);
+
+    const rows = await repo.listRecentBatchesAcrossAgents(WS_ID, 25);
+
+    expect(rows).toEqual([
+      { batch: BATCH_ROW, agentId: AGENT_ID, agentName: 'Test Agent', passCount: 2, totalCount: 3 },
+    ]);
+  });
+
+  it('defaults pass/total to 0 when a batch has no eval_runs rows yet', async () => {
+    const { db } = makeSequencedSelectDb([[{ batch: BATCH_ROW, agentName: 'Test Agent' }], []]);
+    const repo = new EvalRepository(db);
+
+    const rows = await repo.listRecentBatchesAcrossAgents(WS_ID, 25);
+
+    expect(rows[0]).toMatchObject({ passCount: 0, totalCount: 0 });
+  });
+
+  it('never returns more than the requested limit, regardless of total batch count', async () => {
+    const manyBatches = Array.from({ length: 25 }, (_, i) => ({
+      batch: { ...BATCH_ROW, id: `batch-${i}` },
+      agentName: 'Test Agent',
+    }));
+    // The fake's `limit()` returns the full row set unconditionally (it does
+    // not truncate) — this test instead asserts the repository passes the
+    // exact requested cap through to the query builder's `.limit()` call by
+    // constructing the fake db directly and asserting on the argument.
+    let limitArg: number | undefined;
+    const db = {
+      select: (_cols?: Record<string, unknown>) => {
+        const chain: Record<string, unknown> = {
+          from: () => chain,
+          innerJoin: () => chain,
+          where: () => chain,
+          orderBy: () => chain,
+          groupBy: () => chain,
+          limit: (n: number) => {
+            limitArg = n;
+            return Promise.resolve(manyBatches.slice(0, n));
+          },
+          then: (onF?: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
+            Promise.resolve([]).then(onF, onR),
+        };
+        return chain;
+      },
+    } as unknown as Db;
+    const repo = new EvalRepository(db);
+
+    const rows = await repo.listRecentBatchesAcrossAgents(WS_ID, 25);
+
+    expect(limitArg).toBe(25);
+    expect(rows.length).toBeLessThanOrEqual(25);
+  });
+
+  it('returns [] when there are no batches at all (never queries eval_runs)', async () => {
+    const { db, callsPerQuery } = makeSequencedSelectDb([[]]);
+    const repo = new EvalRepository(db);
+
+    const rows = await repo.listRecentBatchesAcrossAgents(WS_ID, 25);
+
+    expect(rows).toEqual([]);
+    expect(callsPerQuery.length).toBe(1);
+  });
+});
+
+describe('EvalRepository.getBatchPromptSnapshot', () => {
+  it('returns the agent id + snapshot for a batch in the workspace', async () => {
+    const { db, calls } = makeSelectOnlyDb([{ agentId: AGENT_ID, systemPromptSnapshot: 'You are a reviewer.' }]);
+    const repo = new EvalRepository(db);
+
+    const snapshot = await repo.getBatchPromptSnapshot(WS_ID, BATCH_ID);
+
+    expect(snapshot).toEqual({ agentId: AGENT_ID, systemPromptSnapshot: 'You are a reviewer.' });
+    expect(calls.where.length).toBe(1);
+  });
+
+  it('returns null for a cross-workspace batch id', async () => {
+    const { db } = makeSelectOnlyDb([]);
+    const repo = new EvalRepository(db);
+    expect(await repo.getBatchPromptSnapshot(OTHER_WS_ID, BATCH_ID)).toBeNull();
+  });
+
+  it('returns systemPromptSnapshot: null for a pre-feature batch (never fabricates a value)', async () => {
+    const { db } = makeSelectOnlyDb([{ agentId: AGENT_ID, systemPromptSnapshot: null }]);
+    const repo = new EvalRepository(db);
+    expect(await repo.getBatchPromptSnapshot(WS_ID, BATCH_ID)).toEqual({
+      agentId: AGENT_ID,
+      systemPromptSnapshot: null,
+    });
+  });
+});

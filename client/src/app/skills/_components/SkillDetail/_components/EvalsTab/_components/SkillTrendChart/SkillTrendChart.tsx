@@ -63,7 +63,7 @@ export function SkillTrendChart({
     <div>
       {/* Colour legend — names always; each metric's value appears only while
           a point is hovered, and reflects THAT batch (no static clutter). */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 10, justifyContent: "flex-end" }}>
         {series.map((sr) => (
           <span
             key={sr.name}
@@ -82,6 +82,7 @@ export function SkillTrendChart({
         yMin={0}
         yMax={1}
         showDots
+        fill
         onActiveIndexChange={onActive}
         renderTooltip={(i) => {
           const p = points[i];

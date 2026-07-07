@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import type { EvalCaseListItem } from "@devdigest/shared";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { CaseRow } from "../CaseRow/CaseRow";
-import { s } from "../../styles";
+import { evalStyles as s } from "@/components/eval";
 
 interface CaseListProps {
   cases: EvalCaseListItem[];

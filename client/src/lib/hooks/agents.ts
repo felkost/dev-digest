@@ -98,3 +98,23 @@ export function useProviderModels(provider: Provider | null | undefined) {
     staleTime: 5 * 60_000,
   });
 }
+
+/**
+ * Promote an eval batch's frozen `agent_snapshot` into a new `AgentVersion`
+ * (Agent Eval Dashboard). On success, invalidate every query keyed off this
+ * agent's config/version-history/eval-batches — the promoted version changes
+ * all three (new current config, new version-history row, and the promoting
+ * batch's own detail no longer shows as "not yet promoted").
+ */
+export function usePromoteAgentPrompt(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (batchId: string) =>
+      api.post<Agent>(`/agents/${agentId}/evals/promote`, { batch_id: batchId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["agent", agentId] });
+      qc.invalidateQueries({ queryKey: ["agent-versions", agentId] });
+      qc.invalidateQueries({ queryKey: ["eval-batches", agentId] });
+    },
+  });
+}

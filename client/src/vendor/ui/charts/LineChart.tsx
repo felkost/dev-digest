@@ -23,6 +23,7 @@ export function LineChart({
   yMin = 0.6,
   yMax = 1.0,
   showDots = false,
+  fill = false,
   onActiveIndexChange,
   renderTooltip,
 }: {
@@ -31,6 +32,10 @@ export function LineChart({
   h?: number;
   yMin?: number;
   yMax?: number;
+  /** Stretch to the full width of the parent (drops the `w` max-width cap) so
+   *  the plotted lines span the whole block instead of being left-aligned at
+   *  `w` px. Default false keeps the capped width for existing consumers. */
+  fill?: boolean;
   /** Draw a marker at each data point (off by default to keep existing
    *  consumers unchanged). */
   showDots?: boolean;
@@ -53,7 +58,7 @@ export function LineChart({
     return row;
   });
   return (
-    <div style={{ width: "100%", maxWidth: w, height: h }}>
+    <div style={{ width: "100%", maxWidth: fill ? undefined : w, height: h }}>
       <ResponsiveContainer width="100%" height="100%">
         <RLineChart
           data={rows}

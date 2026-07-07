@@ -2,16 +2,18 @@
 
 /* EvalMetrics — top-of-tab KPI infographic: recall/precision/citation-accuracy
    (latest full batch value + delta vs the previous full batch) plus a
-   traces-passed tally for the latest batch. The "View full dashboard" link is
-   intentionally inert for now (placed, not wired). */
+   traces-passed tally for the latest batch. The "View full dashboard" link
+   navigates to that agent's dashboard detail page (`/evals/:agentId`) when
+   `agentId` is known, else falls back to the workspace-wide landing page
+   (`/evals`). */
 
 import React from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Icon } from "@devdigest/ui";
 import type { EvalKpiDeltaResponse } from "@devdigest/shared";
-import { pct } from "../../helpers";
-import { deltaColor } from "../../helpers";
-import { s } from "../../styles";
+import { pct, deltaColor } from "../helpers";
+import { s } from "../styles";
 
 interface EvalMetricsProps {
   recall: number | null;
@@ -21,10 +23,16 @@ interface EvalMetricsProps {
   delta: EvalKpiDeltaResponse | undefined;
   tracesPassed: number | null;
   tracesTotal: number | null;
+  /** Optional — when provided, "View full dashboard" routes to this agent's
+   *  detail page (`/evals/:agentId`) instead of the workspace landing page. */
+  agentId?: string;
 }
 
-export function EvalMetrics({ recall, precision, citation, delta, tracesPassed, tracesTotal }: EvalMetricsProps) {
+export function EvalMetrics({ recall, precision, citation, delta, tracesPassed, tracesTotal, agentId }: EvalMetricsProps) {
   const t = useTranslations("agents");
+  const router = useRouter();
+
+  const goToDashboard = () => router.push(agentId ? `/evals/${agentId}` : "/evals");
 
   const cards = [
     { key: "recall", label: t("evals.metrics.recall"), value: pct(recall), color: "var(--accent)", delta: delta?.recall ?? null },
@@ -39,10 +47,15 @@ export function EvalMetrics({ recall, precision, citation, delta, tracesPassed, 
           <Icon.FlaskConical size={13} />
           {t("evals.metrics.title")}
         </span>
-        {/* Placed but inert for now — full dashboard is a follow-up. */}
-        <span style={s.dashboardLinkDisabled} aria-disabled="true" title={t("evals.metrics.dashboardSoon")}>
+        <button
+          type="button"
+          style={s.dashboardLink}
+          onClick={goToDashboard}
+          title={t("evals.metrics.viewDashboardHint")}
+          aria-label={t("evals.metrics.viewDashboardHint")}
+        >
           {t("evals.metrics.viewDashboard")} →
-        </span>
+        </button>
       </div>
       <div style={s.metricsGrid}>
         {cards.map((c) => (

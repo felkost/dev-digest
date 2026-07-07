@@ -7,8 +7,7 @@
 
 import { useTranslations } from "next-intl";
 import type { EvalKpiDeltaResponse } from "@devdigest/shared";
-import { fmtDelta, deltaColor } from "../../helpers";
-import { s } from "../../styles";
+import { fmtDelta, deltaColor, evalStyles as s } from "@/components/eval";
 
 interface KpiDeltaStripProps {
   delta: EvalKpiDeltaResponse | undefined;

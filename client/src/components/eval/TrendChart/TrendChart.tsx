@@ -15,17 +15,24 @@ import { useTranslations } from "next-intl";
 import { LineChart, Icon } from "@devdigest/ui";
 import type { EvalTrendPointV2 } from "@devdigest/shared";
 import { formatCost } from "@/lib/format";
-import { pct, modelLabelFrom, snapshotLabel } from "../../helpers";
+import { pct, modelLabelFrom } from "../helpers";
 
 export function TrendChart({
   points,
   onHighlightBatch,
+  versionByBatchId,
+  fillWidth = false,
 }: {
   points: EvalTrendPointV2[];
   /** Report the batch_id under the cursor (or null on leave) so a parent can
    *  highlight + scroll the matching Batch History row — the chart links to
    *  that table instead of duplicating its per-batch snapshot/cost details. */
   onHighlightBatch?: (batchId: string | null) => void;
+  /** `batchId → version` for the tooltip's v-label (dashboard detail page). */
+  versionByBatchId?: Map<string, number>;
+  /** Stretch the plotted lines to the full block width + right-align the
+   *  legend (dashboard detail page). Default false keeps the Evals-tab look. */
+  fillWidth?: boolean;
 }) {
   const t = useTranslations("agents");
   // Index of the point under the cursor — drives the per-metric values shown in
@@ -54,7 +61,7 @@ export function TrendChart({
     <div>
       {/* Colour legend — names always; each metric's value appears only while a
           point is hovered, and reflects THAT batch (no static clutter). */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 10, justifyContent: fillWidth ? "flex-end" : "flex-start" }}>
         {series.map((sr) => (
           <span
             key={sr.name}
@@ -73,14 +80,17 @@ export function TrendChart({
         yMin={0}
         yMax={1}
         showDots
+        fill={fillWidth}
         onActiveIndexChange={onActive}
         renderTooltip={(i) => {
           const p = points[i];
           if (!p) return null;
+          const version = versionByBatchId?.get(p.batch_id) ?? null;
           return (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ fontWeight: 600 }}>{modelLabelFrom(p.agent_snapshot)}</span>
-              <span style={{ color: "var(--text-muted)" }}>{snapshotLabel(p.agent_snapshot)}</span>
+              {version != null && <span style={{ fontWeight: 600 }}>v{version}</span>}
+              <span style={{ color: "var(--text-muted)" }}>{new Date(p.ran_at).toLocaleString()}</span>
+              <span>{modelLabelFrom(p.agent_snapshot)}</span>
               <span>{formatCost(p.cost_usd)}</span>
             </div>
           );

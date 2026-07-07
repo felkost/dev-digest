@@ -12,6 +12,7 @@ import type {
 } from '@devdigest/shared';
 import { AgentsRepository } from './repository.js';
 import { toAgentDto, toAgentVersionDto } from './helpers.js';
+import { NotFoundError, ValidationError } from '../../platform/errors.js';
 
 /**
  * A2 — agents service. Business logic for the Agents tab + Agent Editor.
@@ -246,5 +247,32 @@ export class AgentsService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Promote an eval batch's frozen system-prompt snapshot onto this agent
+   * (Agent Eval Dashboard). Reads the batch via `container.evalRepo` — the
+   * ONE cross-module read into `eval`'s data, never a direct import of
+   * `eval/repository.js` (R6). Ownership (`batch.agentId === agentId`) is
+   * checked BEFORE any mutation (AC-25 — prevents a same-workspace IDOR where
+   * agent A's batch overwrites agent B's prompt).
+   */
+  async promoteFromBatch(workspaceId: string, agentId: string, batchId: string): Promise<Agent> {
+    const snapshot = await this.container.evalRepo.getBatchPromptSnapshot(workspaceId, batchId);
+    if (!snapshot) throw new NotFoundError('Eval batch not found');
+    if (snapshot.agentId !== agentId) {
+      throw new ValidationError('Batch does not belong to this agent');
+    }
+    if (snapshot.systemPromptSnapshot === null) {
+      throw new ValidationError('This batch has no stored prompt text and cannot be promoted');
+    }
+
+    const row = await this.repo.promoteSystemPrompt(
+      workspaceId,
+      agentId,
+      snapshot.systemPromptSnapshot,
+      batchId,
+    );
+    return toAgentDto(row!);
   }
 }

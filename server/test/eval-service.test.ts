@@ -1005,3 +1005,259 @@ describe('EvalService.clearHistory', () => {
     expect(result).toEqual({ deleted_batches: 0, deleted_runs: 0 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cross-agent eval dashboard (Step 4) — getOverview / getRecentAcrossAgents /
+// startRunAll. The repository layer is stubbed via vi.spyOn (same convention
+// as the rest of this file); these tests assert the SERVICE's own mapping/
+// exclusion/cap-forwarding behavior, not the repository's SQL scoping (that's
+// eval-repository.test.ts's job).
+// ---------------------------------------------------------------------------
+
+const OTHER_AGENT_ID = '66666666-6666-6666-6666-666666666666';
+
+describe('EvalService.getOverview', () => {
+  it('returns [] when no agent in the workspace has any eval case', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([]);
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    const overview = await service.getOverview(WS_ID);
+
+    expect(overview).toEqual([]);
+  });
+
+  it('maps a qualifying agent to an EvalAgentSummary with a chronological sparkline', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
+      {
+        agentId: AGENT_ID,
+        agentName: 'Test Agent',
+        model: 'gpt-4.1',
+        latestBatch: makeBatchRow({ id: 'batch-latest', status: 'clean', recall: 0.9 }) as any,
+        caseCount: 4,
+      },
+    ]);
+    // recentTrendPointsForAgent returns newest-first (repo convention) —
+    // the service must reverse it to chronological order for the sparkline.
+    vi.spyOn(EvalRepository.prototype, 'recentTrendPointsForAgent').mockResolvedValue([
+      makeBatchRow({ id: 'b2', ranAt: new Date('2026-02-01'), recall: 0.9, status: 'clean' }) as any,
+      makeBatchRow({ id: 'b1', ranAt: new Date('2026-01-01'), recall: 0.7, status: 'clean' }) as any,
+    ]);
+
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    const overview = await service.getOverview(WS_ID);
+
+    expect(overview).toHaveLength(1);
+    expect(overview[0]).toMatchObject({
+      agent_id: AGENT_ID,
+      agent_name: 'Test Agent',
+      model: 'gpt-4.1',
+      case_count: 4,
+    });
+    expect(overview[0]!.latest_batch).toMatchObject({ id: 'batch-latest' });
+    expect(overview[0]!.sparkline_points).toEqual([
+      { ran_at: new Date('2026-01-01').toISOString(), recall: 0.7 },
+      { ran_at: new Date('2026-02-01').toISOString(), recall: 0.9 },
+    ]);
+  });
+
+  it('sets latest_batch: null for an agent with cases but no sealed full batch yet', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
+      { agentId: AGENT_ID, agentName: 'Test Agent', model: 'gpt-4.1', latestBatch: null, caseCount: 2 },
+    ]);
+    vi.spyOn(EvalRepository.prototype, 'recentTrendPointsForAgent').mockResolvedValue([]);
+
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    const overview = await service.getOverview(WS_ID);
+
+    expect(overview[0]!.latest_batch).toBeNull();
+    expect(overview[0]!.sparkline_points).toEqual([]);
+  });
+
+  it('only ever surfaces agents the repository already resolved for THIS workspace (no cross-workspace leakage)', async () => {
+    // The repository is the workspace-scoping boundary (verified in
+    // eval-repository.test.ts); here we confirm the service does not add or
+    // substitute any agent beyond what the repo returned for this workspace.
+    const listSpy = vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
+      { agentId: AGENT_ID, agentName: 'Test Agent', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+    ]);
+    vi.spyOn(EvalRepository.prototype, 'recentTrendPointsForAgent').mockResolvedValue([]);
+
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    const overview = await service.getOverview(WS_ID);
+
+    expect(listSpy).toHaveBeenCalledWith(WS_ID);
+    expect(overview.map((o) => o.agent_id)).toEqual([AGENT_ID]);
+  });
+});
+
+describe('EvalService.getRecentAcrossAgents', () => {
+  it('maps repo rows to EvalRecentBatchRow DTOs', async () => {
+    const repoSpy = vi.spyOn(EvalRepository.prototype, 'listRecentBatchesAcrossAgents').mockResolvedValue([
+      {
+        batch: makeBatchRow({ id: 'batch-1' }) as any,
+        agentId: AGENT_ID,
+        agentName: 'Test Agent',
+        passCount: 2,
+        totalCount: 3,
+      },
+    ]);
+
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    const rows = await service.getRecentAcrossAgents(WS_ID);
+
+    expect(rows).toEqual([
+      {
+        batch: expect.objectContaining({ id: 'batch-1' }),
+        agent_id: AGENT_ID,
+        agent_name: 'Test Agent',
+        pass_count: 2,
+        total_count: 3,
+      },
+    ]);
+    expect(repoSpy).toHaveBeenCalledWith(WS_ID, 25);
+  });
+
+  it('never requests more than the fixed server cap (25), regardless of how many batches exist', async () => {
+    const repoSpy = vi.spyOn(EvalRepository.prototype, 'listRecentBatchesAcrossAgents').mockResolvedValue([]);
+
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    await service.getRecentAcrossAgents(WS_ID);
+
+    expect(repoSpy).toHaveBeenCalledTimes(1);
+    expect(repoSpy.mock.calls[0]![1]).toBe(25);
+    expect(repoSpy.mock.calls[0]![1]).toBeLessThanOrEqual(25);
+  });
+
+  it('returns [] when there are no batches for any agent in the workspace', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listRecentBatchesAcrossAgents').mockResolvedValue([]);
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    expect(await service.getRecentAcrossAgents(WS_ID)).toEqual([]);
+  });
+});
+
+describe('EvalService.startRunAll', () => {
+  it('starts a batch for every eval-configured agent and returns {agent_id, batch_id} pairs', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
+      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+      { agentId: OTHER_AGENT_ID, agentName: 'Agent B', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+    ]);
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([makeCaseRow({ id: 'case-1' }) as any]);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockImplementation(async (data: any) => makeBatchRow(data) as any);
+
+    const container = buildContainer({
+      agent: AGENT_ROW,
+      linkedSkills: [],
+    });
+    // getById must resolve for BOTH agent ids (startBatch looks up the agent).
+    (container.agentsRepo.getById as any).mockImplementation((_ws: string, id: string) =>
+      Promise.resolve({ ...AGENT_ROW, id }),
+    );
+
+    const service = new EvalService(container);
+    const { result, started } = await service.startRunAll(WS_ID);
+
+    expect(result.started).toHaveLength(2);
+    expect(result.started.map((s) => s.agent_id).sort()).toEqual([AGENT_ID, OTHER_AGENT_ID].sort());
+    expect(started).toHaveLength(2);
+  });
+
+  it('skips an agent whose case set is empty (ValidationError) without failing the whole fan-out', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
+      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+      { agentId: OTHER_AGENT_ID, agentName: 'Agent B (now empty)', model: 'gpt-4.1', latestBatch: null, caseCount: 0 },
+    ]);
+    // Agent A has a case; Agent B's case set resolved empty (e.g. deleted
+    // concurrently) — listCases returns [] for B, causing startBatch to throw.
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockImplementation(async (_ws, agentId) =>
+      agentId === AGENT_ID ? ([makeCaseRow({ id: 'case-1' })] as any) : ([] as any),
+    );
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockImplementation(async (data: any) => makeBatchRow(data) as any);
+
+    const container = buildContainer({ agent: AGENT_ROW, linkedSkills: [] });
+    (container.agentsRepo.getById as any).mockImplementation((_ws: string, id: string) =>
+      Promise.resolve({ ...AGENT_ROW, id }),
+    );
+
+    const service = new EvalService(container);
+    const { result, started } = await service.startRunAll(WS_ID);
+
+    // Only agent A started — agent B's ValidationError was caught and skipped,
+    // not propagated as a 500 for the whole fan-out.
+    expect(result.started).toEqual([{ agent_id: AGENT_ID, batch_id: expect.any(String) }]);
+    expect(started).toHaveLength(1);
+  });
+
+  it('skips an agent whose startBatch throws a NON-ValidationError (e.g. NotFoundError) without failing the whole fan-out', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
+      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+      { agentId: OTHER_AGENT_ID, agentName: 'Agent B (deleted)', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+    ]);
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([makeCaseRow({ id: 'case-1' })] as any);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockImplementation(async (data: any) => makeBatchRow(data) as any);
+
+    const container = buildContainer({ agent: AGENT_ROW, linkedSkills: [] });
+    // Agent A resolves normally; Agent B was deleted between the summary
+    // query and this loop, so its own `startBatch` call throws NotFoundError
+    // from `agentsRepo.getById` — NOT a ValidationError.
+    (container.agentsRepo.getById as any).mockImplementation((_ws: string, id: string) =>
+      id === AGENT_ID ? Promise.resolve({ ...AGENT_ROW, id }) : Promise.reject(new NotFoundError('Agent not found')),
+    );
+
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const service = new EvalService(container);
+    const { result, started } = await service.startRunAll(WS_ID, log as any);
+
+    // Only agent A started — agent B's NotFoundError was caught and skipped,
+    // not propagated as a 500 for the whole fan-out.
+    expect(result.started).toEqual([{ agent_id: AGENT_ID, batch_id: expect.any(String) }]);
+    expect(started).toHaveLength(1);
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: OTHER_AGENT_ID }),
+      expect.any(String),
+    );
+  });
+
+  it('returns { started: [] } when no agent in the workspace is eval-configured', async () => {
+    vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([]);
+
+    const container = buildContainer({});
+    const service = new EvalService(container);
+
+    const { result, started } = await service.startRunAll(WS_ID);
+
+    expect(result).toEqual({ started: [] });
+    expect(started).toEqual([]);
+  });
+
+  it('only starts batches for agents the repository resolved for THIS workspace', async () => {
+    const listSpy = vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
+      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+    ]);
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([makeCaseRow({ id: 'case-1' }) as any]);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockImplementation(async (data: any) => makeBatchRow(data) as any);
+
+    const container = buildContainer({ agent: AGENT_ROW, linkedSkills: [] });
+    (container.agentsRepo.getById as any).mockImplementation((_ws: string, id: string) =>
+      Promise.resolve({ ...AGENT_ROW, id }),
+    );
+
+    const service = new EvalService(container);
+    const { result } = await service.startRunAll(WS_ID);
+
+    expect(listSpy).toHaveBeenCalledWith(WS_ID);
+    expect(result.started.every((s) => s.agent_id === AGENT_ID)).toBe(true);
+  });
+});

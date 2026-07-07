@@ -107,12 +107,16 @@ export class AgentsRepository {
 
   /**
    * Update an agent. Any config change bumps the version and snapshots the new
-   * config into agent_versions (reproducibility for eval).
+   * config into agent_versions (reproducibility for eval). The optional
+   * `promote` argument marks the resulting version snapshot's provenance
+   * (Agent Eval Dashboard promote-from-batch flow); omitted for every ordinary
+   * caller (agent creation, normal config edits), which defaults to 'manual'.
    */
   async update(
     workspaceId: string,
     id: string,
     patch: UpdateAgent,
+    promote?: { sourceBatchId: string },
   ): Promise<AgentRow | undefined> {
     const existing = await this.getById(workspaceId, id);
     if (!existing) return undefined;
@@ -141,11 +145,21 @@ export class AgentsRepository {
       .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.id, id)))
       .returning();
 
-    if (configChanged && row) await this.snapshotVersion(row, nextVersion);
+    if (configChanged && row) {
+      await this.snapshotVersion(
+        row,
+        nextVersion,
+        promote ? { source: 'eval_promote', sourceBatchId: promote.sourceBatchId } : undefined,
+      );
+    }
     return row;
   }
 
-  private async snapshotVersion(row: AgentRow, version: number): Promise<void> {
+  private async snapshotVersion(
+    row: AgentRow,
+    version: number,
+    provenance?: { source: 'eval_promote'; sourceBatchId: string },
+  ): Promise<void> {
     const skills = await this.skillIdsForAgent(row.id);
     await this.db
       .insert(t.agentVersions)
@@ -162,8 +176,26 @@ export class AgentsRepository {
           repo_intel: row.repoIntel,
           skills,
         },
+        source: provenance?.source ?? 'manual',
+        sourceBatchId: provenance?.sourceBatchId ?? null,
       })
       .onConflictDoNothing();
+  }
+
+  /**
+   * Promote an eval batch's frozen system-prompt snapshot onto this agent
+   * (Agent Eval Dashboard). A system-prompt change always qualifies as a
+   * config change (`isConfigChange`), so this reuses the existing `update()`
+   * version-bump/snapshot path unchanged — only the version row's provenance
+   * differs (`source: 'eval_promote'`, `source_batch_id: sourceBatchId`).
+   */
+  async promoteSystemPrompt(
+    workspaceId: string,
+    agentId: string,
+    newSystemPrompt: string,
+    sourceBatchId: string,
+  ): Promise<AgentRow | undefined> {
+    return this.update(workspaceId, agentId, { systemPrompt: newSystemPrompt }, { sourceBatchId });
   }
 
   // ---- agent_versions (immutable config snapshots) ------------------------
