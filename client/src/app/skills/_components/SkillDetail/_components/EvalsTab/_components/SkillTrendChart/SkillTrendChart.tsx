@@ -1,36 +1,37 @@
 "use client";
 
-/* TrendChart — one point per full batch, chronological (calibration batches
-   already excluded by the trend endpoint, AC-28). The chart is LINKED to the
-   Batch History table above rather than carrying its own per-batch list:
-   hovering a point reports its batch_id up (onHighlightBatch) so the parent
-   highlights + scrolls the matching Batch History row, which already shows the
-   run's snapshot / cost / status. Degraded points stay visually distinct via
-   the degraded-legend row (AC-30).
-
-   Reuses the existing `LineChart` (Recharts-backed) vendored UI primitive. */
+/* SkillTrendChart — one point per full-kind, sealed skill-eval batch,
+   chronological (calibration batches already excluded by the trend
+   endpoint). LINKED to SkillEvalBatchHistory above rather than carrying its
+   own per-batch list: hovering a point reports its batch_id up
+   (onHighlightBatch) so the parent highlights + scrolls the matching Batch
+   History row. Degraded points stay visually distinct via the
+   degraded-legend row. Mirrors the agent-eval TrendChart structurally
+   (adapted vocabulary: judge score / grounding pass rate / cases passing
+   rate). Reverses this feature's original spec Non-goal (TrendChart) at the
+   user's explicit request. */
 
 import React from "react";
 import { useTranslations } from "next-intl";
 import { LineChart, Icon } from "@devdigest/ui";
-import type { EvalTrendPointV2 } from "@devdigest/shared";
+import type { SkillEvalTrendPoint } from "@devdigest/shared";
 import { formatCost } from "@/lib/format";
-import { pct, modelLabelFrom, snapshotLabel } from "../../helpers";
+import { pct, hostAgentModelFromSnapshot, skillVersionFromSnapshot } from "../../helpers";
 
-export function TrendChart({
+export function SkillTrendChart({
   points,
   onHighlightBatch,
 }: {
-  points: EvalTrendPointV2[];
+  points: SkillEvalTrendPoint[];
   /** Report the batch_id under the cursor (or null on leave) so a parent can
    *  highlight + scroll the matching Batch History row — the chart links to
    *  that table instead of duplicating its per-batch snapshot/cost details. */
   onHighlightBatch?: (batchId: string | null) => void;
 }) {
-  const t = useTranslations("agents");
-  // Index of the point under the cursor — drives the per-metric values shown in
-  // the legend so they sync with whichever batch you hover (names always show;
-  // values only while hovering).
+  const t = useTranslations("skills");
+  // Index of the point under the cursor — drives the per-metric values shown
+  // in the legend so they sync with whichever batch you hover (names always
+  // show; values only while hovering).
   const [activeIdx, setActiveIdx] = React.useState<number | null>(null);
 
   if (points.length === 0) {
@@ -38,9 +39,17 @@ export function TrendChart({
   }
 
   const series = [
-    { name: t("evals.history.recall"), color: "var(--accent)", data: points.map((p) => p.recall) },
-    { name: t("evals.history.precision"), color: "var(--ok)", data: points.map((p) => p.precision) },
-    { name: t("evals.history.citationAccuracy"), color: "var(--warn)", data: points.map((p) => p.citation_accuracy) },
+    { name: t("evals.history.judgeScore"), color: "var(--accent)", data: points.map((p) => p.judge_score) },
+    {
+      name: t("evals.history.groundingPassRate"),
+      color: "var(--ok)",
+      data: points.map((p) => p.grounding_pass_rate),
+    },
+    {
+      name: t("evals.history.casesPassing"),
+      color: "var(--warn)",
+      data: points.map((p) => p.cases_passing_rate),
+    },
   ];
 
   const hasDegraded = points.some((p) => p.is_degraded);
@@ -52,8 +61,8 @@ export function TrendChart({
 
   return (
     <div>
-      {/* Colour legend — names always; each metric's value appears only while a
-          point is hovered, and reflects THAT batch (no static clutter). */}
+      {/* Colour legend — names always; each metric's value appears only while
+          a point is hovered, and reflects THAT batch (no static clutter). */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 10 }}>
         {series.map((sr) => (
           <span
@@ -79,8 +88,8 @@ export function TrendChart({
           if (!p) return null;
           return (
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ fontWeight: 600 }}>{modelLabelFrom(p.agent_snapshot)}</span>
-              <span style={{ color: "var(--text-muted)" }}>{snapshotLabel(p.agent_snapshot)}</span>
+              <span style={{ fontWeight: 600 }}>{hostAgentModelFromSnapshot(p.snapshot_identity)}</span>
+              <span style={{ color: "var(--text-muted)" }}>{skillVersionFromSnapshot(p.snapshot_identity)}</span>
               <span>{formatCost(p.cost_usd)}</span>
             </div>
           );

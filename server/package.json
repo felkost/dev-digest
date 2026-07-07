@@ -14,7 +14,8 @@
     "db:seed": "tsx src/db/seed.ts",
     "verify:l03": "pnpm typecheck && pnpm exec vitest run test/smart-diff-rules.test.ts",
     "verify:l06": "pnpm typecheck && pnpm exec vitest run test/eval-scoring.test.ts test/eval-repository.test.ts test/eval-service.test.ts test/eval-routes.test.ts",
-    "verify:skill-eval": "pnpm typecheck && pnpm exec vitest run test/skill-eval-scoring.test.ts test/skill-eval-repository.test.ts test/skill-eval-service.test.ts test/skill-eval-routes.test.ts"
+    "verify:skill-eval": "pnpm typecheck && pnpm exec vitest run test/skill-eval-scoring.test.ts test/skill-eval-repository.test.ts test/skill-eval-service.test.ts test/skill-eval-routes.test.ts",
+    "mutate": "stryker run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.33.1",
@@ -42,6 +43,8 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@testcontainers/postgresql": "^10.16.0",
     "@types/ms": "0.7.34",
     "@types/node": "^22.10.0",

@@ -18,6 +18,7 @@ import { Modal, Button, Textarea, TextInput } from "@devdigest/ui";
 import type { SkillEvalCaseListItem, SkillEvalCaseCreateInput } from "@devdigest/shared";
 import { useCreateSkillEval, useUpdateSkillEvalCase } from "@/lib/hooks/skills";
 import { ApiError } from "@/lib/api";
+import { DiffViewer, rawDiffToPrFiles } from "@/components/diff-viewer";
 import { TextRowListEditor, type TextListRow } from "./TextRowListEditor";
 import { s } from "../../styles";
 
@@ -140,6 +141,13 @@ export function SkillCaseEditor({ skillId, initialCase, onClose }: SkillCaseEdit
           <span style={s.fieldLabel}>{t("evals.editor.fixture")}</span>
           <Textarea value={fixture} onChange={setFixture} rows={7} mono placeholder={t("evals.editor.fixturePlaceholder")} />
         </label>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={s.smallLabel}>{t("evals.editor.diffPreview")}</span>
+          <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
+            <DiffViewer files={rawDiffToPrFiles(fixture)} />
+          </div>
+        </div>
 
         <TextRowListEditor
           sectionLabel={t("evals.editor.practices")}

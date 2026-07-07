@@ -173,6 +173,7 @@
       "diff": "Diff fragment",
       "diffRequired": "A diff fragment is required.",
       "diffPlaceholder": "Paste a unified diff fragment…",
+      "diffPreview": "Preview",
       "expectationType": "Expectation type",
       "file": "File",
       "filePlaceholder": "path/to/file.ts",

@@ -10,6 +10,9 @@ import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { SkillEvalService } from './eval-service.js';
 
+const CompareQuery = z.object({ a: z.string().uuid(), b: z.string().uuid() });
+const KpiDeltaQuery = z.object({ batch_id: z.string().uuid() });
+
 /**
  * skill-eval routes — a sibling sub-plugin to `skills/routes.ts` (mirrors the
  * `reviews/smart-diff.routes.ts` precedent: `skills/routes.ts` is already
@@ -25,6 +28,10 @@ import { SkillEvalService } from './eval-service.js';
  *   POST   /skills/:id/evals/run              {SkillEvalRunBatchRequest} → 202 Accepted, fan-out detached (AC-11/12/14/18/19)
  *   GET    /skills/:id/evals/batches          → batch history (AC-32)
  *   GET    /skills/:id/evals/batches/:batchId → batch drill-down (AC-32) — client polls this for run completion
+ *   GET    /skills/:id/evals/trend            → trend points, full batches only
+ *   GET    /skills/:id/evals/compare?a=&b=    → side-by-side batch comparison
+ *   GET    /skills/:id/evals/kpi-delta?batch_id= → KPI delta vs. previous full batch
+ *   DELETE /skills/:id/evals/batches          → clear ALL run history (batches + runs) for this skill; cases survive
  *
  * The EXISTING `GET/POST/DELETE /skills/:id/evals` routes stay in
  * `skills/routes.ts` — this file adds run/history/detail/edit/from-finding
@@ -134,4 +141,36 @@ export default async function skillEvalRoutes(appBase: FastifyInstance): Promise
       return service.getBatchDetail(workspaceId, req.params.batchId);
     },
   );
+
+  // ---- Trend (full batches only) --------------------------------------------
+  app.get('/skills/:id/evals/trend', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    return service.getTrend(workspaceId, req.params.id);
+  });
+
+  // ---- Side-by-side batch compare --------------------------------------------
+  app.get(
+    '/skills/:id/evals/compare',
+    { schema: { params: IdParams, querystring: CompareQuery } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return service.compareBatches(workspaceId, req.query.a, req.query.b);
+    },
+  );
+
+  // ---- KPI delta vs. previous FULL batch --------------------------------------
+  app.get(
+    '/skills/:id/evals/kpi-delta',
+    { schema: { params: IdParams, querystring: KpiDeltaQuery } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return service.getKpiDelta(workspaceId, req.params.id, req.query.batch_id);
+    },
+  );
+
+  // ---- Clear ALL run history for this skill (batches + runs); cases survive -
+  app.delete('/skills/:id/evals/batches', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    return service.clearHistory(workspaceId, req.params.id);
+  });
 }

@@ -731,3 +731,144 @@ describe('GET /skills/:id/evals/batches/:batchId', () => {
     expect(res.statusCode).toBe(422);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /skills/:id/evals/trend
+// ---------------------------------------------------------------------------
+
+describe('GET /skills/:id/evals/trend', () => {
+  it('returns 200 with trend points', async () => {
+    vi.spyOn(SkillEvalRepository.prototype, 'listTrendBatches').mockResolvedValue([makeBatchRow()] as any);
+
+    const app = await buildSkillEvalApp();
+    const res = await app.inject({ method: 'GET', url: `/skills/${SKILL_ID}/evals/trend` });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toHaveLength(1);
+    expect(res.json()[0].batch_id).toBe(BATCH_ID);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /skills/:id/evals/compare
+// ---------------------------------------------------------------------------
+
+describe('GET /skills/:id/evals/compare', () => {
+  it('returns 200 with a/b/deltas for two valid UUID batch ids', async () => {
+    const OTHER_BATCH_ID = '99999999-4444-4444-4444-444444444444';
+    const detailA = { ...makeBatchRow({ id: BATCH_ID, judgeScore: 0.6 }), cases: [] };
+    const detailB = { ...makeBatchRow({ id: OTHER_BATCH_ID, judgeScore: 0.9 }), cases: [] };
+    vi.spyOn(SkillEvalRepository.prototype, 'getBatch').mockImplementation(
+      async (_ws: string, batchId: string) => (batchId === BATCH_ID ? detailA : detailB) as any,
+    );
+    vi.spyOn(SkillEvalRepository.prototype, 'runsForBatch').mockResolvedValue([]);
+
+    const app = await buildSkillEvalApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/skills/${SKILL_ID}/evals/compare?a=${BATCH_ID}&b=${OTHER_BATCH_ID}`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().a.id).toBe(BATCH_ID);
+    expect(res.json().b.id).toBe(OTHER_BATCH_ID);
+    expect(res.json().deltas.judge_score).toBeCloseTo(0.3, 6);
+  });
+
+  it('returns 422 for a non-uuid a/b', async () => {
+    const app = await buildSkillEvalApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/skills/${SKILL_ID}/evals/compare?a=${INVALID_ID}&b=${BATCH_ID}`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(422);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /skills/:id/evals/kpi-delta
+// ---------------------------------------------------------------------------
+
+describe('GET /skills/:id/evals/kpi-delta', () => {
+  it('returns 200 with a delta when a previous full batch exists', async () => {
+    vi.spyOn(SkillEvalRepository.prototype, 'getBatch').mockResolvedValue(
+      makeBatchRow({ judgeScore: 0.9, groundingPassRate: 1, casesPassing: 5, casesTotal: 5 }) as any,
+    );
+    vi.spyOn(SkillEvalRepository.prototype, 'previousFullBatch').mockResolvedValue(
+      makeBatchRow({ id: 'previous-batch', judgeScore: 0.7, groundingPassRate: 0.8, casesPassing: 3, casesTotal: 5 }) as any,
+    );
+
+    const app = await buildSkillEvalApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/skills/${SKILL_ID}/evals/kpi-delta?batch_id=${BATCH_ID}`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().judge_score).toBeCloseTo(0.2, 6);
+  });
+
+  it('returns 200 with null when there is no previous full batch', async () => {
+    vi.spyOn(SkillEvalRepository.prototype, 'getBatch').mockResolvedValue(makeBatchRow() as any);
+    vi.spyOn(SkillEvalRepository.prototype, 'previousFullBatch').mockResolvedValue(null);
+
+    const app = await buildSkillEvalApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/skills/${SKILL_ID}/evals/kpi-delta?batch_id=${BATCH_ID}`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toBeNull();
+  });
+
+  it('returns 422 for a non-uuid batch_id', async () => {
+    const app = await buildSkillEvalApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/skills/${SKILL_ID}/evals/kpi-delta?batch_id=${INVALID_ID}`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(422);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /skills/:id/evals/batches
+// ---------------------------------------------------------------------------
+
+describe('DELETE /skills/:id/evals/batches', () => {
+  it('returns 200 with deleted_batches/deleted_runs on a valid skill', async () => {
+    vi.spyOn(SkillsRepository.prototype, 'getById').mockResolvedValue(SKILL_ROW as any);
+    const clearHistorySpy = vi
+      .spyOn(SkillEvalRepository.prototype, 'clearHistory')
+      .mockResolvedValue({ deletedBatches: 2, deletedRuns: 7 });
+
+    const app = await buildSkillEvalApp();
+    const res = await app.inject({ method: 'DELETE', url: `/skills/${SKILL_ID}/evals/batches` });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ deleted_batches: 2, deleted_runs: 7 });
+    expect(clearHistorySpy).toHaveBeenCalledWith(WS_ID, SKILL_ID);
+  });
+
+  it('returns 404 for a cross-workspace/missing skill', async () => {
+    vi.spyOn(SkillsRepository.prototype, 'getById').mockResolvedValue(undefined);
+    const clearHistorySpy = vi.spyOn(SkillEvalRepository.prototype, 'clearHistory');
+
+    const app = await buildSkillEvalApp();
+    const res = await app.inject({ method: 'DELETE', url: `/skills/${SKILL_ID}/evals/batches` });
+    await app.close();
+
+    expect(res.statusCode).toBe(404);
+    expect(clearHistorySpy).not.toHaveBeenCalled();
+  });
+});

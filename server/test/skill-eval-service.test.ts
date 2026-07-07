@@ -1081,3 +1081,226 @@ describe('SkillEvalService.updateCase', () => {
     ).rejects.toThrow(NotFoundError);
   });
 });
+
+// ---------------------------------------------------------------------------
+// getTrend / compareBatches / getKpiDelta / clearHistory — ported from the
+// agent-eval pipeline's precedent (test/eval-service.test.ts), reversing this
+// feature's original spec Non-goals at the user's explicit request.
+// ---------------------------------------------------------------------------
+
+function makeTrendBatchRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'batch-1',
+    workspaceId: WS_ID,
+    skillId: SKILL_ID,
+    hostAgentId: HOST_AGENT_ID,
+    kind: 'full' as const,
+    status: 'clean' as const,
+    snapshotIdentity: { skillBody: 'x', skillVersion: 1, hostAgentModel: 'gpt-4.1', hostAgentId: HOST_AGENT_ID },
+    model: 'gpt-4.1',
+    judgeScore: 0.8,
+    groundingPassRate: 1,
+    casesPassing: 4,
+    casesTotal: 5,
+    costUsd: 0.05,
+    ranAt: new Date('2026-07-01T00:00:00Z'),
+    ...overrides,
+  };
+}
+
+describe('SkillEvalService.getTrend', () => {
+  it('filters out batches with any null/zero-total metric and reverses to chronological order', async () => {
+    const oldest = makeTrendBatchRow({ id: 'batch-oldest', ranAt: new Date('2026-07-01T00:00:00Z') });
+    const noSignal = makeTrendBatchRow({
+      id: 'batch-no-signal',
+      ranAt: new Date('2026-07-02T00:00:00Z'),
+      judgeScore: null,
+      groundingPassRate: null,
+      casesPassing: null,
+      casesTotal: null,
+    });
+    const zeroTotal = makeTrendBatchRow({
+      id: 'batch-zero-total',
+      ranAt: new Date('2026-07-03T00:00:00Z'),
+      casesTotal: 0,
+      casesPassing: 0,
+    });
+    const newest = makeTrendBatchRow({ id: 'batch-newest', ranAt: new Date('2026-07-04T00:00:00Z') });
+
+    // repo.listTrendBatches returns newest-first (desc ran_at) per its own contract.
+    vi.spyOn(SkillEvalRepository.prototype, 'listTrendBatches').mockResolvedValue(
+      [newest, zeroTotal, noSignal, oldest] as any,
+    );
+
+    const service = new SkillEvalService(buildContainer({}));
+    const points = await service.getTrend(WS_ID, SKILL_ID);
+
+    // No-signal and zero-total batches excluded entirely — never rendered as
+    // a fake 0%/0%/0% dip.
+    expect(points.map((p) => p.batch_id)).toEqual(['batch-oldest', 'batch-newest']);
+    expect(points[0]!.judge_score).toBe(0.8);
+    expect(points[0]!.grounding_pass_rate).toBe(1);
+    expect(points[0]!.cases_passing_rate).toBeCloseTo(0.8, 6); // 4/5
+    expect(points[0]!.is_degraded).toBe(false);
+    expect(points[0]!.cost_usd).toBe(0.05);
+  });
+
+  it('marks is_degraded true for a degraded batch', async () => {
+    const degraded = makeTrendBatchRow({ status: 'degraded' });
+    vi.spyOn(SkillEvalRepository.prototype, 'listTrendBatches').mockResolvedValue([degraded] as any);
+
+    const service = new SkillEvalService(buildContainer({}));
+    const points = await service.getTrend(WS_ID, SKILL_ID);
+    expect(points[0]!.is_degraded).toBe(true);
+  });
+
+  it('returns an empty array when there are no full sealed batches', async () => {
+    vi.spyOn(SkillEvalRepository.prototype, 'listTrendBatches').mockResolvedValue([]);
+    const service = new SkillEvalService(buildContainer({}));
+    expect(await service.getTrend(WS_ID, SKILL_ID)).toEqual([]);
+  });
+});
+
+describe('SkillEvalService.compareBatches', () => {
+  function makeDetail(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'batch-x',
+      skill_id: SKILL_ID,
+      host_agent_id: HOST_AGENT_ID,
+      kind: 'full' as const,
+      status: 'clean' as const,
+      snapshot_identity: {},
+      model: 'gpt-4.1',
+      judge_score: 0.8,
+      grounding_pass_rate: 1,
+      cases_passing: 4,
+      cases_total: 5,
+      cost_usd: 0.05,
+      ran_at: '2026-07-01T00:00:00.000Z',
+      cases: [],
+      ...overrides,
+    };
+  }
+
+  it('computes deltas between two fully-scored batches', async () => {
+    const a = makeDetail({ id: 'batch-a', judge_score: 0.6, grounding_pass_rate: 0.8, cases_passing: 2, cases_total: 5 });
+    const b = makeDetail({ id: 'batch-b', judge_score: 0.9, grounding_pass_rate: 1, cases_passing: 4, cases_total: 5 });
+
+    vi.spyOn(SkillEvalService.prototype, 'getBatchDetail')
+      .mockResolvedValueOnce(a as any)
+      .mockResolvedValueOnce(b as any);
+
+    const service = new SkillEvalService(buildContainer({}));
+    const result = await service.compareBatches(WS_ID, 'batch-a', 'batch-b');
+
+    expect(result.a.id).toBe('batch-a');
+    expect(result.b.id).toBe('batch-b');
+    expect(result.deltas.judge_score).toBeCloseTo(0.3, 6);
+    expect(result.deltas.grounding_pass_rate).toBeCloseTo(0.2, 6);
+    expect(result.deltas.cases_passing_rate).toBeCloseTo(0.8 - 0.4, 6); // 4/5 - 2/5
+  });
+
+  it('throws ValidationError when batch A has a null metric', async () => {
+    const a = makeDetail({ id: 'batch-a', judge_score: null });
+    const b = makeDetail({ id: 'batch-b' });
+
+    vi.spyOn(SkillEvalService.prototype, 'getBatchDetail')
+      .mockResolvedValueOnce(a as any)
+      .mockResolvedValueOnce(b as any);
+
+    const service = new SkillEvalService(buildContainer({}));
+    await expect(service.compareBatches(WS_ID, 'batch-a', 'batch-b')).rejects.toThrow(ValidationError);
+  });
+
+  it('throws ValidationError when batch B has cases_total null/zero (no signal)', async () => {
+    const a = makeDetail({ id: 'batch-a' });
+    const b = makeDetail({ id: 'batch-b', cases_total: 0, cases_passing: 0 });
+
+    vi.spyOn(SkillEvalService.prototype, 'getBatchDetail')
+      .mockResolvedValueOnce(a as any)
+      .mockResolvedValueOnce(b as any);
+
+    const service = new SkillEvalService(buildContainer({}));
+    await expect(service.compareBatches(WS_ID, 'batch-a', 'batch-b')).rejects.toThrow(ValidationError);
+  });
+});
+
+describe('SkillEvalService.getKpiDelta', () => {
+  it('returns null when there is no previous full batch (no baseline)', async () => {
+    vi.spyOn(SkillEvalRepository.prototype, 'getBatch').mockResolvedValue(makeTrendBatchRow({ id: 'latest' }) as any);
+    vi.spyOn(SkillEvalRepository.prototype, 'previousFullBatch').mockResolvedValue(null);
+
+    const service = new SkillEvalService(buildContainer({}));
+    expect(await service.getKpiDelta(WS_ID, SKILL_ID, 'latest')).toBeNull();
+  });
+
+  it('returns null (not a thrown error) when either side has a null metric', async () => {
+    vi.spyOn(SkillEvalRepository.prototype, 'getBatch').mockResolvedValue(
+      makeTrendBatchRow({ id: 'latest', judgeScore: null }) as any,
+    );
+    vi.spyOn(SkillEvalRepository.prototype, 'previousFullBatch').mockResolvedValue(
+      makeTrendBatchRow({ id: 'previous' }) as any,
+    );
+
+    const service = new SkillEvalService(buildContainer({}));
+    const result = await service.getKpiDelta(WS_ID, SKILL_ID, 'latest');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when the baseline has cases_total null/zero', async () => {
+    vi.spyOn(SkillEvalRepository.prototype, 'getBatch').mockResolvedValue(makeTrendBatchRow({ id: 'latest' }) as any);
+    vi.spyOn(SkillEvalRepository.prototype, 'previousFullBatch').mockResolvedValue(
+      makeTrendBatchRow({ id: 'previous', casesTotal: 0, casesPassing: 0 }) as any,
+    );
+
+    const service = new SkillEvalService(buildContainer({}));
+    expect(await service.getKpiDelta(WS_ID, SKILL_ID, 'latest')).toBeNull();
+  });
+
+  it('computes the 3-field delta vs. the previous full batch', async () => {
+    vi.spyOn(SkillEvalRepository.prototype, 'getBatch').mockResolvedValue(
+      makeTrendBatchRow({ id: 'latest', judgeScore: 0.9, groundingPassRate: 1, casesPassing: 5, casesTotal: 5 }) as any,
+    );
+    vi.spyOn(SkillEvalRepository.prototype, 'previousFullBatch').mockResolvedValue(
+      makeTrendBatchRow({ id: 'previous', judgeScore: 0.7, groundingPassRate: 0.8, casesPassing: 3, casesTotal: 5 }) as any,
+    );
+
+    const service = new SkillEvalService(buildContainer({}));
+    const result = await service.getKpiDelta(WS_ID, SKILL_ID, 'latest');
+
+    expect(result).not.toBeNull();
+    expect(result!.judge_score).toBeCloseTo(0.2, 6);
+    expect(result!.grounding_pass_rate).toBeCloseTo(0.2, 6);
+    expect(result!.cases_passing_rate).toBeCloseTo(1 - 0.6, 6); // 5/5 - 3/5
+  });
+
+  it('throws NotFoundError when the latest batch id does not resolve', async () => {
+    vi.spyOn(SkillEvalRepository.prototype, 'getBatch').mockResolvedValue(null);
+    const service = new SkillEvalService(buildContainer({}));
+    await expect(service.getKpiDelta(WS_ID, SKILL_ID, 'unknown-batch')).rejects.toThrow(NotFoundError);
+  });
+});
+
+describe('SkillEvalService.clearHistory', () => {
+  it('404s on an unknown/cross-workspace skill', async () => {
+    const container = buildContainer({ skill: undefined });
+    const clearHistorySpy = vi.spyOn(SkillEvalRepository.prototype, 'clearHistory');
+
+    const service = new SkillEvalService(container);
+    await expect(service.clearHistory(WS_ID, SKILL_ID)).rejects.toThrow(NotFoundError);
+    expect(clearHistorySpy).not.toHaveBeenCalled();
+  });
+
+  it('delegates to the repository and returns the snake_case DTO', async () => {
+    vi.spyOn(SkillEvalRepository.prototype, 'clearHistory').mockResolvedValue({
+      deletedBatches: 3,
+      deletedRuns: 12,
+    });
+
+    const container = buildContainer({});
+    const service = new SkillEvalService(container);
+    const result = await service.clearHistory(WS_ID, SKILL_ID);
+
+    expect(result).toEqual({ deleted_batches: 3, deleted_runs: 12 });
+  });
+});

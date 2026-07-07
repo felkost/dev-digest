@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, lt } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import { ConfigError } from '../../platform/errors.js';
@@ -166,5 +166,105 @@ export class SkillEvalRepository {
       .where(and(eq(t.skillEvalBatches.id, batchId), eq(t.skillEvalBatches.workspaceId, workspaceId)))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  /**
+   * 'full'-kind batches only for a skill, newest first (trend chart).
+   * `status IS NOT NULL` excludes unsealed batches — a batch row is inserted
+   * with `status: null` BEFORE its cases run (`SkillEvalOrchestrator.startBatch`),
+   * so an in-flight or crash-orphaned full batch would otherwise plot as a
+   * false clean 0%/0%/0% dip. `desc(id)` is a secondary sort key so two
+   * batches sharing an identical `ran_at` instant order deterministically.
+   * Mirrors `eval/repository.ts`'s `listTrendBatches` exactly.
+   */
+  async listTrendBatches(workspaceId: string, skillId: string): Promise<SkillEvalBatchRow[]> {
+    return this.db
+      .select()
+      .from(t.skillEvalBatches)
+      .where(
+        and(
+          eq(t.skillEvalBatches.workspaceId, workspaceId),
+          eq(t.skillEvalBatches.skillId, skillId),
+          eq(t.skillEvalBatches.kind, 'full'),
+          isNotNull(t.skillEvalBatches.status),
+        ),
+      )
+      .orderBy(desc(t.skillEvalBatches.ranAt), desc(t.skillEvalBatches.id));
+  }
+
+  /**
+   * The most recent 'full'-kind batch that ran strictly before `beforeRanAt`
+   * (KPI-delta baseline). `status IS NOT NULL` excludes unsealed batches — an
+   * in-flight/crashed full batch must never be used as a baseline. `desc(id)`
+   * is a secondary sort key so a tied `ran_at` can't cause the strict `<` to
+   * skip a true predecessor nondeterministically. Mirrors `eval/repository.ts`'s
+   * `previousFullBatch` exactly.
+   */
+  async previousFullBatch(
+    workspaceId: string,
+    skillId: string,
+    beforeRanAt: Date,
+  ): Promise<SkillEvalBatchRow | null> {
+    const rows = await this.db
+      .select()
+      .from(t.skillEvalBatches)
+      .where(
+        and(
+          eq(t.skillEvalBatches.workspaceId, workspaceId),
+          eq(t.skillEvalBatches.skillId, skillId),
+          eq(t.skillEvalBatches.kind, 'full'),
+          isNotNull(t.skillEvalBatches.status),
+          lt(t.skillEvalBatches.ranAt, beforeRanAt),
+        ),
+      )
+      .orderBy(desc(t.skillEvalBatches.ranAt), desc(t.skillEvalBatches.id))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  /**
+   * Clear ALL run history (skill_eval_batches + eval_runs) for one skill,
+   * workspace-scoped, in a SINGLE transaction — `eval_cases` (the case
+   * definitions) are NEVER touched, only their run history.
+   * `eval_runs.skill_batch_id → skill_eval_batches` is `ON DELETE SET NULL`
+   * (schema/eval.ts), so deleting batches alone would NOT remove the skill's
+   * runs — they must be deleted explicitly via the `eval_cases.id` subquery
+   * (`eval_runs` has no `workspace_id`/`skill_id` of its own; scope flows
+   * transitively through `eval_cases.owner_id`/`owner_kind`). Runs deleted
+   * first, then batches, inside one transaction so a mid-way failure leaves
+   * neither partially cleared. Mirrors `eval/repository.ts`'s `clearHistory`
+   * exactly.
+   */
+  async clearHistory(
+    workspaceId: string,
+    skillId: string,
+  ): Promise<{ deletedBatches: number; deletedRuns: number }> {
+    return this.db.transaction(async (tx) => {
+      const deletedRuns = await tx
+        .delete(t.evalRuns)
+        .where(
+          inArray(
+            t.evalRuns.caseId,
+            tx
+              .select({ id: t.evalCases.id })
+              .from(t.evalCases)
+              .where(
+                and(
+                  eq(t.evalCases.workspaceId, workspaceId),
+                  eq(t.evalCases.ownerId, skillId),
+                  eq(t.evalCases.ownerKind, 'skill'),
+                ),
+              ),
+          ),
+        )
+        .returning({ id: t.evalRuns.id });
+
+      const deletedBatches = await tx
+        .delete(t.skillEvalBatches)
+        .where(and(eq(t.skillEvalBatches.workspaceId, workspaceId), eq(t.skillEvalBatches.skillId, skillId)))
+        .returning({ id: t.skillEvalBatches.id });
+
+      return { deletedBatches: deletedBatches.length, deletedRuns: deletedRuns.length };
+    });
   }
 }

@@ -166,6 +166,7 @@
       "fixture": "Fixture (diff)",
       "fixtureRequired": "A fixture is required.",
       "fixturePlaceholder": "Paste a unified diff fragment…",
+      "diffPreview": "Preview",
       "practices": "Practices",
       "practicesHint": "Statements the practices judge verifies against the review output (verbatim evidence required to pass).",
       "practicePlaceholder": "e.g. review output identifies the missing null check",
@@ -199,7 +200,39 @@
       "statusClean": "Clean",
       "statusDegraded": "Degraded",
       "statusCalibration": "Calibration",
-      "statusRunning": "Running"
+      "statusRunning": "Running",
+      "selectTwoHint": "Select exactly two batches to compare.",
+      "compareFullOnly": "Only full-batch runs can be compared.",
+      "clearHistory": "Clear history",
+      "clearHistoryConfirmTitle": "Clear eval history",
+      "clearHistoryConfirmBody": "This deletes all batch history and trend for this skill. Cases are kept.",
+      "clearHistoryConfirmConfirm": "Clear history",
+      "clearHistoryConfirmCancel": "Cancel",
+      "drilldown": {
+        "case": "Case",
+        "outcome": "Outcome",
+        "groundingMissing": "Grounding missing",
+        "judgeScore": "Judge score",
+        "cost": "Cost",
+        "errorLabel": "Error:"
+      }
+    },
+    "trend": {
+      "title": "Trend",
+      "empty": "Not enough full-batch runs yet to plot a trend.",
+      "degradedLegend": "Degraded batch",
+      "linkHint": "Hover a point to highlight its run in Batch History above."
+    },
+    "kpiDelta": {
+      "label": "vs. previous batch",
+      "noBaseline": "No baseline yet — needs at least 2 full batches to show a KPI delta."
+    },
+    "compare": {
+      "title": "Batch comparison",
+      "metric": "Metric",
+      "batchA": "Batch A",
+      "batchB": "Batch B",
+      "delta": "Delta"
     }
   }
 }

@@ -139,6 +139,25 @@ export const s = {
     borderRadius: 6,
     marginBottom: 12,
   } satisfies CSSProperties,
+  // ---- batch history: row select / drill-down (ported from agent-eval) ----
+  batchRow: { cursor: "pointer" } satisfies CSSProperties,
+  drilldownWrap: {
+    padding: "12px 14px",
+    background: "var(--bg-hover)",
+    borderRadius: 6,
+    margin: "6px 0 12px",
+  } satisfies CSSProperties,
+  caseErrorMessage: {
+    marginTop: 4,
+    fontSize: 11,
+    color: "var(--crit)",
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: 320,
+  } satisfies CSSProperties,
   // ---- Case Editor ---------------------------------------------------------
   editorBody: { padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 } satisfies CSSProperties,
   fieldLabel: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,

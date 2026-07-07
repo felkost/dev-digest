@@ -11,15 +11,12 @@ import { Icon } from "@devdigest/ui";
 import type { SkillEvalBatch } from "@devdigest/shared";
 import { formatCost } from "@/lib/format";
 import { s } from "../../styles";
+import { pct } from "../../helpers";
 
 interface SkillEvalMetricsProps {
   /** Newest batch (server-sorted `ORDER BY ran_at DESC`), or null if no batch
       has run yet. */
   latestBatch: SkillEvalBatch | null;
-}
-
-function pct(v: number | null): string {
-  return v == null ? "—" : `${Math.round(v * 100)}%`;
 }
 
 export function SkillEvalMetrics({ latestBatch }: SkillEvalMetricsProps) {

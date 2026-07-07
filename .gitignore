@@ -20,6 +20,8 @@ coverage/
 clones/
 playwright-report/
 test-results/
+.stryker-tmp/
+server/reports/
 
 # emdash worktree config (local)
 .emdash.json

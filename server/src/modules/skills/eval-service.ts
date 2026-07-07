@@ -5,6 +5,10 @@ import type {
   SkillEvalCaseListItem,
   SkillEvalBatch,
   SkillEvalBatchDetail,
+  SkillEvalTrendPoint,
+  SkillEvalBatchCompareResult,
+  SkillEvalKpiDeltaResponse,
+  SkillEvalClearHistoryResponse,
 } from '@devdigest/shared';
 import { parseUnifiedDiff } from '../../adapters/git/diff-parser.js';
 import type { EvalCaseRow, EvalRunRow } from '../../db/rows.js';
@@ -253,6 +257,129 @@ export class SkillEvalService {
     };
   }
 
+  /**
+   * Compare two batches side by side (mirrors `eval/service.ts`'s
+   * `compareBatches`). Null-aware guard: if EITHER batch has no real scored
+   * metric (`judge_score`/`grounding_pass_rate` null, or `cases_total` is
+   * null/zero so `cases_passing_rate` can't be computed), refuse to fabricate
+   * a delta at all — the `deltas.*` fields are non-nullable numbers (frozen
+   * contract), so surfacing a clear error is preferable to silently coercing
+   * null to 0 and rendering a phantom swing.
+   */
+  async compareBatches(
+    workspaceId: string,
+    batchIdA: string,
+    batchIdB: string,
+  ): Promise<SkillEvalBatchCompareResult> {
+    const [a, b] = await Promise.all([
+      this.getBatchDetail(workspaceId, batchIdA),
+      this.getBatchDetail(workspaceId, batchIdB),
+    ]);
+
+    if (!hasScoredMetrics(a) || !hasScoredMetrics(b)) {
+      throw new ValidationError('One or both batches have no scored metrics to compare');
+    }
+
+    return {
+      a,
+      b,
+      deltas: {
+        judge_score: (b.judge_score as number) - (a.judge_score as number),
+        grounding_pass_rate: (b.grounding_pass_rate as number) - (a.grounding_pass_rate as number),
+        cases_passing_rate:
+          (b.cases_passing as number) / b.cases_total - (a.cases_passing as number) / a.cases_total,
+      },
+    };
+  }
+
+  /**
+   * Trend points in CHRONOLOGICAL order — `repo.listTrendBatches` orders
+   * newest-first (desc `ran_at`) for the batch-history table's own needs; the
+   * trend chart plots by array index, so it must be reversed here, at the
+   * trend-specific read path only. A SEALED batch can still have no real
+   * signal (every case in it errored, or `cases_total` is 0/null) — such a
+   * batch contributes no real signal to the trend line and must not render as
+   * a fake 0%/0%/0% dip, so it is filtered out entirely rather than coerced.
+   */
+  async getTrend(workspaceId: string, skillId: string): Promise<SkillEvalTrendPoint[]> {
+    const rows = await this.repo.listTrendBatches(workspaceId, skillId);
+    const withRealMetrics = rows.filter(
+      (r) =>
+        r.judgeScore !== null &&
+        r.groundingPassRate !== null &&
+        r.casesPassing !== null &&
+        r.casesTotal !== null &&
+        r.casesTotal !== 0,
+    );
+    return withRealMetrics
+      .slice()
+      .reverse()
+      .map((row) => ({
+        batch_id: row.id,
+        ran_at: row.ranAt.toISOString(),
+        judge_score: row.judgeScore as number,
+        grounding_pass_rate: row.groundingPassRate as number,
+        cases_passing_rate: (row.casesPassing as number) / (row.casesTotal as number),
+        is_degraded: row.status === 'degraded',
+        snapshot_identity: row.snapshotIdentity,
+        cost_usd: row.costUsd,
+      }));
+  }
+
+  /**
+   * KPI delta vs. the previous FULL batch (calibration batches are skipped as
+   * a baseline via `repo.previousFullBatch`, which also excludes unsealed
+   * batches). Null-aware: "no data" on either side, or no baseline at all, is
+   * NOT coerced to 0 — returns `null` (never throws) since the client treats
+   * a missing KPI delta as "nothing to show yet", not an error state.
+   */
+  async getKpiDelta(
+    workspaceId: string,
+    skillId: string,
+    latestBatchId: string,
+  ): Promise<SkillEvalKpiDeltaResponse> {
+    const latest = await this.repo.getBatch(workspaceId, latestBatchId);
+    if (!latest) throw new NotFoundError('Eval batch not found');
+
+    const previous = await this.repo.previousFullBatch(workspaceId, skillId, latest.ranAt);
+    if (!previous) return null;
+
+    if (
+      latest.judgeScore == null ||
+      previous.judgeScore == null ||
+      latest.groundingPassRate == null ||
+      previous.groundingPassRate == null ||
+      latest.casesPassing == null ||
+      previous.casesPassing == null ||
+      !latest.casesTotal ||
+      !previous.casesTotal
+    ) {
+      return null;
+    }
+
+    return {
+      judge_score: latest.judgeScore - previous.judgeScore,
+      grounding_pass_rate: latest.groundingPassRate - previous.groundingPassRate,
+      cases_passing_rate: latest.casesPassing / latest.casesTotal - previous.casesPassing / previous.casesTotal,
+    };
+  }
+
+  /**
+   * Clear ALL run history (skill_eval_batches + eval_runs) for one skill,
+   * workspace-scoped — the case DEFINITIONS themselves are preserved (only
+   * their run history resets: Batch History empties, Trend empties, every
+   * case's last-run status reverts to never-run). Guarded identically to the
+   * other skill-scoped eval methods: verify the skill exists via
+   * `container.skillsRepo.getById`, else 404 (mirrors the agent-eval
+   * precedent's `container.agentsRepo.getById` guard).
+   */
+  async clearHistory(workspaceId: string, skillId: string): Promise<SkillEvalClearHistoryResponse> {
+    await this.assertSkillExists(workspaceId, skillId);
+
+    const { deletedBatches, deletedRuns } = await this.repo.clearHistory(workspaceId, skillId);
+    return { deleted_batches: deletedBatches, deleted_runs: deletedRuns };
+  }
+
   // ------------------------------------------------------------------ utils
 
   private async assertSkillExists(workspaceId: string, skillId: string): Promise<void> {
@@ -262,6 +389,22 @@ export class SkillEvalService {
 }
 
 // =============================================================== helpers ===
+
+/**
+ * True when a `SkillEvalBatchDetail` has real, comparable metrics: non-null
+ * `judge_score`/`grounding_pass_rate`/`cases_passing`, and a non-null,
+ * non-zero `cases_total` (needed to compute `cases_passing_rate` without
+ * dividing by zero). Used by `compareBatches` to refuse fabricating a delta
+ * against a batch with no real signal (e.g. every case errored).
+ */
+function hasScoredMetrics(batch: SkillEvalBatchDetail): boolean {
+  return (
+    batch.judge_score !== null &&
+    batch.grounding_pass_rate !== null &&
+    batch.cases_passing !== null &&
+    !!batch.cases_total
+  );
+}
 
 /** AC-2/AC-3 cross-field validation, shared by `createCaseManual`/`updateCase`. */
 function validateCaseInput(input: SkillEvalCaseCreateInput): void {

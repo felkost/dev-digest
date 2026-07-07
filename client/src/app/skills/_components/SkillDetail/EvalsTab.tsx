@@ -20,13 +20,19 @@ import {
   useRunSkillEvalBatch,
   useSkillEvalBatchDetail,
   useDeleteSkillEval,
+  useSkillEvalTrend,
+  useSkillEvalKpiDelta,
+  useClearSkillEvalHistory,
 } from "@/lib/hooks/skills";
 import { useAgents } from "@/lib/hooks/agents";
+import { ConfirmModal } from "@/components/confirm-modal";
 import { HostAgentSelect } from "./_components/EvalsTab/_components/HostAgentSelect/HostAgentSelect";
 import { SkillEvalMetrics } from "./_components/EvalsTab/_components/SkillEvalMetrics/SkillEvalMetrics";
 import { SkillCaseList } from "./_components/EvalsTab/_components/SkillCaseList/SkillCaseList";
 import { SkillCaseEditor } from "./_components/EvalsTab/_components/SkillCaseEditor/SkillCaseEditor";
 import { SkillEvalBatchHistory } from "./_components/EvalsTab/_components/SkillEvalBatchHistory/SkillEvalBatchHistory";
+import { SkillTrendChart } from "./_components/EvalsTab/_components/SkillTrendChart/SkillTrendChart";
+import { SkillKpiDeltaStrip } from "./_components/EvalsTab/_components/SkillKpiDeltaStrip/SkillKpiDeltaStrip";
 import { s } from "./_components/EvalsTab/styles";
 
 export interface EvalsTabHandle {
@@ -49,9 +55,12 @@ export const EvalsTab = React.forwardRef<EvalsTabHandle, EvalsTabProps>(function
   const t = useTranslations("skills");
   const { data: cases, isLoading: loadingCases } = useSkillEvals(skill.id);
   const { data: batches, isLoading: loadingBatches } = useSkillEvalBatchHistory(skill.id);
+  const { data: trendPoints, isLoading: loadingTrend } = useSkillEvalTrend(skill.id);
+  const { data: kpiDelta, isLoading: loadingKpiDelta } = useSkillEvalKpiDelta(skill.id);
   const { data: agents } = useAgents();
   const runBatch = useRunSkillEvalBatch(skill.id);
   const deleteCase = useDeleteSkillEval(skill.id);
+  const clearHistory = useClearSkillEvalHistory(skill.id);
 
   const qc = useQueryClient();
   const [selectedHostAgentId, setSelectedHostAgentId] = React.useState<string | null>(null);
@@ -59,6 +68,10 @@ export const EvalsTab = React.forwardRef<EvalsTabHandle, EvalsTabProps>(function
   const [editingCase, setEditingCase] = React.useState<SkillEvalCaseListItem | null>(null);
   const [runningCaseId, setRunningCaseId] = React.useState<string | null>(null);
   const [pendingBatchId, setPendingBatchId] = React.useState<string | null>(null);
+  const [clearHistoryConfirmOpen, setClearHistoryConfirmOpen] = React.useState(false);
+  // Batch id hovered on the trend chart — highlights + scrolls its Batch
+  // History row (chart ⇄ table link, instead of a duplicate list under the chart).
+  const [highlightedBatchId, setHighlightedBatchId] = React.useState<string | null>(null);
 
   // The run route returns 202 BEFORE the batch executes, so poll the just-
   // fired batch until the server seals it (status != null), then refresh the
@@ -131,7 +144,7 @@ export const EvalsTab = React.forwardRef<EvalsTabHandle, EvalsTabProps>(function
     onRunStateChange?.({ canRunAll, running });
   }, [canRunAll, running, onRunStateChange]);
 
-  const isLoading = loadingCases || loadingBatches;
+  const isLoading = loadingCases || loadingBatches || loadingTrend;
 
   if (isLoading) {
     return (
@@ -185,10 +198,44 @@ export const EvalsTab = React.forwardRef<EvalsTabHandle, EvalsTabProps>(function
         onDeleteCase={(caseId) => deleteCase.mutate(caseId)}
       />
 
-      <div style={s.sectionLabel}>{t("evals.history.title")}</div>
-      <SkillEvalBatchHistory batches={batchList} agents={agents ?? []} />
+      <div style={s.headerRow}>
+        <div style={s.sectionLabel}>{t("evals.history.title")}</div>
+        <Button
+          kind="danger"
+          size="sm"
+          onClick={() => setClearHistoryConfirmOpen(true)}
+          disabled={clearHistory.isPending || batchList.length === 0}
+        >
+          {t("evals.history.clearHistory")}
+        </Button>
+      </div>
+      <SkillEvalBatchHistory
+        skillId={skill.id}
+        batches={batchList}
+        agents={agents ?? []}
+        highlightBatchId={highlightedBatchId}
+      />
+
+      <div style={s.sectionLabel}>{t("evals.trend.title")}</div>
+      <SkillKpiDeltaStrip delta={kpiDelta} isLoading={loadingKpiDelta} />
+      <SkillTrendChart points={trendPoints ?? []} onHighlightBatch={setHighlightedBatchId} />
 
       {editorOpen && <SkillCaseEditor skillId={skill.id} initialCase={editingCase} onClose={closeEditor} />}
+
+      {clearHistoryConfirmOpen && (
+        <ConfirmModal
+          title={t("evals.history.clearHistoryConfirmTitle")}
+          body={t("evals.history.clearHistoryConfirmBody")}
+          confirmLabel={t("evals.history.clearHistoryConfirmConfirm")}
+          cancelLabel={t("evals.history.clearHistoryConfirmCancel")}
+          danger
+          onConfirm={() => {
+            clearHistory.mutate();
+            setClearHistoryConfirmOpen(false);
+          }}
+          onCancel={() => setClearHistoryConfirmOpen(false)}
+        />
+      )}
     </div>
   );
 });

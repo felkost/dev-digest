@@ -173,3 +173,57 @@ export const SkillEvalCaseListResponse = z.object({
   cases: z.array(SkillEvalCaseListItem),
 });
 export type SkillEvalCaseListResponse = z.infer<typeof SkillEvalCaseListResponse>;
+
+// ===========================================================================
+// Trend / Compare / KPI-delta / Clear-history — ported from the agent-eval
+// pipeline's precedent (contracts/eval-batch.ts's EvalTrendPointV2 /
+// EvalBatchCompareResult), reversing this feature's original spec Non-goals
+// at the user's explicit request. FROZEN shapes — do not deviate.
+// ===========================================================================
+
+/** A single point on the skill-eval trend chart — one 'full'-kind, sealed
+ *  batch. Never fabricated for a batch with no real signal (all-null/zero
+ *  metrics are filtered out upstream, in the service, before this DTO is
+ *  built) — see `SkillEvalService.getTrend`. */
+export const SkillEvalTrendPoint = z.object({
+  batch_id: z.string(),
+  ran_at: z.string(),
+  judge_score: z.number(),
+  grounding_pass_rate: z.number(),
+  cases_passing_rate: z.number(),
+  is_degraded: z.boolean(),
+  snapshot_identity: z.unknown(),
+  cost_usd: z.number().nullable(),
+});
+export type SkillEvalTrendPoint = z.infer<typeof SkillEvalTrendPoint>;
+
+/** Side-by-side comparison of two skill-eval batches. */
+export const SkillEvalBatchCompareResult = z.object({
+  a: SkillEvalBatchDetail,
+  b: SkillEvalBatchDetail,
+  deltas: z.object({
+    judge_score: z.number(),
+    grounding_pass_rate: z.number(),
+    cases_passing_rate: z.number(),
+  }),
+});
+export type SkillEvalBatchCompareResult = z.infer<typeof SkillEvalBatchCompareResult>;
+
+/** KPI delta vs. the previous full batch — `null` (not a fabricated delta)
+ *  when there is no baseline or either side has a null/zero-total metric. */
+export const SkillEvalKpiDeltaResponse = z
+  .object({
+    judge_score: z.number(),
+    grounding_pass_rate: z.number(),
+    cases_passing_rate: z.number(),
+  })
+  .nullable();
+export type SkillEvalKpiDeltaResponse = z.infer<typeof SkillEvalKpiDeltaResponse>;
+
+/** Response for `DELETE /skills/:id/evals/batches` — case definitions are
+ *  never touched, only their run history. */
+export const SkillEvalClearHistoryResponse = z.object({
+  deleted_batches: z.number().int(),
+  deleted_runs: z.number().int(),
+});
+export type SkillEvalClearHistoryResponse = z.infer<typeof SkillEvalClearHistoryResponse>;

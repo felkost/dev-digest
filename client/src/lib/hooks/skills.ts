@@ -18,6 +18,10 @@ import type {
   SkillEvalBatchDetail,
   SkillEvalRunBatchRequest,
   SkillEvalRunAcceptedResponse,
+  SkillEvalTrendPoint,
+  SkillEvalBatchCompareResult,
+  SkillEvalKpiDeltaResponse,
+  SkillEvalClearHistoryResponse,
 } from "@devdigest/shared";
 
 // ---- Skills CRUD -----------------------------------------------------------
@@ -276,6 +280,81 @@ export function useSkillEvalBatchDetail(
       api.get<SkillEvalBatchDetail>(`/skills/${skillId}/evals/batches/${batchId}`, { signal }),
     enabled: !!batchId,
     refetchInterval: (query) => (query.state.data?.status == null ? 3000 : false),
+  });
+}
+
+/**
+ * Trend chart data — one point per sealed 'full'-kind batch (mirrors
+ * `useEvalTrend` in `hooks/eval.ts`). Reverses this feature's original spec
+ * Non-goal (TrendChart) at the user's explicit request — see
+ * docs/plans/2026-07-06-skill-eval-handoff.md.
+ */
+export function useSkillEvalTrend(skillId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["skill-eval-trend", skillId],
+    queryFn: ({ signal }) => api.get<SkillEvalTrendPoint[]>(`/skills/${skillId}/evals/trend`, { signal }),
+    enabled: !!skillId,
+  });
+}
+
+/** Side-by-side comparison of two full-kind batches (mirrors `useEvalCompare`). */
+export function useSkillEvalCompare(
+  skillId: string | null | undefined,
+  batchIdA: string | null | undefined,
+  batchIdB: string | null | undefined,
+) {
+  return useQuery({
+    queryKey: ["skill-eval-compare", skillId, batchIdA, batchIdB],
+    queryFn: ({ signal }) =>
+      api.get<SkillEvalBatchCompareResult>(
+        `/skills/${skillId}/evals/compare?a=${batchIdA}&b=${batchIdB}`,
+        { signal },
+      ),
+    enabled: !!batchIdA && !!batchIdB,
+  });
+}
+
+/**
+ * KPI delta vs. the previous FULL batch (mirrors `useEvalKpiDelta`). Resolves
+ * the most recent full-kind batch from `useSkillEvalBatchHistory`'s
+ * already-fetched data (server-sorted `ran_at DESC`) and only queries
+ * kpi-delta once that id is known. Returns `null` (not an error) when there
+ * is no previous full batch to compare against.
+ */
+export function useSkillEvalKpiDelta(skillId: string | null | undefined) {
+  const { data: batches } = useSkillEvalBatchHistory(skillId);
+  const latestFullBatchId = batches?.find((b) => b.kind === "full")?.id ?? null;
+
+  return useQuery({
+    queryKey: ["skill-eval-kpi-delta", skillId, latestFullBatchId],
+    queryFn: ({ signal }) =>
+      api.get<SkillEvalKpiDeltaResponse>(
+        `/skills/${skillId}/evals/kpi-delta?batch_id=${latestFullBatchId}`,
+        { signal },
+      ),
+    enabled: !!skillId && !!latestFullBatchId,
+  });
+}
+
+/**
+ * "Clear history" (destructive) — `DELETE /skills/:id/evals/batches` wipes
+ * all skill-eval batches (and their per-case runs) for this skill; eval CASES
+ * themselves are untouched. Mirrors `useClearEvalHistory`. On success,
+ * invalidate every query the batch history feeds: case list (per-case
+ * `last_run_status`/`last_run_summary` reset), batch history, trend chart,
+ * and KPI delta (derived from batch history).
+ */
+export function useClearSkillEvalHistory(skillId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.del<SkillEvalClearHistoryResponse>(`/skills/${skillId}/evals/batches`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["skill-evals", skillId] });
+      qc.invalidateQueries({ queryKey: ["skill-eval-batches", skillId] });
+      qc.invalidateQueries({ queryKey: ["skill-eval-trend", skillId] });
+      qc.invalidateQueries({ queryKey: ["skill-eval-kpi-delta", skillId] });
+    },
   });
 }
 

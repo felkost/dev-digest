@@ -150,4 +150,15 @@ describe('casePassed', () => {
     const justBelowVerdict: JudgeVerdict = { score: 0.5999999, results: [] };
     expect(casePassed({ passed: true }, true, justBelowVerdict, true, 0.6)).toBe(false);
   });
+
+  it('practices required but judgeResult is null fails cleanly, without touching .score on null', () => {
+    // Mutation-testing find: `judgeOk`'s `judgeResult !== null` guard had no
+    // direct test — a mutant that hardcodes it to `true` still passes every
+    // other casePassed test, since none call this with hasPractices=true AND
+    // judgeResult=null simultaneously. hasGrounding=false isolates this from
+    // groundingOk (already covered above), so only the judge-side null guard
+    // is exercised. Without the real `!== null` check, `judgeResult.score`
+    // would throw on a null judgeResult instead of returning false.
+    expect(casePassed({ passed: true }, false, null, true, 0.6)).toBe(false);
+  });
 });

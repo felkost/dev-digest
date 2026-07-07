@@ -18,6 +18,7 @@ import { Modal, Button, Textarea, TextInput, SelectInput, Badge, Tabs, Toggle } 
 import type { Expectation, EvalCaseListItem } from "@devdigest/shared";
 import { useCreateEvalCase, useUpdateEvalCase } from "@/lib/hooks/eval";
 import { ApiError } from "@/lib/api";
+import { DiffViewer, rawDiffToPrFiles } from "@/components/diff-viewer";
 
 interface CaseEditorProps {
   agentId: string;
@@ -351,7 +352,13 @@ export function CaseEditor({ agentId, agentName, initialCase, onClose, onRunCase
             <Tabs tabs={tabs} value={activeTab} onChange={setActiveTab} pad="0" />
 
             {activeTab === "diff" && (
-              <Textarea value={diff} onChange={setDiff} rows={9} mono placeholder={t("evals.editor.diffPlaceholder")} />
+              <>
+                <Textarea value={diff} onChange={setDiff} rows={9} mono placeholder={t("evals.editor.diffPlaceholder")} />
+                <span style={st.smallLabel}>{t("evals.editor.diffPreview")}</span>
+                <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
+                  <DiffViewer files={rawDiffToPrFiles(diff)} />
+                </div>
+              </>
             )}
 
             {activeTab === "files" && (

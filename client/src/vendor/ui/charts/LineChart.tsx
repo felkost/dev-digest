@@ -24,6 +24,7 @@ export function LineChart({
   yMax = 1.0,
   showDots = false,
   onActiveIndexChange,
+  renderTooltip,
 }: {
   series: ChartSeries[];
   w?: number;
@@ -37,6 +38,11 @@ export function LineChart({
    *  consumer link the chart to an external list. When provided, a vertical
    *  cursor is shown so the hovered x is visible. Off by default. */
   onActiveIndexChange?: (index: number | null) => void;
+  /** Custom floating-tooltip content for the hovered point, keyed by its
+   *  data-index. When provided, Recharts' native tooltip renders this
+   *  content positioned near the cursor automatically. Omitted (default) →
+   *  no floating tooltip, matching prior behavior exactly. */
+  renderTooltip?: (index: number) => React.ReactNode;
 }) {
   const n = series[0]?.data.length ?? 0;
   const rows = Array.from({ length: n }, (_, i) => {
@@ -58,8 +64,28 @@ export function LineChart({
           onMouseLeave={() => onActiveIndexChange?.(null)}
         >
           <CartesianGrid stroke="var(--border)" vertical={false} />
-          {onActiveIndexChange && (
-            <Tooltip content={() => null} cursor={{ stroke: "var(--text-muted)", strokeDasharray: "3 3" }} />
+          {(onActiveIndexChange || renderTooltip) && (
+            <Tooltip
+              content={
+                renderTooltip
+                  ? ({ active, label }: { active?: boolean; label?: number }) =>
+                      active && typeof label === "number" ? (
+                        <div
+                          style={{
+                            background: "var(--bg-surface)",
+                            border: "1px solid var(--border)",
+                            borderRadius: 8,
+                            padding: "8px 10px",
+                            fontSize: 12,
+                          }}
+                        >
+                          {renderTooltip(label)}
+                        </div>
+                      ) : null
+                  : () => null
+              }
+              cursor={{ stroke: "var(--text-muted)", strokeDasharray: "3 3" }}
+            />
           )}
           <XAxis dataKey="i" hide />
           <YAxis

@@ -15,6 +15,8 @@ let batches: SkillEvalBatch[] = [];
 // `undefined` = not polling / no pending batch; `{ status: null }` = in flight;
 // `{ status: 'clean' }` = sealed (triggers the refresh effect in EvalsTab).
 let batchDetail: { status: string | null } | undefined = undefined;
+let trendPoints: unknown[] = [];
+let kpiDelta: unknown = null;
 
 const runBatchMutate = vi.fn();
 let runBatchIsPending = false;
@@ -23,6 +25,8 @@ const createCaseMutate = vi.fn();
 let createCaseIsPending = false;
 const updateCaseMutate = vi.fn();
 let updateCaseIsPending = false;
+const clearHistoryMutate = vi.fn();
+let clearHistoryIsPending = false;
 
 vi.mock("@/lib/hooks/skills", () => ({
   useSkillEvals: () => ({ data: cases, isLoading: false }),
@@ -32,6 +36,10 @@ vi.mock("@/lib/hooks/skills", () => ({
   useDeleteSkillEval: () => ({ mutate: deleteCaseMutate }),
   useCreateSkillEval: () => ({ mutate: createCaseMutate, isPending: createCaseIsPending }),
   useUpdateSkillEvalCase: () => ({ mutate: updateCaseMutate, isPending: updateCaseIsPending }),
+  useSkillEvalTrend: () => ({ data: trendPoints, isLoading: false }),
+  useSkillEvalKpiDelta: () => ({ data: kpiDelta, isLoading: false }),
+  useClearSkillEvalHistory: () => ({ mutate: clearHistoryMutate, isPending: clearHistoryIsPending }),
+  useSkillEvalCompare: () => ({ data: undefined }),
 }));
 
 let agentsData: Array<{ id: string; name: string }> | undefined = [{ id: "a1", name: "General Reviewer" }];
@@ -90,6 +98,8 @@ afterEach(() => {
   cases = [];
   batches = [];
   batchDetail = undefined;
+  trendPoints = [];
+  kpiDelta = null;
   runBatchMutate.mockReset();
   runBatchIsPending = false;
   deleteCaseMutate.mockClear();
@@ -97,6 +107,8 @@ afterEach(() => {
   createCaseIsPending = false;
   updateCaseMutate.mockClear();
   updateCaseIsPending = false;
+  clearHistoryMutate.mockClear();
+  clearHistoryIsPending = false;
   agentsData = [{ id: "a1", name: "General Reviewer" }];
 });
 
@@ -382,6 +394,52 @@ describe("EvalsTab — case row Run/Edit actions", () => {
     expect(within(dialog).getByText("Edit eval case")).toBeInTheDocument();
     expect(within(dialog).getByDisplayValue("Editable case")).toBeInTheDocument();
     expect(within(dialog).getByDisplayValue("existing practice")).toBeInTheDocument();
+  });
+});
+
+describe("EvalsTab — Clear History (trend/compare/checkbox-select handoff)", () => {
+  it("disables Clear History when there are zero batches, and requires ConfirmModal confirmation before calling the mutation", async () => {
+    cases = [makeCase()];
+    batches = [];
+    const user = userEvent.setup();
+    renderWithIntl(<EvalsTab skill={SKILL} />);
+
+    const clearButton = screen.getByRole("button", { name: "Clear history" });
+    expect(clearButton).toBeDisabled();
+  });
+
+  it("calls the clear-history mutation only after the confirm dialog is confirmed", async () => {
+    cases = [makeCase()];
+    batches = [
+      {
+        id: "batch-1",
+        skill_id: "sk1",
+        host_agent_id: "a1",
+        kind: "full",
+        status: "clean",
+        snapshot_identity: {},
+        model: "gpt-4.1",
+        judge_score: 0.5,
+        grounding_pass_rate: 1,
+        cases_passing: 1,
+        cases_total: 1,
+        cost_usd: 0.01,
+        ran_at: "2026-07-06T00:00:00Z",
+      },
+    ];
+    const user = userEvent.setup();
+    renderWithIntl(<EvalsTab skill={SKILL} />);
+
+    const clearButton = screen.getByRole("button", { name: "Clear history" });
+    expect(clearButton).toBeEnabled();
+    await user.click(clearButton);
+    expect(clearHistoryMutate).not.toHaveBeenCalled();
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Clear eval history")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Clear history" }));
+
+    expect(clearHistoryMutate).toHaveBeenCalledOnce();
   });
 });
 
