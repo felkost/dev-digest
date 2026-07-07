@@ -124,7 +124,7 @@ sequenceDiagram
 ### Landing page — recent runs across agents
 
 - **AC-8** (Event-driven): WHEN the landing page loads, the system SHALL show a table of the most recent eval batches across every eval-configured agent, ordered newest-first, each row identifying the owning agent's name, the batch's timestamp, its version label, its recall/precision/citation-accuracy, and its pass count.
-- **AC-9** (Ubiquitous): The recent-runs table SHALL cap the number of rows shown to a fixed limit and SHALL NOT attempt to render every batch ever run across every agent unbounded.
+- **AC-9** (Ubiquitous): The recent-runs table SHALL show a fixed number of rows at a time (10) with vertical scrolling to reach any additional rows, and the server response feeding it SHALL be bounded to a fixed limit — the table SHALL NOT attempt to render every batch ever run across every agent unbounded.
 - **AC-10** (Event-driven): WHEN the author clicks a row in the recent-runs table, the system SHALL navigate to that row's owning agent's detail page with that specific batch identifiable (e.g. pre-selected or scrolled into view) on arrival.
 
 ### Landing page — run all agents
@@ -154,6 +154,7 @@ sequenceDiagram
 - **AC-24** (Ubiquitous): Every new cross-agent read introduced by this feature (the landing page's agent-summary list and its recent-runs feed) SHALL be scoped to the requesting workspace and SHALL include only agent-owned (`owner_kind='agent'`) eval data, mirroring the same scoping and ownership boundary the parent eval-pipeline spec already established for its per-agent routes.
 - **AC-25** (Ubiquitous): The prompt-promote operation SHALL be scoped to the requesting workspace and SHALL verify that the batch being promoted belongs to the same agent whose system prompt is being changed, before applying the mutation.
 - **AC-26** (Ubiquitous): The prompt-promote operation SHALL reuse the existing agent-versioning mechanism already used whenever an agent's configuration changes (the same mechanism that already snapshots a version on every agent update), so that a promote action is itself undoable through that existing history, not a bypass of it.
+- **AC-27** (Ubiquitous): The agent-config version created by a promote SHALL record its provenance — that it originated from an eval-batch promotion, and which batch it came from — and the agent's config-version history SHALL surface that provenance (e.g. a "Promoted from batch vN" marker) distinctly from a manually-edited version; a manually-authored config version SHALL continue to carry no such marker, and any pre-existing/legacy config version with no recorded provenance SHALL be treated as manual.
 
 ## 6. Edge Cases
 
@@ -242,6 +243,13 @@ The following are interface-level shapes this feature's server and client agree 
 |---|---|---|---|
 | batch_id | id | The batch whose `system_prompt_snapshot` becomes the agent's new active system prompt | never null (required) |
 
+**Agent config version — extended (additive on the existing `agent_versions` snapshot; provenance for AC-27):**
+
+| Field | Type (conceptual) | Meaning | Null means |
+|---|---|---|---|
+| source | enum: manual \| eval_promote | How this config version was created | legacy/absent → treat as `manual` |
+| source_batch_id | id | The eval batch this config version was promoted from | version was a manual edit, not a promote |
+
 ## 10. Untrusted Inputs
 
 This feature reads no new class of externally-authored text beyond what the parent eval-pipeline spec already established. It surfaces:
@@ -254,7 +262,7 @@ No PR diffs, commit messages, or other third-party-authored content are newly in
 ## 11. [NEEDS CLARIFICATION]
 
 - **Exact persistence mechanism for `system_prompt_snapshot`** (AC-23, §9) — whether this is a new nullable column on the existing `eval_batches` table, a widened `agent_snapshot` JSON payload that now includes the full text alongside the fingerprint, or a new adjacent table — is left to the implementation planner, constrained by this repo's standing rule that existing columns are never altered and new tables/columns only arrive via new numbered migrations. Recommended default: add a new nullable column to `eval_batches` (additive, does not touch the existing fingerprint field) so old batches simply read `null` and new batches populate it going forward, satisfying AC-23's backward-compatible degrade path with the smallest schema change.
-- **Recent-runs feed row limit (the "N" in "Recent eval runs · all agents")** — the exact default and whether it is user-configurable (vs. a fixed constant) is left to the implementation planner; this spec fixes only that a limit must exist and must be enforced server-side (AC-9, §7). Recommended default: 20 rows, no client-side pagination control in this first version.
+- **Recent-runs feed row limit** — RESOLVED (user, 2026-07-07): the table displays **10 rows at a time with vertical scrolling** to reach any beyond that (not pagination). The server response is still bounded to a fixed cap (recommend ~25) rather than an unbounded scan (AC-9, §7).
 - **"Meaningful change" threshold for the detail page's warning banner (AC-15)** — the exact percentage-point threshold that triggers the banner is left to the implementation planner. Recommended default: reuse whatever threshold convention (if any) the parent spec's `KpiDeltaStrip` already applies for visually emphasizing a delta; if none exists, treat any non-zero delta as bannerable but favor the single largest-magnitude metric in the banner's wording.
-- **Promote's interaction with an agent's own version history (AC-26)** — whether "Promote" creates a brand-new agent version row identical in mechanism to a manual system-prompt edit, or a specially-labeled version entry noting it came from a batch promotion, is left to the implementation planner. Recommended default: reuse the exact existing version-snapshot path unmodified (no special-cased version label) so promote is indistinguishable, from the versioning system's point of view, from the author manually pasting that same text into the prompt field.
+- **Promote's interaction with an agent's own version history (AC-26/AC-27)** — RESOLVED (user, 2026-07-07): option **B (labeled version)**. Promote reuses the existing version-snapshot path AND records provenance: add nullable columns to `agent_versions` (`source` = 'manual' | 'eval_promote', plus `source_batch_id`) via a new numbered migration; the config-version history surfaces a "Promoted from batch vN" marker. Note the two distinct counters: batch "vN" (eval-batch ordinal shown on the dashboard) is NOT `agents.version` (the config-version counter). Legacy version rows read `source` as null and are treated as `manual`.
 - **Concurrency cap and rate-limit numeric values for "Run all agents" (AC-12, AC-13, §7)** — left to the implementation planner, consistent with the existing `review-all` precedent (max 2/min, concurrency cap 3) unless a different cap is justified by the number of eval-configured agents typically expected in one workspace.
