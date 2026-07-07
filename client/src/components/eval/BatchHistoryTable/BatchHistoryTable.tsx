@@ -67,8 +67,9 @@ interface BatchHistoryTableProps {
   barMetrics?: boolean;
   /** Pass/total per batch for the `barMetrics` PASS column (see `PassByBatchId`). */
   passByBatchId?: PassByBatchId;
-  /** `batchId → 1-based version` (full batches, chronological). Feeds the
-   *  VERSION column and the Compare modal's v-labels. */
+  /** `batchId → PROMPT version` (bumps only when the system-prompt text
+   *  changes; batches predating prompt tracking are absent → rendered "—").
+   *  Feeds the VERSION column. */
   versionByBatchId?: Map<string, number>;
   /** Optional section title rendered on the same header row as the always-on
    *  Compare button (dashboard detail page). When omitted, no title is shown. */
@@ -327,7 +328,6 @@ export function BatchHistoryTable({
           batchIdA={batchIdA}
           batchIdB={batchIdB}
           batches={batches}
-          versionByBatchId={versionByBatchId}
           onClose={() => setModalOpen(false)}
         />
       )}

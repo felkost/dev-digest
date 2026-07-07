@@ -190,7 +190,8 @@ describe("CompareModal", () => {
 
     expect(screen.getByText("strict")).toBeInTheDocument();
     expect(screen.getByText("lenient")).toBeInTheDocument();
-    // Old/new legend uses PROMPT versions (bump only on a real text change).
+    // Title + legend both read PROMPT versions (bump only on a real text change).
+    expect(screen.getByText("Compare runs · v1 → v2")).toBeInTheDocument();
     expect(screen.getByText("prompt v1 (old)")).toBeInTheDocument();
     expect(screen.getByText("prompt v2 (new)")).toBeInTheDocument();
   });
@@ -213,6 +214,9 @@ describe("CompareModal", () => {
     );
 
     // Two RUNS on an unchanged prompt → still prompt v1, no "v2" prompt bump.
+    // The title compares by prompt version too, so it reads "v1 → v1" (decision:
+    // vN is the prompt version everywhere, never a per-run ordinal).
+    expect(screen.getByText("Compare runs · v1 → v1")).toBeInTheDocument();
     expect(screen.getByText(/still prompt v1/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Promote prompt v1" })).toBeInTheDocument();
   });

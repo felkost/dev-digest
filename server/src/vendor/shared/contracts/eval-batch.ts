@@ -223,8 +223,10 @@ export const EvalAgentSummary = z.object({
   agent_name: z.string(),
   model: z.string(),
   latest_batch: EvalBatch.nullable(),
-  // 1-based version of the latest full batch (v1 = oldest); null when the
-  // agent has no sealed full batch yet. Derived server-side (no stored column).
+  // PROMPT version of the agent's latest full batch — bumps only when the
+  // agent's system-prompt text changes (repeated runs on an unchanged prompt
+  // share one version), NOT a run/attempt ordinal. Null when the latest full
+  // batch predates prompt-snapshot tracking. Derived server-side (no column).
   latest_version: z.number().int().nullable(),
   sparkline_points: z.array(
     z.object({
@@ -241,8 +243,10 @@ export const EvalRecentBatchRow = z.object({
   batch: EvalBatch,
   agent_id: z.string(),
   agent_name: z.string(),
-  // 1-based chronological ordinal among the owning agent's full batches.
-  version: z.number().int(),
+  // PROMPT version of this batch — bumps only when the agent's system-prompt
+  // text changes (unchanged-prompt reruns share one version), NOT a run
+  // ordinal. Null when the batch predates prompt-snapshot tracking.
+  version: z.number().int().nullable(),
   pass_count: z.number().int(),
   total_count: z.number().int(),
 });

@@ -27,7 +27,7 @@ import {
   useRunEvalBatch,
   useEvalRunCompletion,
 } from "@/lib/hooks/eval";
-import { TrendChart, BatchHistoryTable, fullBatchVersionMap } from "@/components/eval";
+import { TrendChart, BatchHistoryTable, promptVersionMap } from "@/components/eval";
 import { AgentSwitcher } from "../AgentSwitcher/AgentSwitcher";
 import { KpiBanner } from "../KpiBanner/KpiBanner";
 import { s } from "./styles";
@@ -120,11 +120,13 @@ export function EvalDetailView({
   const batchList = batches ?? [];
   const trend = trendPoints ?? [];
   const latestPoint = trend.length ? trend[trend.length - 1]! : null;
-  // Run count and version numbering are over FULL batches only (calibration
-  // runs aren't versioned "attempts" and are hidden from the dashboard).
+  // Run count is over FULL batches only (calibration runs are hidden from the
+  // dashboard). The version shown per run is the PROMPT version — it bumps only
+  // when the agent's system-prompt text changes, so repeated runs on the same
+  // prompt share one vN, and runs predating prompt tracking render as "—".
   const fullBatches = batchList.filter((b) => b.kind === "full");
   const runCount = fullBatches.length;
-  const versionByBatchId = fullBatchVersionMap(batchList);
+  const versionByBatchId = promptVersionMap(batchList);
   const overviewAgents = overview ?? [];
   const caseCount = overviewAgents.find((a) => a.agent_id === agentId)?.case_count ?? null;
 

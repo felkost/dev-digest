@@ -28,7 +28,8 @@ export function TrendChart({
    *  highlight + scroll the matching Batch History row — the chart links to
    *  that table instead of duplicating its per-batch snapshot/cost details. */
   onHighlightBatch?: (batchId: string | null) => void;
-  /** `batchId → version` for the tooltip's v-label (dashboard detail page). */
+  /** `batchId → PROMPT version` for the tooltip's v-label (dashboard detail
+   *  page); absent for runs predating prompt tracking → the label is hidden. */
   versionByBatchId?: Map<string, number>;
   /** Stretch the plotted lines to the full block width + right-align the
    *  legend (dashboard detail page). Default false keeps the Evals-tab look. */

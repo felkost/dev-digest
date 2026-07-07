@@ -9,10 +9,10 @@ export interface EvalConfiguredAgentSummaryRow {
   agentName: string;
   model: string;
   latestBatch: EvalBatchRow | null;
-  /** 1-based version of the latest full batch = total count of this agent's
-   *  full batches (the newest one is the highest ordinal). Null when the agent
-   *  has no sealed full batch yet. Derived (never a stored column) so it
-   *  renumbers automatically when history is cleared. */
+  /** PROMPT version of the latest full batch — bumps only when the agent's
+   *  system-prompt text changes (unchanged-prompt reruns share one version),
+   *  NOT a run count. Null when the latest full batch has no snapshot (predates
+   *  prompt tracking) or the agent has no sealed full batch yet. Derived. */
   latestVersion: number | null;
   caseCount: number;
 }
@@ -22,9 +22,10 @@ export interface RecentBatchAcrossAgentsRow {
   batch: EvalBatchRow;
   agentId: string;
   agentName: string;
-  /** 1-based chronological ordinal of this batch among its agent's full
-   *  batches (v1 = oldest). Derived via a window function. */
-  version: number;
+  /** PROMPT version of this batch — bumps only when the agent's system-prompt
+   *  text changes (unchanged-prompt reruns share one version), NOT a run
+   *  ordinal. Null when the batch has no snapshot (predates prompt tracking). */
+  version: number | null;
   passCount: number;
   totalCount: number;
 }
@@ -341,24 +342,31 @@ export class EvalRepository {
       .orderBy(desc(t.evalBatches.ranAt), desc(t.evalBatches.id));
 
     const latestBatchByAgent = new Map<string, EvalBatchRow>();
-    // Total full-batch count per agent = the newest batch's version ordinal
-    // (v1 = oldest, so the latest full batch is v{count}).
-    const fullBatchCountByAgent = new Map<string, number>();
     for (const row of batchRows) {
       if (!latestBatchByAgent.has(row.agentId)) latestBatchByAgent.set(row.agentId, row);
-      fullBatchCountByAgent.set(row.agentId, (fullBatchCountByAgent.get(row.agentId) ?? 0) + 1);
     }
+
+    // PROMPT version per batch (folded over the fetched sealed full batches, per
+    // agent) — so `latestVersion` reflects the prompt lineage (v1 for the first
+    // distinct prompt, bumping only when the prompt text changes), NOT a run
+    // count. A latest batch with no snapshot yields a null version.
+    const promptVersionByBatch = promptVersionsByAgent(
+      batchRows.map((r) => ({ id: r.id, agentId: r.agentId, ranAt: r.ranAt, systemPromptSnapshot: r.systemPromptSnapshot })),
+    );
 
     const caseCountByAgent = new Map(caseCounts.map((c) => [c.agentId, c.caseCount]));
 
-    return agentRows.map((agent) => ({
-      agentId: agent.id,
-      agentName: agent.name,
-      model: agent.model,
-      latestBatch: latestBatchByAgent.get(agent.id) ?? null,
-      latestVersion: fullBatchCountByAgent.get(agent.id) ?? null,
-      caseCount: caseCountByAgent.get(agent.id) ?? 0,
-    }));
+    return agentRows.map((agent) => {
+      const latestBatch = latestBatchByAgent.get(agent.id) ?? null;
+      return {
+        agentId: agent.id,
+        agentName: agent.name,
+        model: agent.model,
+        latestBatch,
+        latestVersion: latestBatch ? promptVersionByBatch.get(latestBatch.id) ?? null : null,
+        caseCount: caseCountByAgent.get(agent.id) ?? 0,
+      };
+    });
   }
 
   /**
@@ -387,13 +395,18 @@ export class EvalRepository {
   }
 
   /**
-   * Recent batches (any kind) across ALL agents in the workspace, newest
-   * first, capped at `limit` (server-fixed cap — never unbounded, AC-9).
-   * `pass_count`/`total_count` are aggregated from `eval_runs` grouped by
-   * `batch_id`, joined in as a second query (Drizzle doesn't cleanly express
-   * "join + group-by + limit-outer-rows-only" in one query without a lateral
-   * join, and `eval_batches` rows are already capped by `limit` before the
-   * runs aggregate is computed, so this stays bounded).
+   * Recent FULL batches across ALL agents in the workspace, newest first,
+   * capped at `limit` (server-fixed cap — never unbounded, AC-9). Calibration
+   * (subset) batches are excluded from the cross-agent feed.
+   *
+   * Three queries: (1) the capped recent window (batch + agent name); (2) the
+   * full-batch snapshot history for the agents in that window, folded into a
+   * PROMPT version per batch (`promptVersionsByAgent`) — the window alone can't
+   * compute it because a batch's prompt version depends on its agent's ENTIRE
+   * snapshot lineage, not just the recent slice; (3) `pass_count`/`total_count`
+   * aggregated from `eval_runs` grouped by `batch_id`. All three stay bounded:
+   * the window is capped, and the history/pass-count fetches are scoped to the
+   * window's (few) agents / (≤limit) batch ids.
    */
   async listRecentBatchesAcrossAgents(
     workspaceId: string,
@@ -403,11 +416,6 @@ export class EvalRepository {
       .select({
         batch: t.evalBatches,
         agentName: t.agents.name,
-        // 1-based chronological ordinal among THIS agent's full batches
-        // (v1 = oldest). Window functions run over the full filtered set
-        // before ORDER BY/LIMIT, so this is the true historical version even
-        // though the outer query keeps only the most recent `limit` rows.
-        version: sql<number>`(row_number() over (partition by ${t.evalBatches.agentId} order by ${t.evalBatches.ranAt} asc, ${t.evalBatches.id} asc))::int`.as('version'),
       })
       .from(t.evalBatches)
       .innerJoin(t.agents, eq(t.evalBatches.agentId, t.agents.id))
@@ -418,6 +426,29 @@ export class EvalRepository {
       .limit(limit);
 
     if (rows.length === 0) return [];
+
+    // PROMPT version depends on the agent's ENTIRE full-batch snapshot history,
+    // not just this capped window — so fetch the (lightweight) full-batch
+    // snapshot history for the agents present in the window and fold it,
+    // mirroring the client `promptVersionMap`. A batch with no snapshot
+    // (predates tracking) gets a null version.
+    const windowAgentIds = [...new Set(rows.map((r) => r.batch.agentId))];
+    const historyRows = await this.db
+      .select({
+        id: t.evalBatches.id,
+        agentId: t.evalBatches.agentId,
+        ranAt: t.evalBatches.ranAt,
+        systemPromptSnapshot: t.evalBatches.systemPromptSnapshot,
+      })
+      .from(t.evalBatches)
+      .where(
+        and(
+          eq(t.evalBatches.workspaceId, workspaceId),
+          inArray(t.evalBatches.agentId, windowAgentIds),
+          eq(t.evalBatches.kind, 'full'),
+        ),
+      );
+    const promptVersionByBatch = promptVersionsByAgent(historyRows);
 
     const batchIds = rows.map((r) => r.batch.id);
     const passCountRows = await this.db
@@ -440,7 +471,7 @@ export class EvalRepository {
         batch: r.batch,
         agentId: r.batch.agentId,
         agentName: r.agentName,
-        version: r.version,
+        version: promptVersionByBatch.get(r.batch.id) ?? null,
         passCount: counts?.passCount ?? 0,
         totalCount: counts?.totalCount ?? 0,
       };
@@ -532,4 +563,49 @@ export class EvalRepository {
 function outcomeFromPass(pass: boolean | null): 'passed' | 'failed' | 'error' {
   if (pass === null) return 'error';
   return pass ? 'passed' : 'failed';
+}
+
+/** Minimal batch shape the prompt-version fold needs. */
+interface PromptVersionInput {
+  id: string;
+  agentId: string;
+  ranAt: Date;
+  systemPromptSnapshot: string | null;
+}
+
+/**
+ * Fold `batchId → PROMPT version`, grouped by agent — the server-side mirror of
+ * the client `promptVersionMap`. Per agent, over batches WITH a non-null
+ * snapshot in chronological order (ran_at asc, id asc), the version bumps only
+ * when the snapshot text differs from the previous non-null snapshot; batches
+ * without a snapshot are absent from the map (their prompt version is unknown,
+ * not 0). Tie-break by id matches the client so server- and client-derived
+ * numbers agree when two batches share a `ran_at`.
+ */
+function promptVersionsByAgent(batches: PromptVersionInput[]): Map<string, number> {
+  const byAgent = new Map<string, PromptVersionInput[]>();
+  for (const b of batches) {
+    const arr = byAgent.get(b.agentId);
+    if (arr) arr.push(b);
+    else byAgent.set(b.agentId, [b]);
+  }
+
+  const versions = new Map<string, number>();
+  for (const agentBatches of byAgent.values()) {
+    const chronological = agentBatches
+      .filter((b) => b.systemPromptSnapshot != null)
+      .sort((a, b) => {
+        const t = a.ranAt.getTime() - b.ranAt.getTime();
+        return t !== 0 ? t : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+    let version = 0;
+    let prev: string | null = null;
+    for (const b of chronological) {
+      const snap = b.systemPromptSnapshot as string;
+      if (snap !== prev) version += 1;
+      versions.set(b.id, version);
+      prev = snap;
+    }
+  }
+  return versions;
 }

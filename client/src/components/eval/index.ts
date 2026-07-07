@@ -14,5 +14,5 @@ export { BatchCompare } from "./BatchCompare/BatchCompare";
 export { CompareModal } from "./CompareModal/CompareModal";
 export { diffWords } from "./CompareModal/diffWords";
 export type { DiffToken, DiffTokenType } from "./CompareModal/diffWords";
-export { pct, fmtDelta, fmtCostDelta, deltaColor, modelLabelFrom, snapshotLabel, fingerprintLabel, fullBatchVersionMap, promptVersionMap } from "./helpers";
+export { pct, fmtDelta, fmtCostDelta, deltaColor, modelLabelFrom, snapshotLabel, fingerprintLabel, promptVersionMap } from "./helpers";
 export { s as evalStyles, TABLE_ROW_HEIGHT_PX } from "./styles";

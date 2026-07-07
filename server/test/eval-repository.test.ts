@@ -46,6 +46,7 @@ const BATCH_ROW = {
   citationAccuracy: 1,
   costUsd: 0.01,
   ranAt: new Date('2026-07-04T00:00:00Z'),
+  systemPromptSnapshot: 'You are a reviewer.',
 };
 
 const RUN_ROW = {
@@ -726,8 +727,9 @@ describe('EvalRepository.clearHistory', () => {
 // ---------------------------------------------------------------------------
 // Cross-agent eval dashboard methods (Step 4) — `listEvalConfiguredAgentSummaries`
 // issues THREE sequential `select()` calls (case-count groupBy → agents →
-// latest-batch), and `listRecentBatchesAcrossAgents` issues TWO (batches join
-// agents → pass/total aggregate). The existing single-resolve `selectChain`
+// latest-batch), and `listRecentBatchesAcrossAgents` issues THREE (batches join
+// agents → full-batch snapshot history for the prompt-version fold → pass/total
+// aggregate). The existing single-resolve `selectChain`
 // can't express "return a different row set per call", so this section uses
 // a small call-sequenced fake that returns the Nth entry of a provided array
 // of row-sets, in call order — genuinely representing the multi-query shape
@@ -911,24 +913,48 @@ describe('EvalRepository.recentTrendPointsForAgent', () => {
 });
 
 describe('EvalRepository.listRecentBatchesAcrossAgents', () => {
-  it('joins batches to agents and aggregates pass/total counts per batch', async () => {
+  it('joins batches to agents, folds a prompt version, and aggregates pass/total counts per batch', async () => {
     const { db } = makeSequencedSelectDb([
       // 1. batches joined to agents, newest first, capped
       [{ batch: BATCH_ROW, agentName: 'Test Agent' }],
-      // 2. pass/total aggregate from eval_runs grouped by batch_id
+      // 2. full-batch snapshot history for the window's agents (prompt-version fold)
+      [{ id: BATCH_ID, agentId: AGENT_ID, ranAt: BATCH_ROW.ranAt, systemPromptSnapshot: BATCH_ROW.systemPromptSnapshot }],
+      // 3. pass/total aggregate from eval_runs grouped by batch_id
       [{ batchId: BATCH_ID, passCount: 2, totalCount: 3 }],
     ]);
     const repo = new EvalRepository(db);
 
     const rows = await repo.listRecentBatchesAcrossAgents(WS_ID, 25);
 
+    // The single snapshot-bearing batch is prompt v1.
     expect(rows).toEqual([
-      { batch: BATCH_ROW, agentId: AGENT_ID, agentName: 'Test Agent', passCount: 2, totalCount: 3 },
+      { batch: BATCH_ROW, agentId: AGENT_ID, agentName: 'Test Agent', version: 1, passCount: 2, totalCount: 3 },
     ]);
   });
 
+  it('yields a null prompt version for a batch whose snapshot predates tracking', async () => {
+    const preTrackingBatch = { ...BATCH_ROW, systemPromptSnapshot: null };
+    const { db } = makeSequencedSelectDb([
+      [{ batch: preTrackingBatch, agentName: 'Test Agent' }],
+      // history: the batch carries no snapshot → excluded from the fold → null version
+      [{ id: BATCH_ID, agentId: AGENT_ID, ranAt: BATCH_ROW.ranAt, systemPromptSnapshot: null }],
+      [{ batchId: BATCH_ID, passCount: 2, totalCount: 3 }],
+    ]);
+    const repo = new EvalRepository(db);
+
+    const rows = await repo.listRecentBatchesAcrossAgents(WS_ID, 25);
+
+    expect(rows[0]).toMatchObject({ version: null, passCount: 2, totalCount: 3 });
+  });
+
   it('defaults pass/total to 0 when a batch has no eval_runs rows yet', async () => {
-    const { db } = makeSequencedSelectDb([[{ batch: BATCH_ROW, agentName: 'Test Agent' }], []]);
+    const { db } = makeSequencedSelectDb([
+      [{ batch: BATCH_ROW, agentName: 'Test Agent' }],
+      // 2. snapshot history (prompt-version fold)
+      [{ id: BATCH_ID, agentId: AGENT_ID, ranAt: BATCH_ROW.ranAt, systemPromptSnapshot: BATCH_ROW.systemPromptSnapshot }],
+      // 3. no eval_runs rows for the batch
+      [],
+    ]);
     const repo = new EvalRepository(db);
 
     const rows = await repo.listRecentBatchesAcrossAgents(WS_ID, 25);

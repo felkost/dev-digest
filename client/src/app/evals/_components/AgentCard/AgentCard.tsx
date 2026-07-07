@@ -39,16 +39,18 @@ export function AgentCard({
   const isDegraded = latest_batch?.status === "degraded";
   const model = latest_batch ? modelLabelFrom(latest_batch.agent_snapshot) : summary.model;
 
+  // `latest_version` is the PROMPT version of the latest run ("—" when that
+  // run predates prompt tracking, matching the VERSION column convention).
   const meta = latest_batch
     ? passInfo
       ? t("card.lastRunPass", {
-          version: latest_version ?? "?",
+          version: latest_version ?? "—",
           timestamp: new Date(latest_batch.ran_at).toLocaleString(),
           pass: passInfo.pass,
           total: passInfo.total,
         })
       : t("card.lastRunCases", {
-          version: latest_version ?? "?",
+          version: latest_version ?? "—",
           timestamp: new Date(latest_batch.ran_at).toLocaleString(),
           count: case_count,
         })

@@ -67,13 +67,14 @@ interface PromptVersionableBatch extends VersionableBatch {
   system_prompt_snapshot: string | null;
 }
 
-/** Builds `batchId → prompt version` for an agent's FULL batches. Unlike the
- *  run/attempt ordinal (`fullBatchVersionMap`), the PROMPT version increments
- *  ONLY when the stored `system_prompt_snapshot` text actually changes from the
- *  previous recorded prompt (chronological). So repeated runs on an unchanged
- *  prompt all share the same `prompt vN` — a run v4 on the original prompt is
- *  still `prompt v1`. Batches with no snapshot (predate tracking) are absent
- *  from the map (their prompt version is unknown, not 0). */
+/** Builds `batchId → prompt version` for an agent's FULL batches. The PROMPT
+ *  version increments ONLY when the stored `system_prompt_snapshot` text
+ *  actually changes from the previous recorded prompt (chronological). So
+ *  repeated runs on an unchanged prompt all share the same `prompt vN` — the
+ *  4th run on the original prompt is still `prompt v1`. Batches with no
+ *  snapshot (predate tracking) are absent from the map (their prompt version
+ *  is unknown, not 0) — the UI renders those as "—". This is the SINGLE
+ *  version notion the dashboard uses; there is no separate run/attempt ordinal. */
 export function promptVersionMap<T extends PromptVersionableBatch>(batches: T[]): Map<string, number> {
   const chronological = batches
     .filter((b) => b.kind === "full" && b.system_prompt_snapshot != null)
@@ -90,24 +91,6 @@ export function promptVersionMap<T extends PromptVersionableBatch>(batches: T[])
     map.set(b.id, version);
     prev = snap;
   }
-  return map;
-}
-
-/** Builds `batchId → 1-based version` for an agent's FULL batches, chronological
- *  (v1 = oldest). Calibration batches get no version (they aren't "attempts").
- *  Derived on read so it renumbers automatically whenever history is cleared —
- *  matching the server's `row_number()` convention for the cross-agent feed.
- *  Tie-break by id (same as the server) so client- and server-derived numbers
- *  agree even when two batches share a `ran_at`. */
-export function fullBatchVersionMap<T extends VersionableBatch>(batches: T[]): Map<string, number> {
-  const chronological = batches
-    .filter((b) => b.kind === "full")
-    .sort((a, b) => {
-      const t = new Date(a.ran_at).getTime() - new Date(b.ran_at).getTime();
-      return t !== 0 ? t : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-    });
-  const map = new Map<string, number>();
-  chronological.forEach((b, i) => map.set(b.id, i + 1));
   return map;
 }
 

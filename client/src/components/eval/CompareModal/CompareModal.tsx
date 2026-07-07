@@ -13,7 +13,11 @@
    `batchIdA`/`batchIdB` — the server does NOT reorder them by `ran_at`. This
    component derives which side is chronologically OLDER vs NEWER (via `ran_at`)
    and drives every "old → new" reading, the diff direction, and the Promote
-   target off that, never off the raw a/b query-param order. */
+   target off that, never off the raw a/b query-param order.
+
+   Every `vN` here (title, legend, Promote) is the PROMPT version — it bumps
+   only when the system-prompt text changes, so two runs on an unchanged prompt
+   read "v1 → v1" (intentional). There is no separate run/attempt ordinal. */
 
 import React from "react";
 import { useTranslations } from "next-intl";
@@ -30,23 +34,13 @@ interface CompareModalProps {
   agentId: string;
   batchIdA: string;
   batchIdB: string;
-  /** Full batch history for this agent — used ONLY to derive each batch's
-   *  chronological ordinal when `versionByBatchId` isn't supplied. */
+  /** Full batch history for this agent — used to derive each batch's PROMPT
+   *  version (via `promptVersionMap`), which drives every `vN` in the modal. */
   batches: EvalBatch[];
-  /** Pre-computed `batchId → version` (full-batch ordinals). Wins over the
-   *  local `ordinalOf` fallback so the modal's v-labels match the table/feed. */
-  versionByBatchId?: Map<string, number>;
   onClose: () => void;
 }
 
-/** 1-based ordinal of `batchId` within `batches`, oldest = 1 (fallback only). */
-function ordinalOf(batches: EvalBatch[], batchId: string): number | null {
-  const chronological = [...batches].sort((x, y) => new Date(x.ran_at).getTime() - new Date(y.ran_at).getTime());
-  const idx = chronological.findIndex((b) => b.id === batchId);
-  return idx === -1 ? null : idx + 1;
-}
-
-export function CompareModal({ agentId, batchIdA, batchIdB, batches, versionByBatchId, onClose }: CompareModalProps) {
+export function CompareModal({ agentId, batchIdA, batchIdB, batches, onClose }: CompareModalProps) {
   const t = useTranslations("evals");
   const toast = useToast();
   const compare = useEvalCompare(agentId, batchIdA, batchIdB);
@@ -54,12 +48,10 @@ export function CompareModal({ agentId, batchIdA, batchIdB, batches, versionByBa
 
   const result = compare.data;
 
-  const versionOf = (batchId: string): number | null => versionByBatchId?.get(batchId) ?? ordinalOf(batches, batchId);
-
-  // PROMPT versions (distinct from RUN versions): bump only when the prompt
-  // text actually changes. An unchanged prompt keeps the same `prompt vN`
-  // across many runs — this is what the prompt section + Promote label use, so
-  // running the same prompt twice never looks like a prompt-version bump.
+  // Every `vN` in the modal is the PROMPT version: it bumps only when the
+  // prompt text actually changes, so an unchanged prompt keeps the same
+  // `prompt vN` across many runs (running the same prompt twice reads
+  // "v1 → v1", never a phantom bump).
   const promptVersions = React.useMemo(() => promptVersionMap(batches), [batches]);
   const promptVersionOf = (batchId: string): number | null => promptVersions.get(batchId) ?? null;
 
@@ -67,8 +59,6 @@ export function CompareModal({ agentId, batchIdA, batchIdB, batches, versionByBa
   const newer = result && new Date(result.b.ran_at).getTime() >= new Date(result.a.ran_at).getTime() ? result.b : result?.a;
   const older = result ? (newer === result.b ? result.a : result.b) : undefined;
 
-  const newerVersion = newer ? versionOf(newer.id) : null;
-  const olderVersion = older ? versionOf(older.id) : null;
   const newerPromptVersion = newer ? promptVersionOf(newer.id) : null;
   const olderPromptVersion = older ? promptVersionOf(older.id) : null;
   const canPromote = !!newer && newer.system_prompt_snapshot != null;
@@ -84,9 +74,12 @@ export function CompareModal({ agentId, batchIdA, batchIdB, batches, versionByBa
     });
   };
 
+  // Title shows the PROMPT versions being compared (decision: title by prompt
+  // versions — two runs on the same prompt read "v1 → v1"). Falls back to the
+  // generic title when either side predates prompt tracking (no version).
   const title =
-    olderVersion != null && newerVersion != null
-      ? t("compare.titleVersions", { old: olderVersion, new: newerVersion })
+    olderPromptVersion != null && newerPromptVersion != null
+      ? t("compare.titleVersions", { old: olderPromptVersion, new: newerPromptVersion })
       : t("compare.title");
 
   return (

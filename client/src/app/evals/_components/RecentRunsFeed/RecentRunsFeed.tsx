@@ -1,8 +1,9 @@
 "use client";
 
 /* RecentRunsFeed — cross-agent "recent eval runs" table on the Eval Dashboard
-   landing page. Each row: owning agent, timestamp, a short version token (the
-   run's snapshot fingerprint), the three metrics as colored progress bars
+   landing page. Each row: owning agent, timestamp, the run's PROMPT version
+   token (bumps only when the system-prompt text changes; "—" for runs that
+   predate prompt tracking), the three metrics as colored progress bars
    (recall=blue, precision=green, citation=amber — same convention as the
    agent cards and KPI cards), and a pass/total count (AC-8). Fixed to show 10
    visible rows via `overflowY: auto` + `maxHeight` (AC-9 — never pagination;
@@ -72,7 +73,7 @@ export function RecentRunsFeed({ rows }: { rows: EvalRecentBatchRow[] }) {
                     {new Date(row.batch.ran_at).toLocaleString()}
                   </td>
                   <td style={{ ...evalsTabStyles.td }}>
-                    <span style={s.versionToken}>v{row.version}</span>
+                    <span style={s.versionToken}>{row.version != null ? `v${row.version}` : "—"}</span>
                   </td>
                   <td style={evalsTabStyles.td}>
                     <MetricBar value={row.batch.recall} color="var(--accent)" />
