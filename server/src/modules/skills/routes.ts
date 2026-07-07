@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { SkillType, SkillSource, ContextDocAttachment } from '@devdigest/shared';
+import { SkillType, SkillSource, ContextDocAttachment, SkillEvalCaseCreateInput } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { SkillsService } from './service.js';
+import { SkillEvalService } from './eval-service.js';
 
 const VersionParams = z.object({
   id: z.string().uuid(),
@@ -48,13 +49,6 @@ const ConfirmImportBody = z.object({
   enabled: z.boolean().optional(),
 });
 
-const CreateEvalCaseBody = z.object({
-  name: z.string().min(1),
-  input_diff: z.string(),
-  expected_output: z.unknown().optional(),
-  notes: z.string().optional(),
-});
-
 /**
  * A1 — skills module.
  *   GET    /skills                       → list (workspace-scoped)
@@ -67,7 +61,7 @@ const CreateEvalCaseBody = z.object({
  *   GET    /skills/:id/versions          → version history
  *   POST   /skills/:id/versions/:version/restore → restore body from past version
  *   GET    /skills/:id/stats             → usage stats
- *   GET    /skills/:id/evals             → eval cases (owner_kind='skill')
+ *   GET    /skills/:id/evals             → enriched eval-case list (SkillEvalCaseListResponse, via SkillEvalService.listCases)
  *   POST   /skills/:id/evals             → create eval case
  *   DELETE /skills/:id/evals/:caseId     → delete eval case
  *   GET    /skills/:id/context-docs      → attached context documents (ordered)
@@ -76,6 +70,7 @@ const CreateEvalCaseBody = z.object({
 export default async function skillsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
   const service = new SkillsService(app.container);
+  const evalService = new SkillEvalService(app.container);
 
   app.get('/skills', async (req) => {
     const { workspaceId } = await getContext(app.container, req);
@@ -173,17 +168,30 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
 
   // ---- Eval cases (existing eval_cases table, owner_kind='skill') ----------
 
+  // Enriched list (SkillEvalCaseListResponse): delegates to SkillEvalService,
+  // which joins each case with its most recent skill-eval run outcome
+  // (flat last_run_status/last_run_summary/last_host_agent_id) — the shape
+  // the client's rewritten EvalsTab (Steps 7/8) needs. Only SkillsService's
+  // basic POST/DELETE stay on the plain SkillsService path; this GET no
+  // longer calls service.listEvalCases.
   app.get('/skills/:id/evals', { schema: { params: IdParams } }, async (req) => {
     const { workspaceId } = await getContext(app.container, req);
-    return service.listEvalCases(workspaceId, req.params.id);
+    const cases = await evalService.listCases(workspaceId, req.params.id);
+    return { cases };
   });
 
+  // Create routes through SkillEvalService.createCaseManual so the manual
+  // create path gets the SAME AC-2 (practices OR grounding non-empty) / AC-3
+  // (non-empty fixture) validation + input_meta.source:'manual' default that
+  // the PATCH edit path already enforces. The body is the shared
+  // SkillEvalCaseCreateInput; the skill id comes from the :id path param (the
+  // body's redundant skill_id is ignored by the service).
   app.post(
     '/skills/:id/evals',
-    { schema: { params: IdParams, body: CreateEvalCaseBody } },
+    { schema: { params: IdParams, body: SkillEvalCaseCreateInput } },
     async (req, reply) => {
       const { workspaceId } = await getContext(app.container, req);
-      const evalCase = await service.createEvalCase(workspaceId, req.params.id, req.body);
+      const evalCase = await evalService.createCaseManual(workspaceId, req.params.id, req.body);
       reply.status(201);
       return evalCase;
     },

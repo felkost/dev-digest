@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Tabs, Button, Badge, Icon } from "@devdigest/ui";
 import type { Skill } from "@devdigest/shared";
 import { ConfigTab } from "./ConfigTab";
 import { ContextTab } from "./ContextTab";
 import { PreviewTab } from "./PreviewTab";
-import { EvalsTab } from "./EvalsTab";
+import { EvalsTab, type EvalsTabHandle } from "./EvalsTab";
 import { StatsTab } from "./StatsTab";
 import { VersionsTab } from "./VersionsTab";
 
@@ -32,6 +32,11 @@ interface SkillDetailProps {
 
 export function SkillDetail({ skill }: SkillDetailProps) {
   const [tab, setTab] = useState("config");
+  const evalsRef = useRef<EvalsTabHandle>(null);
+  // Reactive run-state reported up by EvalsTab, driving the header "Run on
+  // evals" button's disabled/loading appearance while on the Evals tab.
+  const [evalRunState, setEvalRunState] = useState({ canRunAll: false, running: false });
+  const onEvalsTab = tab === "evals";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -51,7 +56,22 @@ export function SkillDetail({ skill }: SkillDetailProps) {
             v{skill.version}
           </Badge>
           <div style={{ marginLeft: "auto" }}>
-            <Button kind="secondary" size="sm" icon="Play" onClick={() => setTab("evals")}>
+            {/* Single run trigger: on the Evals tab it fires a full run (via the
+                EvalsTab handle); elsewhere it navigates to the Evals tab. */}
+            <Button
+              kind="secondary"
+              size="sm"
+              icon="Play"
+              disabled={onEvalsTab && !evalRunState.canRunAll}
+              loading={onEvalsTab && evalRunState.running}
+              onClick={() => {
+                if (!onEvalsTab) {
+                  setTab("evals");
+                  return;
+                }
+                evalsRef.current?.runAll();
+              }}
+            >
               Run on evals
             </Button>
           </div>
@@ -64,7 +84,9 @@ export function SkillDetail({ skill }: SkillDetailProps) {
         {tab === "config" && <ConfigTab skill={skill} />}
         {tab === "context" && <ContextTab skill={skill} />}
         {tab === "preview" && <PreviewTab skill={skill} />}
-        {tab === "evals" && <EvalsTab skill={skill} />}
+        {tab === "evals" && (
+          <EvalsTab skill={skill} ref={evalsRef} onRunStateChange={setEvalRunState} />
+        )}
         {tab === "stats" && <StatsTab skill={skill} />}
         {tab === "versions" && <VersionsTab skill={skill} onRestore={() => setTab("config")} />}
       </div>

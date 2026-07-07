@@ -48,7 +48,17 @@
 
 ## Тестування (обов'язкове — у плані)
 
-Server hermetic: `skill-eval-scoring.test.ts`, `skill-eval-repository.test.ts`, `skill-eval-service.test.ts`, `skill-eval-routes.test.ts` (MockLLMProvider + fake db). Client RTL: `EvalsTab.test.tsx`, `SkillCaseEditor.test.tsx`, `HostAgentSelect.test.tsx`. Кожен крок має Verify-чеклист (typecheck + таргетовані тести). Крок 11 — повний hermetic sweep. (Опційно: додати `verify:skill-eval` npm-скрипт для CI-паритету з `verify:l06`.)
+Server hermetic: `skill-eval-scoring.test.ts`, `skill-eval-repository.test.ts`, `skill-eval-service.test.ts`, `skill-eval-routes.test.ts` (MockLLMProvider + fake db). Client RTL: `EvalsTab.test.tsx`, `SkillCaseEditor.test.tsx`, `HostAgentSelect.test.tsx`. Кожен крок має Verify-чеклист (typecheck + таргетовані тести). Крок 11 — повний hermetic sweep.
+
+**`verify:skill-eval` ДОДАНО** у `server/package.json` (дзеркалить `verify:l06`; поки інертний — стане зеленим, коли Кроки 3–6 створять 4 тест-файли).
+
+**Фінальна верифікація (обов'язково в самому кінці, після всіх кроків):**
+1. `cd server && pnpm verify:l06` — регресія: agent-eval має лишитись зеленим.
+2. `cd server && pnpm verify:skill-eval` — новий гейт зелений.
+3. `cd server && pnpm exec vitest run --exclude '**/*.it.test.ts'` — повний server sweep.
+4. `cd client && pnpm typecheck && pnpm test` — клієнтський сьют (= GitHub-чек `client / tests`).
+
+**GitHub-чеки для PR цієї фічі (за path-фільтром):** `server unit / typecheck` + `server unit / tests` (від `server/**`; CI ганяє повний sweep, НЕ `verify:*`), `client / tests` (від `client/**`), `server integration` (`.it.test.ts` — фіча нових не додає). **`evals / model evals (OpenRouter)` НЕ спрацьовує** для цієї фічі — його фільтр лише `.claude/**`/`CLAUDE.md`/`evals/**`; це харнес для ВЛАСНИХ скілів/агентів репо, ортогональний до in-app вкладки Skill Evals.
 
 ## Залишкові ризики імплементера (не блокери)
 

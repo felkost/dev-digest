@@ -507,6 +507,20 @@ Note on Step 9: a `HostAgentSelect` component is its own step (not folded into S
 | `SkillCaseEditor.test.tsx` (may be folded into `EvalsTab.test.tsx` or split out) | RTL | AC-2, AC-3, AC-39 |
 | `HostAgentSelect.test.tsx` | RTL | AC-11 (default resolution + fallback + empty state) |
 
+**Verification scripts & CI parity:**
+
+- `pnpm verify:skill-eval` — added to `server/package.json`, mirrors `verify:l06`: `pnpm typecheck && pnpm exec vitest run test/skill-eval-scoring.test.ts test/skill-eval-repository.test.ts test/skill-eval-service.test.ts test/skill-eval-routes.test.ts`. **Inert until Steps 3–6 create those four files**; Step 11 must confirm it exits 0. (Note: `server/package.json` is normally tracked — flag `H`, not skip-worktree — so this script IS committed.)
+- **Final verification — run at the very end, after every step:**
+  1. `cd server && pnpm verify:l06` — **regression gate**: the agent-eval pipeline must stay green (this feature must not break it).
+  2. `cd server && pnpm verify:skill-eval` — the new gate is green.
+  3. `cd server && pnpm exec vitest run --exclude '**/*.it.test.ts'` — full server hermetic sweep (Step 11).
+  4. `cd client && pnpm typecheck && pnpm test` — client suite (mirrors the `client / tests` GitHub check).
+- **GitHub checks that fire for THIS feature's PR** (by path filter — confirm all green before merge):
+  - `server unit / typecheck` + `server unit / tests` — triggered by `server/**`; runs the full hermetic sweep (includes the new `skill-eval-*.test.ts`). CI does NOT call `verify:*` — it runs the whole sweep, so the new tests are covered regardless.
+  - `client / tests` — triggered by `client/**`; runs `pnpm typecheck && pnpm test` (includes the new client RTL tests).
+  - `server integration` — triggered by `server/**`; runs `.it.test.ts` (this feature adds none by design — the existing suite must still pass).
+  - `evals / model evals (OpenRouter)` — **does NOT trigger for this feature.** Its path filter is `.claude/**` / `CLAUDE.md` / `evals/**` only; this feature touches `server/**`/`client/**`/`docs/**`. That workflow evals the repo's OWN skills/agents (harness), orthogonal to the in-app Skill Evals tab — it fires only if a step also edits a `.claude/` skill/agent or the `evals/` package (none planned).
+
 ## 8. Out of Scope
 
 - Trend chart UI for a skill's batches over time (spec Non-goal — deferred).

@@ -1287,6 +1287,232 @@ If this PR removes or renames something that was never marked deprecated, flag i
     }
   }
 
+  // ---- demo skill-eval cases for `flaky-test-detector` (idempotent) ----
+  // Skill-eval pipeline (docs/plans/2026-07-06-skill-eval-pipeline.md, Step 10).
+  //
+  // CHOSEN SKILL: `flaky-test-detector` (one of the 5 Test Quality Reviewer
+  // skills seeded above, ~seed.ts:421-441). WHY: its body enumerates concrete,
+  // literal antipattern keywords — "Hardcoded Date.now() or new Date()",
+  // "Math.random() without seeding", "setTimeout/setInterval without fake
+  // timers", "Array/object order assumptions", "External network calls" — each
+  // of which is a natural, unambiguous `grounding[]` substring that a real
+  // review finding about that antipattern would be expected to literally
+  // contain (e.g. a finding calling out a flaky test would say "Date.now()" or
+  // "Math.random()" by name, not a paraphrase). This makes the grounding gate
+  // meaningfully checkable rather than a vague semantic match. The skill's
+  // "Reporting rule" ("report the exact line ... explain what triggers the
+  // intermittent failure") is equally well-suited to `practices[]` statements
+  // a judge can verify against real review output with a verbatim quote (e.g.
+  // "review output explains why the assertion is non-deterministic"). This
+  // skill-eval scoring (`patternMatch` + `judgePractices`, see
+  // skills/eval-scoring.ts) is UNRELATED to reviewer-core's `groundFindings()`
+  // citation gate, which remains mandatory and untouched inside
+  // `reviewPullRequest()` itself — see the Constraints section of the plan
+  // above for the full naming-collision note.
+  //
+  // `no-mock-overuse` was the other strong candidate (clear keyword:
+  // "mocking the system under test") but `flaky-test-detector` has MORE
+  // distinct, independently-citable antipattern keywords, giving more natural
+  // spread across the 5 required edge-case shapes below.
+  //
+  // Every `inputDiff` below is a small, valid unified diff — hand-traced to
+  // parse correctly via `parseUnifiedDiff` (server/src/adapters/git/
+  // diff-parser.ts); this feature's `grounding[]` is a substring check against
+  // review OUTPUT TEXT, not diff line ranges, so the new-side line-numbering
+  // pitfall documented elsewhere in this file does not apply here — the only
+  // requirement is that the fixture parses without throwing.
+  //
+  // Fixed UUID literals + `.onConflictDoNothing()` keyed on `id` keep re-runs
+  // of `pnpm db:seed` from duplicating rows (AC-38). `ownerKind: 'skill'`,
+  // `ownerId: <flaky-test-detector's id>`, resolved via the same
+  // `SELECT ... WHERE workspace_id = $1 AND name = $2` pattern already used
+  // above for agents (here against `t.skills`, guarded so this whole section
+  // no-ops if the skill lookup fails on a partial/customized seed run).
+  //
+  // Edge-case coverage (AC-20–AC-24, AC-27, AC-37):
+  //   1. hardcoded-date-now-flake        — practices[] + grounding[] (both populated)
+  //   2. math-random-flake               — practices[] + grounding[] (both populated)
+  //   3. array-order-assumption-grounding — grounding[] only, practices[] empty
+  //   4. boundary-empty-input-well-tested  — practices[] only, grounding[] empty
+  //   5. network-call-fails-grounding      — deliberately fails the grounding gate
+  const [flakyTestDetectorSkill] = await db
+    .select()
+    .from(t.skills)
+    .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, 'flaky-test-detector')));
+  if (flakyTestDetectorSkill) {
+    const skillEvalCaseSeeds: Array<typeof t.evalCases.$inferInsert> = [
+      {
+        id: '33333333-3333-4333-a333-000000000001',
+        workspaceId,
+        ownerKind: 'skill',
+        ownerId: flakyTestDetectorSkill.id,
+        name: 'hardcoded Date.now() assertion',
+        inputDiff: `diff --git a/src/modules/billing/invoice.test.ts b/src/modules/billing/invoice.test.ts
+--- a/src/modules/billing/invoice.test.ts
++++ b/src/modules/billing/invoice.test.ts
+@@ -8,6 +8,10 @@ describe('generateInvoice', () => {
+   it('stamps the invoice with the current period', () => {
+     const invoice = generateInvoice(customer, plan);
+     expect(invoice.total).toBe(4200);
++  });
++
++  it('stamps the invoice with today\\'s date', () => {
++    const invoice = generateInvoice(customer, plan);
++    expect(invoice.issuedAt).toBe(Date.now());
+   });
+ });
+`,
+        expectedOutput: {
+          practices: [
+            'review output explains why asserting on Date.now() makes the test non-deterministic',
+          ],
+          grounding: ['Date.now()'],
+          threshold: 0.6,
+        },
+        notes: 'Full two-tier case: grounding requires the literal "Date.now()" keyword; practices asks the judge to verify the review actually explains the flakiness, not just names the call.',
+      },
+      {
+        id: '33333333-3333-4333-a333-000000000002',
+        workspaceId,
+        ownerKind: 'skill',
+        ownerId: flakyTestDetectorSkill.id,
+        name: 'unseeded Math.random() in assertion',
+        inputDiff: `diff --git a/src/modules/pricing/discount.test.ts b/src/modules/pricing/discount.test.ts
+--- a/src/modules/pricing/discount.test.ts
++++ b/src/modules/pricing/discount.test.ts
+@@ -12,6 +12,11 @@ describe('applyPromoDiscount', () => {
+     const result = applyPromoDiscount(100, 'SAVE10');
+     expect(result).toBe(90);
+   });
++
++  it('applies a random bonus discount', () => {
++    const bonus = Math.random() * 5;
++    const result = applyPromoDiscount(100, 'SAVE10', bonus);
++    expect(result).toBeLessThan(90);
++  });
+ });
+`,
+        expectedOutput: {
+          practices: [
+            'review output explains that the assertion result depends on an unseeded random value',
+          ],
+          grounding: ['Math.random()'],
+          threshold: 0.6,
+        },
+        notes: 'Full two-tier case: grounding requires the literal "Math.random()" keyword; practices verifies the judge can confirm the review connects the random value to assertion flakiness.',
+      },
+      {
+        id: '33333333-3333-4333-a333-000000000003',
+        workspaceId,
+        ownerKind: 'skill',
+        ownerId: flakyTestDetectorSkill.id,
+        name: 'array order assumption without ORDER BY',
+        inputDiff: `diff --git a/src/modules/audit/log.test.ts b/src/modules/audit/log.test.ts
+--- a/src/modules/audit/log.test.ts
++++ b/src/modules/audit/log.test.ts
+@@ -15,6 +15,10 @@ describe('listAuditEvents', () => {
+     const events = await listAuditEvents(workspaceId);
+     expect(events.length).toBe(2);
++  });
++
++  it('returns the most recent event first', async () => {
++    const events = await listAuditEvents(workspaceId);
++    expect(events[0].action).toBe('workspace.created');
+   });
+ });
+`,
+        expectedOutput: {
+          practices: [],
+          grounding: ['Array/object order assumptions', 'ORDER BY'],
+          threshold: 0.6,
+        },
+        notes: 'Grounding-only case (AC-20/AC-22 edge case): no practices configured, so a pass/fail is determined entirely by the substring gate and the judge is never invoked — the query behind listAuditEvents has no ORDER BY, so asserting events[0] is a real order-assumption flake.',
+      },
+      {
+        id: '33333333-3333-4333-a333-000000000004',
+        workspaceId,
+        ownerKind: 'skill',
+        ownerId: flakyTestDetectorSkill.id,
+        name: 'well-covered boundary input, no flakiness to report',
+        inputDiff: `diff --git a/src/modules/pricing/discount.ts b/src/modules/pricing/discount.ts
+--- a/src/modules/pricing/discount.ts
++++ b/src/modules/pricing/discount.ts
+@@ -4,6 +4,9 @@ export function applyPromoDiscount(amount: number, code: string, bonus = 0): number {
++  if (amount <= 0) {
++    return 0;
++  }
+   const base = code === 'SAVE10' ? amount * 0.9 : amount;
+   return Math.max(0, base - bonus);
+ }
+diff --git a/src/modules/pricing/discount.test.ts b/src/modules/pricing/discount.test.ts
+--- a/src/modules/pricing/discount.test.ts
++++ b/src/modules/pricing/discount.test.ts
+@@ -1,5 +1,9 @@
+ describe('applyPromoDiscount', () => {
++  it('returns zero for a zero amount', () => {
++    expect(applyPromoDiscount(0, 'SAVE10')).toBe(0);
++  });
++
++  it('returns zero for a negative amount', () => {
++    expect(applyPromoDiscount(-5, 'SAVE10')).toBe(0);
++  });
+   it('applies the SAVE10 discount', () => {
+     expect(applyPromoDiscount(100, 'SAVE10')).toBe(90);
+   });
+`,
+        expectedOutput: {
+          practices: [
+            'review output does not flag any flaky-test pattern in this diff',
+          ],
+          grounding: [],
+          threshold: 0.6,
+        },
+        notes: 'Practices-only case (AC-20/AC-22 edge case): no grounding requirement (empty array, vacuously satisfied), so the outcome is decided purely by the judge — a clean, deterministic boundary-case addition with no timing/randomness/ordering/network antipattern.',
+      },
+      {
+        id: '33333333-3333-4333-a333-000000000005',
+        workspaceId,
+        ownerKind: 'skill',
+        ownerId: flakyTestDetectorSkill.id,
+        name: 'unstubbed network call (deliberately fails grounding)',
+        inputDiff: `diff --git a/src/modules/webhooks/dispatch.test.ts b/src/modules/webhooks/dispatch.test.ts
+--- a/src/modules/webhooks/dispatch.test.ts
++++ b/src/modules/webhooks/dispatch.test.ts
+@@ -6,6 +6,11 @@ describe('dispatchWebhook', () => {
+     const result = await dispatchWebhook(event);
+     expect(result.delivered).toBe(true);
++  });
++
++  it('dispatches to the configured external endpoint', async () => {
++    const result = await fetch('https://webhook.example.com/health');
++    expect(result.status).toBe(200);
+   });
+ });
+`,
+        expectedOutput: {
+          // Deliberately mismatched against the skill's realistic output for
+          // this diff: a real flaky-test-detector review of an unstubbed
+          // `fetch()` call would cite "External network calls" (the skill's
+          // own vocabulary for this antipattern, ~seed.ts:436), NOT the string
+          // below — demonstrating `failed_grounding` as a status distinct
+          // from `failed_judge` (AC-21/AC-30): the gate fails and the judge
+          // (which would otherwise assess the practices statement) is never
+          // invoked.
+          practices: [
+            'review output explains that the test depends on a live external service',
+          ],
+          grounding: ['fake timers'],
+          threshold: 0.6,
+        },
+        notes: 'Deliberate grounding-gate failure (AC-21/AC-30): the diff\'s real antipattern is an unstubbed network call, but the grounding substring asks for "fake timers" (a setTimeout/setInterval-specific phrase from the skill body that a real review of THIS diff would not use) — the gate fails and the judge is skipped entirely, producing a distinct failed_grounding outcome.',
+      },
+    ];
+
+    for (const c of skillEvalCaseSeeds) {
+      await db.insert(t.evalCases).values(c).onConflictDoNothing({ target: t.evalCases.id });
+    }
+  }
+
   return { workspaceId, userId };
 }
 

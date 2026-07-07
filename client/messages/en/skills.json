@@ -114,5 +114,92 @@
       "toggle": "Serialization preview ({tokens} tokens total)",
       "total": "Total: {tokens} tokens"
     }
+  },
+  "evals": {
+    "title": "Evals",
+    "casesTitle": "Eval cases",
+    "passing": "{passed} / {total} passing",
+    "hostAgent": {
+      "label": "Host agent",
+      "noAgents": "No agents available — create one first"
+    },
+    "runAll": "Run all evals",
+    "newCase": "+ New eval case",
+    "metrics": {
+      "title": "Eval metrics",
+      "judgeScore": "Judge score",
+      "groundingPassRate": "Grounding pass rate",
+      "casesPassing": "Cases passing",
+      "cost": "Cost"
+    },
+    "empty": {
+      "title": "No eval cases yet",
+      "hint": "Accept or dismiss a finding on a PR, then use \"Attribute to skill\" on its card to turn it into a regression case — or author one by hand.",
+      "cta": "+ New eval case"
+    },
+    "status": {
+      "never_run": "Never run",
+      "passed": "Passed",
+      "failed_grounding": "Failed grounding",
+      "failed_judge": "Failed judge",
+      "error": "Error"
+    },
+    "summary": {
+      "neverRun": "never run"
+    },
+    "case": {
+      "practicesCount": "{count} practice(s)",
+      "groundingCount": "{count} grounding term(s)",
+      "run": "Run",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteConfirmTitle": "Delete eval case",
+      "deleteConfirmBody": "Delete \"{name}\"? This cannot be undone.",
+      "deleteConfirmConfirm": "Delete",
+      "deleteConfirmCancel": "Cancel"
+    },
+    "editor": {
+      "titleNew": "New eval case",
+      "titleEdit": "Edit eval case",
+      "name": "Name",
+      "namePlaceholder": "Case name",
+      "fixture": "Fixture (diff)",
+      "fixtureRequired": "A fixture is required.",
+      "fixturePlaceholder": "Paste a unified diff fragment…",
+      "practices": "Practices",
+      "practicesHint": "Statements the practices judge verifies against the review output (verbatim evidence required to pass).",
+      "practicePlaceholder": "e.g. review output identifies the missing null check",
+      "addPractice": "+ Add practice",
+      "removePractice": "Remove",
+      "grounding": "Grounding terms",
+      "groundingHint": "Substrings that must all appear in the review output for the grounding gate to pass. Leave empty for no requirement.",
+      "groundingPlaceholder": "e.g. Math.random()",
+      "addGrounding": "+ Add grounding term",
+      "removeGrounding": "Remove",
+      "threshold": "Threshold",
+      "thresholdHint": "Judge score (0–1) required to pass. Defaults to 0.6.",
+      "thresholdOutOfRange": "Threshold must be between 0 and 1.",
+      "notes": "Notes",
+      "notesPlaceholder": "Optional notes",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel"
+    },
+    "history": {
+      "title": "Batch history",
+      "empty": "No batch runs yet.",
+      "timestamp": "Timestamp",
+      "hostAgent": "Host agent",
+      "model": "Model",
+      "judgeScore": "Judge score",
+      "groundingPassRate": "Grounding pass rate",
+      "casesPassing": "Cases passing",
+      "cost": "Cost",
+      "status": "Status",
+      "statusClean": "Clean",
+      "statusDegraded": "Degraded",
+      "statusCalibration": "Calibration",
+      "statusRunning": "Running"
+    }
   }
 }

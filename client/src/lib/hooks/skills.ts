@@ -3,7 +3,22 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Skill, SkillType, SkillSource, SkillVersion, SkillStats, ImportPreview, EvalCase, AgentSkillLink } from "@devdigest/shared";
+import type {
+  Skill,
+  SkillType,
+  SkillSource,
+  SkillVersion,
+  SkillStats,
+  ImportPreview,
+  AgentSkillLink,
+  SkillEvalCaseListItem,
+  SkillEvalCaseListResponse,
+  SkillEvalCaseCreateInput,
+  SkillEvalBatch,
+  SkillEvalBatchDetail,
+  SkillEvalRunBatchRequest,
+  SkillEvalRunAcceptedResponse,
+} from "@devdigest/shared";
 
 // ---- Skills CRUD -----------------------------------------------------------
 
@@ -131,24 +146,40 @@ export function useConfirmImport() {
 }
 
 // ---- Eval cases (existing eval_cases table, owner_kind='skill') ------------
-
-export type SkillEvalCase = EvalCase & {
-  last_run?: { pass: boolean | null; ran_at: string } | null;
-};
+//
+// `GET /skills/:id/evals` now returns `{ cases: SkillEvalCaseListItem[] }`
+// (flat `last_run_status`/`last_run_summary`/`last_host_agent_id` fields) —
+// RESHAPED from the old bare-array response with a nested `last_run` object.
+// `useSkillEvals` is kept as the query fn's name (single existing call site,
+// `SkillDetail/EvalsTab.tsx`, is rewritten in a parallel sibling step) but its
+// return shape is now `SkillEvalCaseListItem[]` from `@devdigest/shared` —
+// the local `SkillEvalCase` type alias is removed, never redefine this shape
+// locally.
 
 export function useSkillEvals(skillId: string | null | undefined) {
   return useQuery({
     queryKey: ["skill-evals", skillId],
-    queryFn: ({ signal }) => api.get<SkillEvalCase[]>(`/skills/${skillId}/evals`, { signal }),
+    queryFn: ({ signal }) =>
+      api
+        .get<SkillEvalCaseListResponse>(`/skills/${skillId}/evals`, { signal })
+        .then((r) => r.cases),
     enabled: !!skillId,
   });
 }
 
+/**
+ * Create a hand-authored skill eval case. `POST /skills/:id/evals` is wired to
+ * `SkillEvalService.createCaseManual`, which enforces AC-2 (practices OR
+ * grounding non-empty) / AC-3 (non-empty fixture) server-side and defaults
+ * `input_meta.source:'manual'`. The body is the shared
+ * `SkillEvalCaseCreateInput` posted directly (no wire-shape translation); the
+ * skill id from the route is injected so it always matches the path param.
+ */
 export function useCreateSkillEval(skillId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { name: string; input_diff: string; expected_output: unknown; notes?: string }) =>
-      api.post<SkillEvalCase>(`/skills/${skillId}/evals`, input),
+    mutationFn: (input: SkillEvalCaseCreateInput) =>
+      api.post<SkillEvalCaseListItem>(`/skills/${skillId}/evals`, { ...input, skill_id: skillId }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["skill-evals", skillId] }),
   });
 }
@@ -158,6 +189,93 @@ export function useDeleteSkillEval(skillId: string) {
   return useMutation({
     mutationFn: (caseId: string) => api.del<{ ok: boolean }>(`/skills/${skillId}/evals/${caseId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["skill-evals", skillId] }),
+  });
+}
+
+/** Edit-in-place (full replacement; AC-39's threshold edit applies too). */
+export interface UpdateSkillEvalCaseInput {
+  caseId: string;
+  input: SkillEvalCaseCreateInput;
+}
+
+export function useUpdateSkillEvalCase(skillId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ caseId, input }: UpdateSkillEvalCaseInput) =>
+      api.patch<SkillEvalCaseListItem>(`/skills/${skillId}/evals/${caseId}`, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["skill-evals", skillId] }),
+  });
+}
+
+/**
+ * Promote an already-accepted/dismissed finding into a SKILL-eval case
+ * (AC-4) — the target skill is an explicit author choice (`skill_id` in the
+ * mutation variables), never inferred from route params, since this hook is
+ * called from a FindingCard context that doesn't inherently know which skill
+ * tab is open.
+ */
+export interface CreateSkillEvalCaseFromFindingInput {
+  findingId: string;
+  skill_id: string;
+}
+
+export function useCreateSkillEvalCaseFromFinding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ findingId, skill_id }: CreateSkillEvalCaseFromFindingInput) =>
+      api.post<SkillEvalCaseListItem>(`/findings/${findingId}/evals/skill-case`, { skill_id }),
+    onSuccess: (_data, { skill_id }) => {
+      qc.invalidateQueries({ queryKey: ["skill-evals", skill_id] });
+    },
+  });
+}
+
+/**
+ * `POST /skills/:id/evals/run` — 202 Accepted; the server enqueues the batch
+ * and returns only `{ batch_id }`. `host_agent_id` is always included;
+ * omitting `case_ids` runs the full case set, providing a strict subset
+ * records a `calibration` batch. The caller must poll
+ * `useSkillEvalBatchDetail(skillId, batch_id)` (self-polls while `status` is
+ * null) to know when the batch actually finishes — mirrors
+ * `useRunEvalBatch`/`useEvalRunCompletion` in `hooks/eval.ts`.
+ */
+export function useRunSkillEvalBatch(skillId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SkillEvalRunBatchRequest) =>
+      api.post<SkillEvalRunAcceptedResponse>(`/skills/${skillId}/evals/run`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["skill-evals", skillId] });
+      qc.invalidateQueries({ queryKey: ["skill-eval-batches", skillId] });
+    },
+  });
+}
+
+export function useSkillEvalBatchHistory(skillId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["skill-eval-batches", skillId],
+    queryFn: ({ signal }) => api.get<SkillEvalBatch[]>(`/skills/${skillId}/evals/batches`, { signal }),
+    enabled: !!skillId,
+  });
+}
+
+/**
+ * Batch drill-down — also doubles as the completion poll for a just-fired
+ * run: while the batch row's `status` is still null (in flight), this query
+ * self-polls. Reuses the SAME `refetchInterval` value as `hooks/eval.ts`'s
+ * `useEvalBatchDetail` (3000ms) for consistency across the two eval
+ * pipelines.
+ */
+export function useSkillEvalBatchDetail(
+  skillId: string | null | undefined,
+  batchId: string | null | undefined,
+) {
+  return useQuery({
+    queryKey: ["skill-eval-batch-detail", skillId, batchId],
+    queryFn: ({ signal }) =>
+      api.get<SkillEvalBatchDetail>(`/skills/${skillId}/evals/batches/${batchId}`, { signal }),
+    enabled: !!batchId,
+    refetchInterval: (query) => (query.state.data?.status == null ? 3000 : false),
   });
 }
 

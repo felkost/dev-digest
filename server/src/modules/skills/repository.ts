@@ -284,6 +284,14 @@ export class SkillsRepository {
     input_diff: string;
     expected_output: unknown;
     notes?: string;
+    /**
+     * Provenance (AC-8) — optional, additive: existing callers that omit it
+     * (e.g. the manual-case path) are unaffected (`inputMeta` stays `null`).
+     * The skill-eval `createCaseFromFinding` path passes
+     * `{ source: 'finding', source_finding_id, source_pr_number }` here so the
+     * persisted row (not just the returned DTO) carries provenance.
+     */
+    input_meta?: unknown;
   }): Promise<EvalCaseRow> {
     const [row] = await this.db
       .insert(t.evalCases)
@@ -294,10 +302,50 @@ export class SkillsRepository {
         name: values.name,
         inputDiff: values.input_diff,
         expectedOutput: values.expected_output as object,
+        inputMeta: (values.input_meta as object | undefined) ?? null,
         notes: values.notes ?? null,
       })
       .returning();
     return row!;
+  }
+
+  /**
+   * Full-replacement edit of a skill-owned eval case (AC-39). Mirrors
+   * `insertEvalCase`'s shape/signature — same `expected_output: unknown`
+   * passthrough for the skill-eval `{practices, grounding, threshold}` JSON.
+   * Scoped by `workspaceId` + `owner_kind='skill'` + `owner_id` (skillId) so a
+   * same-workspace caseId belonging to a DIFFERENT skill (or an agent-owned
+   * case) cannot be edited via this method — returns `undefined` in that case.
+   */
+  async updateEvalCase(
+    workspaceId: string,
+    skillId: string,
+    caseId: string,
+    values: {
+      name: string;
+      input_diff: string;
+      expected_output: unknown;
+      notes?: string;
+    },
+  ): Promise<EvalCaseRow | undefined> {
+    const [row] = await this.db
+      .update(t.evalCases)
+      .set({
+        name: values.name,
+        inputDiff: values.input_diff,
+        expectedOutput: values.expected_output as object,
+        notes: values.notes ?? null,
+      })
+      .where(
+        and(
+          eq(t.evalCases.id, caseId),
+          eq(t.evalCases.workspaceId, workspaceId),
+          eq(t.evalCases.ownerKind, 'skill'),
+          eq(t.evalCases.ownerId, skillId),
+        ),
+      )
+      .returning();
+    return row;
   }
 
   async deleteEvalCase(workspaceId: string, caseId: string): Promise<boolean> {

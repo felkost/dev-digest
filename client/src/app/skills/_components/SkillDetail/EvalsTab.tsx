@@ -1,150 +1,194 @@
 "use client";
 
-import React, { useState } from "react";
-import { Button, Badge, Icon, Skeleton, FormField, TextInput, Textarea } from "@devdigest/ui";
-import type { Skill } from "@devdigest/shared";
-import { useSkillEvals, useCreateSkillEval, useDeleteSkillEval } from "../../../../lib/hooks/skills";
+/* EvalsTab — skill Evals tab (Step 8 of docs/plans/2026-07-06-skill-eval-
+   pipeline.md). Thin container: metrics strip + host-agent selector + case
+   list + Case Editor + batch history. The full-run trigger lives in the
+   SkillDetail header ("Run on evals"): this component exposes `runAll` via a
+   ref and reports its disabled/loading state up via `onRunStateChange`, so
+   there is no separate in-tab run button. Mirrors the agent-eval EvalsTab's
+   container-component pattern (adapted vocabulary: judge score / grounding
+   pass rate / cases passing, NOT recall/precision/citation-accuracy). */
+
+import React from "react";
+import { useTranslations } from "next-intl";
+import { useQueryClient } from "@tanstack/react-query";
+import { Button, EmptyState, Skeleton } from "@devdigest/ui";
+import type { Skill, SkillEvalCaseListItem } from "@devdigest/shared";
+import {
+  useSkillEvals,
+  useSkillEvalBatchHistory,
+  useRunSkillEvalBatch,
+  useSkillEvalBatchDetail,
+  useDeleteSkillEval,
+} from "@/lib/hooks/skills";
+import { useAgents } from "@/lib/hooks/agents";
+import { HostAgentSelect } from "./_components/EvalsTab/_components/HostAgentSelect/HostAgentSelect";
+import { SkillEvalMetrics } from "./_components/EvalsTab/_components/SkillEvalMetrics/SkillEvalMetrics";
+import { SkillCaseList } from "./_components/EvalsTab/_components/SkillCaseList/SkillCaseList";
+import { SkillCaseEditor } from "./_components/EvalsTab/_components/SkillCaseEditor/SkillCaseEditor";
+import { SkillEvalBatchHistory } from "./_components/EvalsTab/_components/SkillEvalBatchHistory/SkillEvalBatchHistory";
+import { s } from "./_components/EvalsTab/styles";
+
+export interface EvalsTabHandle {
+  /** Fire a full-set eval run (all cases) with the currently-selected host
+      agent. No-op if no host agent is selected or a run is already in flight. */
+  runAll: () => void;
+}
 
 interface EvalsTabProps {
   skill: Skill;
+  /** Reports run availability + in-flight state up to the parent so the header
+      "Run on evals" button can drive its own disabled / loading appearance. */
+  onRunStateChange?: (state: { canRunAll: boolean; running: boolean }) => void;
 }
 
-function statusIcon(lastRun?: { pass: boolean | null } | null) {
-  if (!lastRun) return <Icon.Dot size={16} style={{ color: "var(--text-muted)" }} />;
-  if (lastRun.pass === null) return <Icon.Clock size={14} style={{ color: "var(--text-muted)" }} />;
-  return lastRun.pass ? (
-    <Icon.CheckCircle size={14} style={{ color: "var(--ok)" }} />
-  ) : (
-    <Icon.XCircle size={14} style={{ color: "var(--crit)" }} />
-  );
-}
+export const EvalsTab = React.forwardRef<EvalsTabHandle, EvalsTabProps>(function EvalsTab(
+  { skill, onRunStateChange },
+  ref,
+) {
+  const t = useTranslations("skills");
+  const { data: cases, isLoading: loadingCases } = useSkillEvals(skill.id);
+  const { data: batches, isLoading: loadingBatches } = useSkillEvalBatchHistory(skill.id);
+  const { data: agents } = useAgents();
+  const runBatch = useRunSkillEvalBatch(skill.id);
+  const deleteCase = useDeleteSkillEval(skill.id);
 
-export function EvalsTab({ skill }: EvalsTabProps) {
-  const { data: evals, isLoading } = useSkillEvals(skill.id);
-  const createEval = useCreateSkillEval(skill.id);
-  const deleteEval = useDeleteSkillEval(skill.id);
-  const [showNew, setShowNew] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newDiff, setNewDiff] = useState("");
+  const qc = useQueryClient();
+  const [selectedHostAgentId, setSelectedHostAgentId] = React.useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = React.useState(false);
+  const [editingCase, setEditingCase] = React.useState<SkillEvalCaseListItem | null>(null);
+  const [runningCaseId, setRunningCaseId] = React.useState<string | null>(null);
+  const [pendingBatchId, setPendingBatchId] = React.useState<string | null>(null);
 
-  const passed = (evals ?? []).filter((e) => e.last_run?.pass === true).length;
-  const total = (evals ?? []).length;
+  // The run route returns 202 BEFORE the batch executes, so poll the just-
+  // fired batch until the server seals it (status != null), then refresh the
+  // case statuses + history. Without this the metrics/statuses/history would
+  // never update until a manual page reload. Mirrors hooks/eval.ts's
+  // useEvalRunCompletion pattern; useSkillEvalBatchDetail self-polls while
+  // status is null and stops once sealed.
+  const pendingBatch = useSkillEvalBatchDetail(skill.id, pendingBatchId);
+  const running = runBatch.isPending || pendingBatchId != null;
 
-  const handleCreate = () => {
-    if (!newName.trim()) return;
-    createEval.mutate(
-      { name: newName.trim(), input_diff: newDiff, expected_output: null },
+  React.useEffect(() => {
+    if (pendingBatchId && pendingBatch.data?.status != null) {
+      qc.invalidateQueries({ queryKey: ["skill-evals", skill.id] });
+      qc.invalidateQueries({ queryKey: ["skill-eval-batches", skill.id] });
+      setPendingBatchId(null);
+      setRunningCaseId(null);
+    }
+  }, [pendingBatchId, pendingBatch.data?.status, qc, skill.id]);
+
+  const list = cases ?? [];
+  const batchList = batches ?? [];
+  // Server sorts batch history `ORDER BY ran_at DESC` — newest first.
+  const latestBatch = batchList[0] ?? null;
+  const passedCount = list.filter((c) => c.last_run_status === "passed").length;
+
+  const openNewCase = () => {
+    setEditingCase(null);
+    setEditorOpen(true);
+  };
+
+  const openEditCase = (evalCase: SkillEvalCaseListItem) => {
+    setEditingCase(evalCase);
+    setEditorOpen(true);
+  };
+
+  const closeEditor = () => {
+    setEditorOpen(false);
+    setEditingCase(null);
+  };
+
+  const runCase = (caseId: string) => {
+    if (!selectedHostAgentId || running) return;
+    setRunningCaseId(caseId);
+    runBatch.mutate(
+      { case_ids: [caseId], host_agent_id: selectedHostAgentId },
       {
-        onSuccess: () => {
-          setShowNew(false);
-          setNewName("");
-          setNewDiff("");
-        },
+        onSuccess: (res) => setPendingBatchId(res.batch_id),
+        // The batch never started — the completion effect won't fire, so
+        // release the per-row spinner here.
+        onError: () => setRunningCaseId(null),
       },
     );
   };
 
-  return (
-    <div style={{ padding: "24px 28px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 700 }}>Eval cases</h2>
-        {total > 0 && (
-          <Badge color={passed === total ? "var(--ok)" : "var(--color-warning)"}>
-            {passed}/{total} passing
-          </Badge>
-        )}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <Button kind="secondary" size="sm" icon="Play" disabled>
-            Run all evals
-          </Button>
-          <Button kind="primary" size="sm" icon="Plus" onClick={() => setShowNew(true)}>
-            New eval case
-          </Button>
-        </div>
-      </div>
+  const runAll = () => {
+    if (!selectedHostAgentId || running) return;
+    runBatch.mutate(
+      { host_agent_id: selectedHostAgentId },
+      { onSuccess: (res) => setPendingBatchId(res.batch_id) },
+    );
+  };
 
-      {isLoading && <Skeleton height={60} style={{ marginBottom: 8 }} />}
+  // The full-run trigger lives in the SkillDetail header ("Run on evals").
+  // Expose runAll imperatively and report the reactive disabled/loading state
+  // up so that header button reflects it (disabled while no host agent is
+  // selected, no cases exist, or a run is in flight; loading while running).
+  const canRunAll = !!selectedHostAgentId && !running && (cases?.length ?? 0) > 0;
+  React.useImperativeHandle(ref, () => ({ runAll }), [runAll]);
+  React.useEffect(() => {
+    onRunStateChange?.({ canRunAll, running });
+  }, [canRunAll, running, onRunStateChange]);
 
-      {!isLoading && total === 0 && !showNew && (
-        <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13, padding: "32px 0" }}>
-          No eval cases yet. Create one to test this skill.
-        </div>
-      )}
+  const isLoading = loadingCases || loadingBatches;
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {(evals ?? []).map((ec) => (
-          <div
-            key={ec.id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "10px 14px",
-              background: "var(--bg-surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-            }}
-          >
-            {statusIcon(ec.last_run)}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 13 }}>{ec.name}</div>
-              {ec.last_run && (
-                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  {ec.last_run.pass ? "Passed" : "Failed"} &middot; {new Date(ec.last_run.ran_at).toLocaleDateString()}
-                </div>
-              )}
-              {!ec.last_run && (
-                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>never run</div>
-              )}
-            </div>
-            <button
-              onClick={() => deleteEval.mutate(ec.id)}
-              style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "var(--text-muted)" }}
-              title="Delete eval case"
-            >
-              <Icon.Trash size={14} />
-            </button>
-          </div>
+  if (isLoading) {
+    return (
+      <div style={s.wrap}>
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} height={56} style={{ marginBottom: 8 }} />
         ))}
       </div>
+    );
+  }
 
-      {showNew && (
-        <div
-          style={{
-            marginTop: 16,
-            padding: 16,
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-          }}
-        >
-          <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>New eval case</h3>
-          <div style={{ marginBottom: 12 }}>
-            <FormField label="Name" required>
-              <TextInput value={newName} onChange={setNewName} placeholder="stripe-key-leak" />
-            </FormField>
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <FormField label="Input diff (paste)">
-              <Textarea
-                value={newDiff}
-                onChange={setNewDiff}
-                rows={5}
-                mono
-                placeholder="@@ -1,3 +1,5 @@&#10;+const key = 'sk_live_...';"
-              />
-            </FormField>
-          </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button kind="secondary" size="sm" onClick={() => setShowNew(false)}>
-              Cancel
-            </Button>
-            <Button kind="primary" size="sm" onClick={handleCreate} disabled={!newName.trim() || createEval.isPending}>
-              {createEval.isPending ? "Saving..." : "Save"}
-            </Button>
-          </div>
+  if (list.length === 0) {
+    return (
+      <div style={s.wrap}>
+        <EmptyState
+          icon="FlaskConical"
+          title={t("evals.empty.title")}
+          body={t("evals.empty.hint")}
+          cta={t("evals.empty.cta")}
+          onCta={openNewCase}
+        />
+        {editorOpen && <SkillCaseEditor skillId={skill.id} initialCase={editingCase} onClose={closeEditor} />}
+      </div>
+    );
+  }
+
+  return (
+    <div style={s.wrap}>
+      <SkillEvalMetrics latestBatch={latestBatch} />
+
+      <div style={s.headerRow}>
+        <div style={s.titleRow}>
+          <h2 style={s.title}>{t("evals.casesTitle")}</h2>
+          <span style={s.passingBadge}>{t("evals.passing", { passed: passedCount, total: list.length })}</span>
         </div>
-      )}
+        <Button kind="primary" size="sm" onClick={openNewCase}>
+          {t("evals.newCase")}
+        </Button>
+      </div>
+
+      <div style={s.runControls}>
+        <HostAgentSelect value={selectedHostAgentId} onChange={setSelectedHostAgentId} />
+      </div>
+
+      <SkillCaseList
+        cases={list}
+        runningCaseId={runningCaseId}
+        runDisabled={!selectedHostAgentId || running}
+        onRunCase={runCase}
+        onEditCase={openEditCase}
+        onDeleteCase={(caseId) => deleteCase.mutate(caseId)}
+      />
+
+      <div style={s.sectionLabel}>{t("evals.history.title")}</div>
+      <SkillEvalBatchHistory batches={batchList} agents={agents ?? []} />
+
+      {editorOpen && <SkillCaseEditor skillId={skill.id} initialCase={editingCase} onClose={closeEditor} />}
     </div>
   );
-}
+});
