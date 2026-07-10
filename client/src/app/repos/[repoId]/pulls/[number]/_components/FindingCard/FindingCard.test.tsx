@@ -80,7 +80,7 @@ describe("FindingCard (smoke, both themes)", () => {
 describe("FindingCard — add to eval case", () => {
   it("hides the action when the finding is neither accepted nor dismissed", () => {
     renderWithIntl(<FindingCard f={FINDING} defaultExpanded onAction={() => {}} />);
-    expect(screen.queryByText("Add to eval set")).not.toBeInTheDocument();
+    expect(screen.queryByText("Turn into eval case")).not.toBeInTheDocument();
   });
 
   it("shows an enabled action once the finding is accepted, and calls the mutation with the finding id", () => {
@@ -88,7 +88,7 @@ describe("FindingCard — add to eval case", () => {
     renderWithIntl(
       <FindingCard f={accepted} defaultExpanded onAction={() => {}} agentId="agent-1" />,
     );
-    const button = screen.getByText("Add to eval set");
+    const button = screen.getByText("Turn into eval case");
     expect(button).toBeEnabled();
     fireEvent.click(button);
     expect(createEvalCaseMutate).toHaveBeenCalledWith({ findingId: "f1", agentId: "agent-1" });
@@ -99,7 +99,7 @@ describe("FindingCard — add to eval case", () => {
     renderWithIntl(<FindingCard f={accepted} defaultExpanded onAction={() => {}} />);
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("Add to eval set"));
+    fireEvent.click(screen.getByText("Turn into eval case"));
 
     // Mutation fires straight away — no intermediate confirmation dialog.
     expect(createEvalCaseMutate).toHaveBeenCalledOnce();
@@ -109,20 +109,20 @@ describe("FindingCard — add to eval case", () => {
   it("shows an enabled action once the finding is dismissed", () => {
     const dismissed: FindingRecord = { ...FINDING, dismissed_at: "2026-07-01T00:00:00Z" };
     renderWithIntl(<FindingCard f={dismissed} defaultExpanded onAction={() => {}} />);
-    expect(screen.getByText("Add to eval set")).toBeEnabled();
+    expect(screen.getByText("Turn into eval case")).toBeEnabled();
   });
 
   it("disables the action while the mutation is pending", () => {
     createEvalCaseState = { isPending: true, isSuccess: false };
     const accepted: FindingRecord = { ...FINDING, accepted_at: "2026-07-01T00:00:00Z" };
     renderWithIntl(<FindingCard f={accepted} defaultExpanded onAction={() => {}} />);
-    expect(screen.getByText("Add to eval set")).toBeDisabled();
+    expect(screen.getByText("Turn into eval case")).toBeDisabled();
   });
 
   it("renders a success confirmation after the mutation resolves", () => {
     createEvalCaseState = { isPending: false, isSuccess: true };
     const accepted: FindingRecord = { ...FINDING, accepted_at: "2026-07-01T00:00:00Z" };
     renderWithIntl(<FindingCard f={accepted} defaultExpanded onAction={() => {}} />);
-    expect(screen.getByText("Added to eval set ✓")).toBeInTheDocument();
+    expect(screen.getByText("Turned into eval case ✓")).toBeInTheDocument();
   });
 });

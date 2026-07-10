@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Provider } from './knowledge.js';
+import { ReviewRunTarget } from './review-api.js';
 
 /**
  * Platform / scaffolding DTOs owned by F1:
@@ -250,8 +251,26 @@ export type PrCommentInput = z.infer<typeof PrCommentInput>;
 export const RunRequest = z.object({
   agentId: z.string().optional(),
   all: z.boolean().optional(),
+  agentIds: z.array(z.string()).optional(),
 });
 export type RunRequest = z.infer<typeof RunRequest>;
+
+// ---- Multi-agent run start response (POST /pulls/:id/multi-agent-run) ----
+export const MultiAgentRunStartResponse = z.object({
+  multi_agent_run_id: z.string(),
+  pr_id: z.string(),
+  runs: z.array(ReviewRunTarget),
+});
+export type MultiAgentRunStartResponse = z.infer<typeof MultiAgentRunStartResponse>;
+
+// ---- Per-agent cost/duration estimate (from run history) ----
+export const AgentEstimate = z.object({
+  agent_id: z.string(),
+  avg_duration_ms: z.number().nullable(),
+  avg_cost_usd: z.number().nullable(),
+  sample_size: z.number().int(), // 0-3; 0 means "no history" (AC-7)
+});
+export type AgentEstimate = z.infer<typeof AgentEstimate>;
 
 // ---- Structured API error envelope (returned by the API; UX taxonomy is FE) ----
 export const ApiErrorBody = z.object({

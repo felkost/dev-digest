@@ -64,3 +64,14 @@ export type RiskBriefLlmResult = z.infer<typeof RiskBriefLlmResult>;
 export const BRIEF_GENERATE_RATE_LIMIT = { max: 3, timeWindow: '1 minute' } as const;
 
 export { BRIEF_INPUT_TOKEN_BUDGET } from './brief-generator-helpers.js';
+
+// ---------------------------------------------------------------------------
+// Multi-Agent Review (plan Step 4) — concurrency cap for the fan-out worker
+// pool (mirrors `review-all`'s existing `CONCURRENCY = 3` literal in
+// `routes.ts`) and the rate limit for the trigger route (mirrors the existing
+// `/pulls/:id/review` route's inline `{ max: 10, timeWindow: '1 minute' }`).
+// ---------------------------------------------------------------------------
+
+export const MULTI_AGENT_CONCURRENCY_CAP = 3;
+
+export const MULTI_AGENT_RUN_RATE_LIMIT = { max: 10, timeWindow: '1 minute' } as const;

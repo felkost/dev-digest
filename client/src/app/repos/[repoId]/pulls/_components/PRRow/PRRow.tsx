@@ -14,7 +14,7 @@ import { formatCost } from "@/lib/format";
 import { s } from "../../styles";
 import { usePrReviews } from "@/lib/hooks/reviews";
 import { usePopupPosition } from "@/lib/hooks";
-import { RunReviewDropdown } from "@/components/run-review-dropdown";
+import { MultiAgentPicker } from "@/components/multi-agent-picker";
 
 // ---- Severity display config ------------------------------------------------
 
@@ -267,14 +267,16 @@ export function PRRow({ pr, repoId }: { pr: PrMetaType; repoId: string }) {
 
       <div style={s.costCell}>{formatCost(pr.cost_usd)}</div>
 
-      {/* Actions — always-visible Run Review button in its own column */}
+      {/* Actions — always-visible Run Review button in its own column.
+          MultiAgentPicker navigates to the grouped run's results page itself
+          on confirm (AC-3) — no in-page navigation callback needed here. */}
       <div onClick={(e) => e.stopPropagation()}>
         {pr.id && (
-          <RunReviewDropdown
+          <MultiAgentPicker
             prId={pr.id}
             size="sm"
             kind="secondary"
-            onRunsStarted={() => router.push(`/repos/${repoId}/pulls/${pr.number}?tab=findings`)}
+            warnMerged={pr.status === "merged" || pr.status === "closed"}
           />
         )}
       </div>

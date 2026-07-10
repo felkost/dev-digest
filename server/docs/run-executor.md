@@ -14,23 +14,23 @@ Declare capture variables **before** the try block, assign them immediately afte
 
 ```typescript
 let partialCostUsd: number | null = null;
-let partialCostKnown = false;        // explicit flag — see Pattern 3
-let partialTokensIn = 0;
-let partialTokensOut = 0;
+let partialTokensIn: number | null = null;
+let partialTokensOut: number | null = null;
+let partialOutcomeKnown = false;     // explicit flag — see Pattern 3
 let partialGrounding = '0/0 passed';
 let partialFindingsCount = 0;
 
 try {
   const outcome = await reviewPullRequest(input);
   partialCostUsd = outcome.costUsd ?? null;
-  partialCostKnown = true;
   partialTokensIn = outcome.tokensIn;
   partialTokensOut = outcome.tokensOut;
+  partialOutcomeKnown = true;
   partialGrounding = outcome.grounding;
   partialFindingsCount = outcome.review.findings.length;
   // ...DB writes that may throw...
 } catch (err) {
-  // partialCostKnown/tokensIn/etc. hold real values if LLM succeeded
+  // partialOutcomeKnown/tokensIn/etc. hold real values if LLM succeeded
 }
 ```
 
@@ -59,21 +59,28 @@ try {
 `runBus.complete(runId)` must be outside the `if (!runCompleted)` guard — the UI SSE stream
 must be released even if both DB writes fail.
 
-## Pattern 3: `partialCostKnown` boolean flag
+## Pattern 3: `partialOutcomeKnown` boolean flag
 
 `null` is ambiguous: it means both "LLM never returned" and "LLM returned but model has no
-pricing entry". Without a flag, `partialCostUsd ?? undefined` in the catch branch cannot
-distinguish the two cases, and `completeAgentRun`'s conditional spread writes NULL for both.
+pricing entry / usage wasn't reported". Without a flag, `partialCostUsd ?? undefined` in the
+catch branch cannot distinguish the two cases, and `completeAgentRun`'s conditional spread
+writes NULL for both.
 
-The flag makes intent explicit:
+The flag makes intent explicit, and gates `costUsd` AND `tokensIn`/`tokensOut` identically
+(AC-33: tokens follow the same null-semantics as cost — never coerced to `0` when unknown):
 
 ```typescript
-costUsd: partialCostKnown ? partialCostUsd : undefined
+costUsd: partialOutcomeKnown ? partialCostUsd : undefined,
+tokensIn: partialOutcomeKnown ? partialTokensIn : undefined,
+tokensOut: partialOutcomeKnown ? partialTokensOut : undefined,
 // ↑ writes null (known-null) or undefined (skip write)
 ```
 
-`completeAgentRun` uses `...(values.costUsd !== undefined ? { costUsd: values.costUsd } : {})`
-so `undefined` means "do not touch the column" and `null` means "write NULL".
+`completeAgentRun` uses the same conditional-spread pattern for all three columns —
+`...(values.costUsd !== undefined ? { costUsd: values.costUsd } : {})` and identically for
+`tokensIn`/`tokensOut` — so `undefined` means "do not touch the column" and `null` means
+"write NULL". The pre-work failure path (`failAll`, e.g. diff-load failure before any agent
+ran) omits all three keys entirely for the same reason — the LLM never even started.
 
 ## Workspace scoping on every query
 

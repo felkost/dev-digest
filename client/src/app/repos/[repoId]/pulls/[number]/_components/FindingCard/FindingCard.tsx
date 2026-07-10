@@ -34,6 +34,7 @@ export function FindingCard({
   repoFullName,
   headSha,
   agentId,
+  footerExtra,
 }: {
   f: FindingRecord;
   focused?: boolean;
@@ -43,6 +44,8 @@ export function FindingCard({
   repoFullName?: string | null;
   headSha?: string | null;
   agentId?: string | null;
+  /** Extra buttons rendered in the same action row as Accept/Dismiss (e.g. TabsView's Learn/Reply-to-author stubs, AC-26). */
+  footerExtra?: React.ReactNode;
 }) {
   const t = useTranslations("prReview");
   const [expanded, setExpanded] = React.useState(defaultExpanded ?? false);
@@ -139,6 +142,7 @@ export function FindingCard({
             {createEvalCase.isSuccess && (
               <span style={s.acceptedTag}>{t("finding.addedToEvals")}</span>
             )}
+            {footerExtra}
           </div>
         </div>
       )}
