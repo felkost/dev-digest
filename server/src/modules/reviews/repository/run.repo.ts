@@ -36,7 +36,13 @@ export async function activeRunsForPull(
   }));
 }
 
-/** All runs for a PR (any status), newest first — the PR run history. */
+/** All SINGLE-AGENT runs for a PR (any status), newest first — the PR run
+ *  history shown on the PR-detail "Agent runs" tab. Multi-agent fan-out runs
+ *  are EXCLUDED: they belong to a `multi_agent_runs` group and are viewed on
+ *  the dedicated /multi-agent-review page (queried via
+ *  multi-run.repo `listAgentRunsForGroup`). Including them here would let a
+ *  fan-out run displace the newest single-agent run in the default-open
+ *  accordion and render its members ungrouped as loose runs. */
 export async function listRunsForPull(
   db: Db,
   workspaceId: string,
@@ -46,7 +52,13 @@ export async function listRunsForPull(
     .select({ run: t.agentRuns, agentName: t.agents.name })
     .from(t.agentRuns)
     .leftJoin(t.agents, eq(t.agents.id, t.agentRuns.agentId))
-    .where(and(eq(t.agentRuns.workspaceId, workspaceId), eq(t.agentRuns.prId, prId)))
+    .where(
+      and(
+        eq(t.agentRuns.workspaceId, workspaceId),
+        eq(t.agentRuns.prId, prId),
+        isNull(t.agentRuns.multiAgentRunId),
+      ),
+    )
     .orderBy(desc(t.agentRuns.ranAt));
 
   // Per-severity counts per run: JOIN findings via reviews.run_id.
