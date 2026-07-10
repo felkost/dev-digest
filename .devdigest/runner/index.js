@@ -19222,11 +19222,22 @@ const Review = objectType({
     // reviewer-core `structured.ts` via dereferencing, not here.)
     verdict: Verdict.default('comment'),
     summary: stringType(),
+    // Like `verdict` above, some models OMIT `score` from structured output. The
+    // model's score is NEVER used downstream: grounding recomputes the displayed
+    // score from the grounded findings (`scoreFromFindings` in reviewer-core
+    // reduce.ts, applied in run.ts), discarding the self-reported value.
+    // `.default(0)` backfills an immediately-overwritten placeholder so an
+    // omission is a soft no-op, not a hard parse failure. Keep `.default()` (the
+    // output stays `number`, which `reduceReviews` averages) — do NOT use
+    // `.nullish()` (would yield NaN in that mean) or revert to required (regressed
+    // multi-agent runs 2026-07-10: an Anthropic reviewer omitted score →
+    // "Anthropic structured output failed schema validation: - score: Required").
     score: numberType()
         .int()
         .min(0)
         .max(100)
-        .describe('Overall PR quality from 0 to 100, where HIGHER is better. 90–100 = no or only trivial issues (approve); 60–89 = minor suggestions; 30–59 = warnings worth addressing; 0–29 = critical problems. Must be consistent with `findings`: if there are no findings, the score is 90 or above.'),
+        .describe('Overall PR quality from 0 to 100, where HIGHER is better. 90–100 = no or only trivial issues (approve); 60–89 = minor suggestions; 30–59 = warnings worth addressing; 0–29 = critical problems. Must be consistent with `findings`: if there are no findings, the score is 90 or above.')
+        .default(0),
     findings: arrayType(Finding),
 });
 /** Action taken on a finding (accept/dismiss/learn/reply). */
@@ -19905,6 +19916,7 @@ const RunSummary = objectType({
 ;// CONCATENATED MODULE: ../server/src/vendor/shared/contracts/platform.ts
 
 
+
 /**
  * Platform / scaffolding DTOs owned by F1:
  *  - settings (GET/PUT /settings, POST /settings/test-connection)
@@ -20101,6 +20113,20 @@ const PrCommentInput = objectType({
 const RunRequest = objectType({
     agentId: stringType().optional(),
     all: booleanType().optional(),
+    agentIds: arrayType(stringType()).optional(),
+});
+// ---- Multi-agent run start response (POST /pulls/:id/multi-agent-run) ----
+const MultiAgentRunStartResponse = objectType({
+    multi_agent_run_id: stringType(),
+    pr_id: stringType(),
+    runs: arrayType(ReviewRunTarget),
+});
+// ---- Per-agent cost/duration estimate (from run history) ----
+const AgentEstimate = objectType({
+    agent_id: stringType(),
+    avg_duration_ms: numberType().nullable(),
+    avg_cost_usd: numberType().nullable(),
+    sample_size: numberType().int(), // 0-3; 0 means "no history" (AC-7)
 });
 // ---- Structured API error envelope (returned by the API; UX taxonomy is FE) ----
 const ApiErrorBody = objectType({
@@ -20379,6 +20405,8 @@ const CiInstallation = objectType({
     post_as: enumType(['github_review', 'pr_comment', 'none']),
     /** Server-computed from the latest ingested `ci_runs` row — never a DB column. */
     latest_run_status: CiRunStatus.nullable(),
+    /** ISO timestamp of that latest run — server-computed, never a DB column. */
+    latest_run_at: stringType().nullable(),
 });
 /** Response of `POST /agents/:id/export-ci`. */
 const CiExport = objectType({
@@ -20391,6 +20419,8 @@ const CiRun = objectType({
     id: stringType(),
     ci_installation_id: stringType().nullable(),
     pr_number: numberType().int().nullable(),
+    /** Denormalized PR title snapshot for the CI Runs list (null for older rows / runs with no PR). */
+    pr_title: stringType().nullish(),
     ran_at: stringType().nullable(),
     status: stringType().nullable(),
     findings_count: numberType().int().nullable(),
@@ -20928,6 +20958,13 @@ const AgentColumn = objectType({
     summary: stringType().nullable(),
     duration_ms: numberType().int().nullable(),
     cost_usd: numberType().nullable(),
+    // Additive extension approved 2026-07-10 to satisfy AC-17 (error) / AC-33
+    // (tokens); the only consumers are this feature's own service + client
+    // views — see server/insights.md and client/insights.md 2026-07-09 entries
+    // documenting the gap this closes.
+    error: stringType().nullable(),
+    tokens_in: numberType().int().nullable(),
+    tokens_out: numberType().int().nullable(),
     findings: arrayType(AgentColumnFinding),
 });
 /** One agent's stance on a contended file:line. */
@@ -20958,6 +20995,11 @@ const MultiAgentRun = objectType({
     agent_count: numberType().int(),
     total_duration_ms: numberType().int(),
     total_cost_usd: numberType().nullable(),
+    // Additive extension approved 2026-07-10 to satisfy AC-33 (token usage);
+    // same null-if-any-unknown semantics as total_cost_usd. The only consumers
+    // are this feature's own service + client views.
+    total_tokens_in: numberType().int().nullable(),
+    total_tokens_out: numberType().int().nullable(),
     columns: arrayType(AgentColumn),
     conflicts: arrayType(Conflict),
 });
