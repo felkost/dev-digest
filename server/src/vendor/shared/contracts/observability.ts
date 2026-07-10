@@ -44,6 +44,13 @@ export const AgentColumn = z.object({
   summary: z.string().nullable(),
   duration_ms: z.number().int().nullable(),
   cost_usd: z.number().nullable(),
+  // Additive extension approved 2026-07-10 to satisfy AC-17 (error) / AC-33
+  // (tokens); the only consumers are this feature's own service + client
+  // views — see server/insights.md and client/insights.md 2026-07-09 entries
+  // documenting the gap this closes.
+  error: z.string().nullable(),
+  tokens_in: z.number().int().nullable(),
+  tokens_out: z.number().int().nullable(),
   findings: z.array(AgentColumnFinding),
 });
 export type AgentColumn = z.infer<typeof AgentColumn>;
@@ -80,6 +87,11 @@ export const MultiAgentRun = z.object({
   agent_count: z.number().int(),
   total_duration_ms: z.number().int(),
   total_cost_usd: z.number().nullable(),
+  // Additive extension approved 2026-07-10 to satisfy AC-33 (token usage);
+  // same null-if-any-unknown semantics as total_cost_usd. The only consumers
+  // are this feature's own service + client views.
+  total_tokens_in: z.number().int().nullable(),
+  total_tokens_out: z.number().int().nullable(),
   columns: z.array(AgentColumn),
   conflicts: z.array(Conflict),
 });

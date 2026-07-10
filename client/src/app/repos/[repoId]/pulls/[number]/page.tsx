@@ -1,6 +1,6 @@
 /* PR Detail — /repos/:repoId/pulls/:number. F2 shell extended by A2 with:
    - Findings panel (VerdictBanner + FindingCards)
-   - RunReviewDropdown (run all / a specific agent) + live SSE RunStatus
+   - MultiAgentPicker (pick a subset of enabled agents) + live SSE RunStatus
    - Basic file-by-file diff viewer in the Files tab
    Tab state lives in query (?tab). */
 "use client";

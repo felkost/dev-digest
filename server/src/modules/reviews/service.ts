@@ -49,12 +49,23 @@ export class ReviewService {
   // ===========================================================================
 
   /**
-   * Resolve which agents to run. `all` → all enabled agents; else a single agent.
+   * Resolve which agents to run. `agentIds` (Multi-Agent Review, non-empty) →
+   * each id resolved in input order; `all` → all enabled agents; else a single
+   * agent.
    */
   async resolveTargets(
     workspaceId: string,
-    opts: { agentId?: string; all?: boolean },
+    opts: { agentId?: string; all?: boolean; agentIds?: string[] },
   ): Promise<AgentRow[]> {
+    if (opts.agentIds && opts.agentIds.length > 0) {
+      const resolved: AgentRow[] = [];
+      for (const id of opts.agentIds) {
+        const agent = await this.agents.getById(workspaceId, id);
+        if (!agent) throw new NotFoundError('Agent not found: ' + id);
+        resolved.push(agent);
+      }
+      return resolved;
+    }
     if (opts.all) return this.agents.listEnabled(workspaceId);
     if (opts.agentId) {
       const agent = await this.agents.getById(workspaceId, opts.agentId);

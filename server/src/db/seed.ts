@@ -9,6 +9,9 @@ import {
   PERFORMANCE_REVIEWER_PROMPT,
   TEST_QUALITY_REVIEWER_PROMPT,
   API_CONTRACT_REVIEWER_PROMPT,
+  JUNIOR_MENTOR_REVIEWER_PROMPT,
+  CUSTOMER_FACING_REVIEWER_PROMPT,
+  ARCHITECTURE_REVIEWER_PROMPT,
 } from './seed-prompts.js';
 
 /** Default provider/model for the built-in reviewer agents. */
@@ -345,6 +348,39 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       version: 1,
       createdBy: userId,
     },
+    {
+      workspaceId,
+      name: 'Junior Mentor Reviewer',
+      description: 'Mentoring, tone-differentiated reviewer — explains why an issue matters, encouraging tone, still flags real defects.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: JUNIOR_MENTOR_REVIEWER_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
+    {
+      workspaceId,
+      name: 'Customer-Facing Reviewer',
+      description: 'Reviews customer-facing language, UX copy, and error messages for clarity and tone — not code correctness.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: CUSTOMER_FACING_REVIEWER_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
+    {
+      workspaceId,
+      name: 'Architecture Reviewer',
+      description: 'Reviews module boundaries, layering, and coupling.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: ARCHITECTURE_REVIEWER_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
   ];
   for (const a of seedAgents) {
     const [existing] = await db
@@ -352,6 +388,210 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       .from(t.agents)
       .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, a.name)));
     if (!existing) await db.insert(t.agents).values(a);
+  }
+
+  // ---- Multi-Agent Review demo: grouped run on PR #482 (idempotent) ----
+  // Seeds one `multi_agent_runs` group against the existing demo PR (#482),
+  // fanned out over the Security Reviewer, Performance Reviewer, and
+  // Architecture Reviewer (3 done agents — satisfies AC-32's >=2-done gate).
+  // Guard: select-before-insert on `multi_agent_runs` for (workspaceId, prId)
+  // — a second `pnpm db:seed` run finds the existing group row and no-ops the
+  // whole block, so re-seeding never duplicates agent_runs/reviews/findings.
+  const [existingMultiRun] = await db
+    .select({ id: t.multiAgentRuns.id })
+    .from(t.multiAgentRuns)
+    .where(and(eq(t.multiAgentRuns.workspaceId, workspaceId), eq(t.multiAgentRuns.prId, pr!.id)));
+  if (!existingMultiRun) {
+    const [multiSecurityReviewer] = await db
+      .select()
+      .from(t.agents)
+      .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, 'Security Reviewer')));
+    const [multiPerformanceReviewer] = await db
+      .select()
+      .from(t.agents)
+      .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, 'Performance Reviewer')));
+    const [multiArchitectureReviewer] = await db
+      .select()
+      .from(t.agents)
+      .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, 'Architecture Reviewer')));
+
+    if (multiSecurityReviewer && multiPerformanceReviewer && multiArchitectureReviewer) {
+      const [group] = await db
+        .insert(t.multiAgentRuns)
+        .values({ workspaceId, prId: pr!.id })
+        .returning();
+
+      if (group) {
+        const [secRun] = await db
+          .insert(t.agentRuns)
+          .values({
+            workspaceId,
+            agentId: multiSecurityReviewer.id,
+            prId: pr!.id,
+            status: 'done',
+            provider: DEFAULT_PROVIDER,
+            model: DEFAULT_MODEL,
+            durationMs: 8400,
+            tokensIn: 5200,
+            tokensOut: 620,
+            costUsd: 0.021,
+            findingsCount: 1,
+            grounding: '1/1 passed',
+            score: 55,
+            blockers: 1,
+            multiAgentRunId: group.id,
+          })
+          .returning();
+
+        const [perfRun] = await db
+          .insert(t.agentRuns)
+          .values({
+            workspaceId,
+            agentId: multiPerformanceReviewer.id,
+            prId: pr!.id,
+            status: 'done',
+            provider: DEFAULT_PROVIDER,
+            model: DEFAULT_MODEL,
+            durationMs: 7100,
+            tokensIn: 4800,
+            tokensOut: 540,
+            costUsd: 0.018,
+            findingsCount: 1,
+            grounding: '1/1 passed',
+            score: 78,
+            blockers: 0,
+            multiAgentRunId: group.id,
+          })
+          .returning();
+
+        const [archRun] = await db
+          .insert(t.agentRuns)
+          .values({
+            workspaceId,
+            agentId: multiArchitectureReviewer.id,
+            prId: pr!.id,
+            status: 'done',
+            provider: DEFAULT_PROVIDER,
+            model: DEFAULT_MODEL,
+            durationMs: 6800,
+            tokensIn: 4600,
+            tokensOut: 510,
+            costUsd: 0.017,
+            findingsCount: 1,
+            grounding: '1/1 passed',
+            score: 82,
+            blockers: 0,
+            multiAgentRunId: group.id,
+          })
+          .returning();
+
+        if (secRun && perfRun && archRun) {
+          const [secReview] = await db
+            .insert(t.reviews)
+            .values({
+              workspaceId,
+              prId: pr!.id,
+              agentId: multiSecurityReviewer.id,
+              runId: secRun.id,
+              kind: 'review',
+              verdict: 'request_changes',
+              summary: 'SSRF risk: the webhook delivery forwards to a caller-supplied URL with no allow-list.',
+              score: 55,
+              model: DEFAULT_MODEL,
+            })
+            .returning();
+
+          const [perfReview] = await db
+            .insert(t.reviews)
+            .values({
+              workspaceId,
+              prId: pr!.id,
+              agentId: multiPerformanceReviewer.id,
+              runId: perfRun.id,
+              kind: 'review',
+              verdict: 'comment',
+              summary: 'Rate limiter middleware looks fine on the hot path; one N+1 concern in the user list endpoint.',
+              score: 78,
+              model: DEFAULT_MODEL,
+            })
+            .returning();
+
+          const [archReview] = await db
+            .insert(t.reviews)
+            .values({
+              workspaceId,
+              prId: pr!.id,
+              agentId: multiArchitectureReviewer.id,
+              runId: archRun.id,
+              kind: 'review',
+              verdict: 'comment',
+              summary: 'Middleware boundary is clean; one WARNING on the webhook handler reaching outside its layer.',
+              score: 82,
+              model: DEFAULT_MODEL,
+            })
+            .returning();
+
+          if (secReview && perfReview && archReview) {
+            await db.insert(t.findings).values([
+              // Security Reviewer flags SSRF at webhooks.ts:16 (a real line in
+              // the seeded pr_files patch summary, ~seed.ts:224-229). The
+              // Performance Reviewer's review below has NO finding at this
+              // exact file+startLine — a genuine "one flagged, one silently
+              // didn't" disagreement (AC-29, consumed by AC-42's conflict
+              // matcher).
+              {
+                reviewId: secReview.id,
+                file: 'src/api/public/webhooks.ts',
+                startLine: 16,
+                endLine: 18,
+                severity: 'CRITICAL',
+                category: 'security',
+                title: 'SSRF via unvalidated webhook callback URL',
+                rationale: 'The webhook handler forwards to payload.callbackUrl with no allow-list, letting a caller redirect delivery to an internal address.',
+                suggestion: 'Validate callbackUrl against an allow-list of known hosts before forwarding.',
+                confidence: 0.93,
+              },
+              // Performance Reviewer: a real finding, but at a different
+              // location than the Security finding above.
+              {
+                reviewId: perfReview.id,
+                file: 'src/api/users.ts',
+                startLine: 45,
+                endLine: 52,
+                severity: 'WARNING',
+                category: 'perf',
+                title: 'N+1 query in user list endpoint',
+                rationale: 'Loop issues one query per user under the new rate limiter middleware, scaling with request volume.',
+                suggestion: 'Use a single IN query and group in memory.',
+                confidence: 0.84,
+              },
+              // Architecture Reviewer: SAME file+startLine as the Security
+              // finding above, but a DIFFERENT severity — a second, richer
+              // disagreement example (same location, divergent verdicts).
+              {
+                reviewId: archReview.id,
+                file: 'src/api/public/webhooks.ts',
+                startLine: 16,
+                endLine: 18,
+                severity: 'WARNING',
+                // NOTE: `category` must be one of the shared FindingCategory
+                // enum values ('bug'|'security'|'perf'|'style'|'test') —
+                // `FindingRecord` (GET /reviews/:id response) extends the
+                // strict `Finding` LLM contract, not the looser
+                // `AgentColumnFinding.category: z.string()` used by the
+                // multi-agent view. 'style' is the closest fit for a
+                // structural/layering finding; do not use 'architecture'.
+                category: 'style',
+                title: 'Webhook handler reaches outside its layer to deliver payloads directly',
+                rationale: 'The route-level webhook handler performs outbound delivery itself instead of delegating to a service — the same code path the Security Reviewer already flags as a CRITICAL SSRF risk.',
+                suggestion: 'Extract delivery into a service method so validation (including the allow-list) lives in one place.',
+                confidence: 0.7,
+              },
+            ]);
+          }
+        }
+      }
+    }
   }
 
   // ---- demo skills for Test Quality Reviewer ----

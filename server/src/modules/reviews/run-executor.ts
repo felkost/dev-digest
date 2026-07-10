@@ -6,7 +6,7 @@ import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
 import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './repository.js';
-import { REVIEW_STRATEGY } from './constants.js';
+import { REVIEW_STRATEGY, MULTI_AGENT_CONCURRENCY_CAP } from './constants.js';
 import { taskLine } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
 import { composePrBrief } from './brief-composer.js';
@@ -110,6 +110,68 @@ export class ReviewRunExecutor {
     jobs: { agent: AgentRow; runId: string }[],
     logger?: Logger,
   ): Promise<void> {
+    const ctx = await this.prepareRunContext(workspaceId, pull, repo, jobs, logger);
+    if (!ctx) return; // pre-work failure already failed every job (see prepareRunContext)
+    const { diff, intent, runLog } = ctx;
+
+    for (const job of jobs) {
+      await this.runJob(workspaceId, job, pull, repo, diff, intent, runLog, logger);
+    }
+  }
+
+  /**
+   * Background execution of the queued agent runs, in parallel up to
+   * `MULTI_AGENT_CONCURRENCY_CAP` (Multi-Agent Review). A DISTINCT entry point
+   * from `executeRuns` — the sequential path used by single-agent/`all:true`/
+   * `review-all` stays untouched. Shares the same pre-work (diff + intent load,
+   * shared `RunLogger`) as `executeRuns` via `prepareRunContext`; diverges only
+   * at the scheduling step below (bounded worker pool vs. plain `for...of`).
+   */
+  async executeRunsConcurrent(
+    workspaceId: string,
+    pull: PullRow,
+    repo: typeof schema.repos.$inferSelect,
+    jobs: { agent: AgentRow; runId: string }[],
+    logger?: Logger,
+  ): Promise<void> {
+    const ctx = await this.prepareRunContext(workspaceId, pull, repo, jobs, logger, MULTI_AGENT_CONCURRENCY_CAP);
+    if (!ctx) return; // pre-work failure already failed every job (see prepareRunContext)
+    const { diff, intent, runLog } = ctx;
+
+    // Bounded-concurrency fan-out. Each job's own try/catch (inside `runJob` →
+    // `runOneAgent`) never rethrows past the worker, and `runBus.complete` fires
+    // unconditionally per job — a plain `Promise.all` over the workers is safe.
+    await this.runWithConcurrencyCap(jobs, MULTI_AGENT_CONCURRENCY_CAP, (job) =>
+      this.runJob(workspaceId, job, pull, repo, diff, intent, runLog, logger),
+    );
+  }
+
+  /**
+   * Shared PRE-WORK for both `executeRuns` and `executeRunsConcurrent` —
+   * everything that happens BEFORE the per-job loop/pool starts: the fanned-out
+   * `RunLogger`, the diff load, and the intent pre-pass. Extracted verbatim from
+   * both call sites (Low finding, architecture review) — the per-job
+   * loop/pool itself is NOT part of this method and stays in each caller
+   * unchanged (Constraint 1, plan §4): the sequential path's behavior must
+   * remain byte-for-byte identical.
+   *
+   * `concurrencyCap`, when passed, is appended to the "Diff ready" Live Log
+   * line only (cosmetic — matches `executeRunsConcurrent`'s prior wording);
+   * it does not otherwise affect pre-work behavior.
+   *
+   * Returns `undefined` when pre-work fails (e.g. diff load): every queued job
+   * has already been marked failed and completed on the bus by `failAll`
+   * inside this method — the caller's only remaining job is to return without
+   * entering its loop/pool.
+   */
+  private async prepareRunContext(
+    workspaceId: string,
+    pull: PullRow,
+    repo: typeof schema.repos.$inferSelect,
+    jobs: { agent: AgentRow; runId: string }[],
+    logger: Logger | undefined,
+    concurrencyCap?: number,
+  ): Promise<{ diff: UnifiedDiff; intent: Intent | undefined; runLog: RunLogger } | undefined> {
     // ONE logger fanned out over every queued run: shared pre-work (diff +
     // intent) is streamed into each target agent's Live Log and persisted into
     // each run's trace. Per-agent work below narrows it to a single run.
@@ -129,11 +191,13 @@ export class ReviewRunExecutor {
           .completeAgentRun(runId, {
             status: 'failed',
             durationMs: 0,
-            tokensIn: 0,
-            tokensOut: 0,
             findingsCount: 0,
             grounding: '0/0 passed',
             error: msg,
+            // Pre-work failure — the LLM never ran for any queued job, so
+            // costUsd/tokensIn/tokensOut are genuinely unknown. Omit them
+            // (rather than write 0) so the columns stay NULL, matching the
+            // AC-33 null-semantics used everywhere else in this file.
           })
           .catch(() => undefined);
         await this.repo
@@ -151,9 +215,12 @@ export class ReviewRunExecutor {
     } catch (err) {
       runLog.error(`Failed to load PR diff: ${(err as Error).message}`);
       await failAll(`Failed to load PR diff: ${(err as Error).message}`);
-      return;
+      return undefined;
     }
-    runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
+    runLog.info(
+      `Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)` +
+        (concurrencyCap ? ` (concurrency cap ${concurrencyCap})` : ''),
+    );
 
     // ---- Intent pre-pass (shared across all agents in this batch) ---------
     // Classify the PR intent once. Cached in pr_intent — subsequent runs reuse
@@ -201,34 +268,76 @@ export class ReviewRunExecutor {
       // Intent is optional — never fail the whole review batch because of it
     }
 
-    for (const { agent, runId } of jobs) {
-      const agentStart = Date.now();
+    return { diff, intent, runLog };
+  }
+
+  /**
+   * Run one queued agent job: logs start/done/failed at the run level and
+   * delegates the actual review to `runOneAgent` (which owns persistence +
+   * failure isolation — this method never rethrows, so it is safe to invoke
+   * either sequentially (`executeRuns`) or from a bounded worker pool
+   * (`executeRunsConcurrent`).
+   */
+  private async runJob(
+    workspaceId: string,
+    job: { agent: AgentRow; runId: string },
+    pull: PullRow,
+    repo: typeof schema.repos.$inferSelect,
+    diff: UnifiedDiff,
+    intent: Intent | undefined,
+    runLog: RunLogger,
+    logger?: Logger,
+  ): Promise<void> {
+    const { agent, runId } = job;
+    const agentStart = Date.now();
+    logger?.info(
+      { runId, agent: agent.name, provider: agent.provider, model: agent.model, prId: pull.id },
+      `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
+    );
+    try {
+      const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog, intent);
       logger?.info(
-        { runId, agent: agent.name, provider: agent.provider, model: agent.model, prId: pull.id },
-        `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
+        {
+          runId,
+          agent: agent.name,
+          findings: outcome.findings.length,
+          grounding: outcome.grounding,
+          durationMs: Date.now() - agentStart,
+        },
+        `review: agent "${agent.name}" done — ${outcome.findings.length} finding(s)`,
       );
-      try {
-        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog, intent);
-        logger?.info(
-          {
-            runId,
-            agent: agent.name,
-            findings: outcome.findings.length,
-            grounding: outcome.grounding,
-            durationMs: Date.now() - agentStart,
-          },
-          `review: agent "${agent.name}" done — ${outcome.findings.length} finding(s)`,
-        );
-      } catch (err) {
-        // runOneAgent already persisted the failure/cancel (status + error +
-        // trace) and completed the bus; here we only log at the run level.
-        const cancelled = err instanceof RunCancelledError;
-        logger?.[cancelled ? 'info' : 'error'](
-          { runId, agent: agent.name, err: (err as Error).message, durationMs: Date.now() - agentStart },
-          `review: agent "${agent.name}" ${cancelled ? 'cancelled' : 'failed'}`,
-        );
-      }
+    } catch (err) {
+      // runOneAgent already persisted the failure/cancel (status + error +
+      // trace) and completed the bus; here we only log at the run level.
+      const cancelled = err instanceof RunCancelledError;
+      logger?.[cancelled ? 'info' : 'error'](
+        { runId, agent: agent.name, err: (err as Error).message, durationMs: Date.now() - agentStart },
+        `review: agent "${agent.name}" ${cancelled ? 'cancelled' : 'failed'}`,
+      );
     }
+  }
+
+  /**
+   * Bounded-concurrency map over `items`: N workers pull from a shared cursor,
+   * awaiting all before returning. Structurally identical to
+   * `eval/run-orchestrator.ts`'s `runWithConcurrencyCap` — do not diverge.
+   */
+  private async runWithConcurrencyCap<T>(
+    items: T[],
+    concurrency: number,
+    fn: (item: T) => Promise<void>,
+  ): Promise<void> {
+    let head = 0;
+    const workers: Promise<void>[] = [];
+    const runNext = async (): Promise<void> => {
+      while (head < items.length) {
+        const item = items[head++]!;
+        await fn(item);
+      }
+    };
+    const workerCount = Math.min(concurrency, items.length);
+    for (let i = 0; i < workerCount; i++) workers.push(runNext());
+    await Promise.all(workers);
   }
 
   /** Execute a single agent's review against a PR, streaming progress. */
@@ -253,12 +362,15 @@ export class ReviewRunExecutor {
     // Captured after reviewPullRequest returns; stay at defaults when the engine
     // throws before returning (cancelled/failed mid-LLM — no partial data yet).
     let partialCostUsd: number | null = null;
+    let partialTokensIn: number | null = null;
+    let partialTokensOut: number | null = null;
     // Explicit flag: true once reviewPullRequest returns, so the catch path can
-    // distinguish "LLM never returned" (skip cost write) from "LLM returned with
-    // unknown pricing" (write null). Avoids the fragile `null ?? undefined` idiom.
-    let partialCostKnown = false;
-    let partialTokensIn = 0;
-    let partialTokensOut = 0;
+    // distinguish "LLM never returned" (skip cost/token writes, columns stay
+    // NULL) from "LLM returned with unknown pricing/usage" (write null
+    // explicitly). Gates costUsd AND tokensIn/tokensOut alike — both follow
+    // the identical null-semantics (AC-33). Avoids the fragile
+    // `null ?? undefined` idiom.
+    let partialOutcomeKnown = false;
     let partialGrounding = '0/0 passed';
     let partialFindingsCount = 0;
     // Set to true only after both completion writes succeed, so a failed trace
@@ -361,9 +473,9 @@ export class ReviewRunExecutor {
         },
       });
       partialCostUsd = outcome.costUsd ?? null;
-      partialCostKnown = true;
       partialTokensIn = outcome.tokensIn;
       partialTokensOut = outcome.tokensOut;
+      partialOutcomeKnown = true;
       partialGrounding = outcome.grounding;
       partialFindingsCount = outcome.review.findings.length;
       const { tokensIn, tokensOut, grounding } = outcome;
@@ -486,15 +598,17 @@ export class ReviewRunExecutor {
           .completeAgentRun(runId, {
             status,
             durationMs: Date.now() - start,
-            tokensIn: partialTokensIn,
-            tokensOut: partialTokensOut,
             findingsCount: partialFindingsCount,
             grounding: partialGrounding,
             error: msg,
             // When the LLM never returned, skip the column write (don't clear a
-            // previously stored cost). When it returned with unknown pricing,
-            // write null explicitly to record "cost is known to be absent".
-            costUsd: partialCostKnown ? partialCostUsd : undefined,
+            // previously stored value). When it returned with unknown
+            // pricing/usage, write null explicitly to record "known to be
+            // absent". Same contract for costUsd and tokensIn/tokensOut (AC-33)
+            // — tokens are never coerced to 0 when they are genuinely unknown.
+            costUsd: partialOutcomeKnown ? partialCostUsd : undefined,
+            tokensIn: partialOutcomeKnown ? partialTokensIn : undefined,
+            tokensOut: partialOutcomeKnown ? partialTokensOut : undefined,
           })
           .catch(() => undefined);
         await this.repo
