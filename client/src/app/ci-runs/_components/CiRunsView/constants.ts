@@ -13,8 +13,14 @@ import type { IconName } from "@devdigest/ui";
  * `agent` and `source` get their own columns and `duration` is split out of the
  * cost cell — matching the reference design. `source` is a constant
  * "GitHub Actions" badge in v1 (the only functional export target, AC-33).
+ *
+ * The text columns (PR, agent, source, findings, status) share the row width as
+ * weighted `fr` tracks rather than pinning everything except PR to a fixed
+ * width — otherwise PR alone absorbs ALL the slack and opens a large gap
+ * between the left-aligned PR cell and the AGENT column. Even distribution
+ * matches the reference's balanced spacing.
  */
-export const GRID = "118px 1fr 148px 132px 56px 128px 74px 116px 54px";
+export const GRID = "128px 1.4fr 1.05fr 1.1fr 62px 1fr 80px 1.05fr 62px";
 
 /** The single recency preset this page offers — "keep it simple" (AC-23). */
 export const RECENCY_DAYS = 7;

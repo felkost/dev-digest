@@ -106,6 +106,7 @@ function makeInstallation(overrides: Partial<CiInstallation> = {}): CiInstallati
     triggers: ["opened", "synchronize"],
     post_as: "github_review",
     latest_run_status: "succeeded",
+    latest_run_at: "2026-07-10T20:00:00.000Z",
     ...overrides,
   };
 }
@@ -135,7 +136,31 @@ describe("CITab", () => {
     expect(screen.getByText("acme/payments-api")).toBeInTheDocument();
     expect(screen.getByText("GitHub Actions")).toBeInTheDocument();
     expect(screen.getByText("Succeeded")).toBeInTheDocument();
-    expect(screen.getByText("v2")).toBeInTheDocument();
+    expect(screen.getByText("Active in 1 repos")).toBeInTheDocument();
+  });
+
+  it("hides disconnected installations from the active list (AC-14) but keeps active ones", () => {
+    surface = {
+      installations: [
+        makeInstallation(),
+        makeInstallation({
+          id: "inst-gone",
+          repo: "acme/legacy-service",
+          disconnected_at: "2026-07-10T22:42:52.000Z",
+        }),
+      ],
+      // active_count already excludes the disconnected one (server-computed).
+      active_count: 1,
+      last_7_days: { runs: 4, findings: 9, cost_usd: 1.23 },
+    };
+    renderWithIntl(<CITab agent={AGENT} />);
+
+    expect(screen.getByText("acme/payments-api")).toBeInTheDocument();
+    // A disconnected installation must NOT render as an active row — after
+    // disconnect it drops out of the CI tab (its run history stays on the CI
+    // Runs page). This guards the AC-14 regression where it lingered as a
+    // full, still-disconnectable row.
+    expect(screen.queryByText("acme/legacy-service")).not.toBeInTheDocument();
     expect(screen.getByText("Active in 1 repos")).toBeInTheDocument();
   });
 

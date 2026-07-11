@@ -67,9 +67,15 @@ export function CITab({ agent }: CITabProps) {
     return <div style={s.wrap}>{failOnControl}</div>;
   }
 
-  const installations = surface?.installations ?? [];
+  const allInstallations = surface?.installations ?? [];
+  // AC-14: once disconnected, an installation drops out of the CI tab's
+  // active-installation state (its run history still lives on the CI Runs
+  // page). The surface intentionally returns disconnected rows too — they back
+  // `active_count` and the id→repo map below — so the visible list, the bulk-
+  // update action, and the empty hint all key off the active subset only.
+  const installations = allInstallations.filter((i) => i.disconnected_at === null);
   const activeCount = surface?.active_count ?? 0;
-  const repoByInstallationId = new Map(installations.map((i) => [i.id, i.repo]));
+  const repoByInstallationId = new Map(allInstallations.map((i) => [i.id, i.repo]));
 
   return (
     <div style={s.wrap}>
