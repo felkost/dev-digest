@@ -1,5 +1,7 @@
 /* PR list — /repos/:repoId/pulls. Ported from screen_dashboard.jsx; fetches
-   GET /repos/:id/pulls (F1). Filters/sort live in query (?status&sort). */
+   GET /repos/:id/pulls (F1). Filters/sort live in query (?status&sort).
+   PullsPageContent is wrapped in Suspense here so useSearchParams is inside a
+   Suspense boundary — required by Next.js 15 (CSR bailout rule). */
 "use client";
 
 import React from "react";
@@ -16,18 +18,18 @@ import { AppShell } from "@/components/app-shell";
 import { RepoNotFound } from "@/components/repo-not-found";
 import { usePulls, useRefreshRepo, useSettings } from "@/lib/hooks";
 import { useAgents } from "@/lib/hooks/agents";
-import { useReviewAll } from "@/lib/hooks/reviews";
 import { useActiveRepo, useRepoNotFound } from "@/lib/repo-context";
 import { ApiError } from "@/lib/api";
 import { COLUMN_KEYS, SKELETON_ROWS } from "./constants";
 import { s } from "./styles";
 import { PRRow } from "./_components/PRRow";
 import { FilterBar } from "./_components/FilterBar";
+import { ReviewAllButton } from "./_components/ReviewAllButton";
 
 /** Open PRs carry a derived review status; everything else is merged/closed. */
 const OPEN_STATUSES = new Set(["needs_review", "reviewed", "stale"]);
 
-export default function PullsPage() {
+function PullsPageContent() {
   const t = useTranslations("prReview");
   const params = useParams<{ repoId: string }>();
   const repoId = params.repoId;
@@ -39,7 +41,6 @@ export default function PullsPage() {
   const refresh = useRefreshRepo();
   const { data: settings } = useSettings();
   const { data: agents } = useAgents();
-  const reviewAll = useReviewAll(repoId);
 
   const autoReviewOn = settings?.automatic_reviews ?? false;
   const pollingMin = settings?.polling_interval_min ?? 5;
@@ -101,16 +102,7 @@ export default function PullsPage() {
           >
             {t("list.triageQueue")}
           </Button>
-          <Button
-            kind="primary"
-            size="sm"
-            icon="Sparkles"
-            loading={reviewAll.isPending}
-            disabled={reviewAll.isPending}
-            onClick={() => reviewAll.mutate()}
-          >
-            {reviewAll.isPending ? t("list.reviewAllRunning") : t("list.reviewAll")}
-          </Button>
+          <ReviewAllButton repoId={repoId} />
         </div>
       </div>
 
@@ -161,5 +153,13 @@ export default function PullsPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+export default function PullsPage() {
+  return (
+    <React.Suspense>
+      <PullsPageContent />
+    </React.Suspense>
   );
 }

@@ -1,0 +1,76 @@
+import type { CSSProperties } from "react";
+
+/** Co-located styles for CITab. */
+export const s = {
+  // Fill the parent container (the Agent Editor tab body) rather than capping
+  // at a fixed 760px — the CI deployment list + its rows should span the full
+  // available width.
+  wrap: { width: "100%" } satisfies CSSProperties,
+  header: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 16,
+    marginBottom: 20,
+  } satisfies CSSProperties,
+  headerLeft: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" } satisfies CSSProperties,
+  h2: { fontSize: 18, fontWeight: 700 } satisfies CSSProperties,
+  subtitle: { fontSize: 13, color: "var(--text-secondary)", marginTop: 4 } satisfies CSSProperties,
+  headerActions: { display: "flex", gap: 8, flexShrink: 0 } satisfies CSSProperties,
+  bulkResults: {
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  } satisfies CSSProperties,
+  bulkResultsHeading: { fontSize: 13, fontWeight: 600, marginBottom: 8 } satisfies CSSProperties,
+  bulkResultRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    padding: "4px 0",
+    fontSize: 12,
+  } satisfies CSSProperties,
+  bulkResultRepo: { color: "var(--text-secondary)", fontFamily: "var(--font-mono, monospace)" } satisfies CSSProperties,
+  list: { display: "flex", flexDirection: "column", gap: 8 } satisfies CSSProperties,
+  row: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "12px 14px",
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    background: "var(--bg-elevated)",
+    transition: "background .12s",
+    flexWrap: "wrap",
+  } satisfies CSSProperties,
+  rowMain: { display: "flex", alignItems: "center", gap: 8, minWidth: 0 } satisfies CSSProperties,
+  rowRepo: { fontSize: 13, fontWeight: 600 } satisfies CSSProperties,
+  rowMeta: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } satisfies CSSProperties,
+  rowVersion: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  rowMuted: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  addRepoRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    width: "100%",
+    padding: "12px 14px",
+    border: "1px dashed var(--border)",
+    borderRadius: 8,
+    background: "transparent",
+    color: "var(--text-secondary)",
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: "pointer",
+    transition: "border-color .12s, color .12s",
+  } satisfies CSSProperties,
+  emptyHint: { fontSize: 13, color: "var(--text-muted)", padding: "2px 2px 8px" } satisfies CSSProperties,
+  failOnSection: {
+    marginTop: 24,
+    paddingTop: 16,
+    borderTop: "1px solid var(--border)",
+  } satisfies CSSProperties,
+} as const;

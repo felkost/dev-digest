@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { Finding } from '@devdigest/shared';
@@ -54,15 +54,22 @@ export async function insertFindings(
   return rows;
 }
 
-/** Reviews for a PR (newest first), each with its findings. */
+/** Reviews for a PR (newest first), each with its findings.
+ *  EXCLUDES reviews produced by a multi-agent fan-out run: those belong to a
+ *  `multi_agent_runs` group shown on the dedicated /multi-agent-review page, not
+ *  the PR-detail "Review runs" list (whose first/newest accordion opens by
+ *  default). The LEFT JOIN keeps standalone reviews (`run_id IS NULL`) and
+ *  single-agent reviews (linked run's `multi_agent_run_id IS NULL`); only
+ *  group-linked reviews are dropped. */
 export async function reviewsForPull(
   db: Db,
   prId: string,
 ): Promise<{ review: ReviewRow; findings: FindingRow[] }[]> {
   const reviews = await db
-    .select()
+    .select(getTableColumns(t.reviews))
     .from(t.reviews)
-    .where(eq(t.reviews.prId, prId))
+    .leftJoin(t.agentRuns, eq(t.agentRuns.id, t.reviews.runId))
+    .where(and(eq(t.reviews.prId, prId), isNull(t.agentRuns.multiAgentRunId)))
     .orderBy(desc(t.reviews.createdAt));
   if (reviews.length === 0) return [];
   const ids = reviews.map((r) => r.id);

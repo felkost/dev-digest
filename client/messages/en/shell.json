@@ -18,13 +18,11 @@
     "pulls": "Pull Requests",
     "onboarding-tour": "Onboarding Tour",
     "context": "Project Context",
+    "multi-agent": "Multi-Agent Review",
     "skills": "Skills",
     "agents": "Agents",
     "conventions": "Conventions",
-    "eval": "Eval Dashboard",
-    "memory": "Memory",
-    "multi-agent": "Multi-Agent Review",
-    "agent-performance": "Agent Performance",
+    "evals": "Eval Dashboard",
     "ci-runs": "CI Runs"
   },
   "featurePlaceholder": {
