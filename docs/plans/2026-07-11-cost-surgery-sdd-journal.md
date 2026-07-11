@@ -64,18 +64,26 @@
 ### spec-creator — ✅ DONE 2026-07-11 (Spec A backend) — status: APPROVED
 - Output: `docs/feature-requirements/2026-07-11-cost-surgery-backend.md` — 30 EARS ACs across 6 workstreams, 2 Mermaid diagrams, zero new LLM calls, Risks + Measurement-Acceptance (tied to lab self-check). Index updated in `docs/feature-requirements/README.md`.
 - §13 clarifications RESOLVED (user): deterministic scoring · wire review_intent (backend-only) · per-case editable threshold. Status flipped draft→approved.
-- spec-creator agentId (resumable if edits needed): a25536083832b313c.
+- spec-creator agentId (resumable if edits needed): a25536083832b313c. ⚠️ CORRECTION (session 2): prior-session agentIds do NOT resume across sessions ("No transcript found") — spawn a fresh agent for cross-session spec edits.
+
+### Session 2 — ✅ DONE 2026-07-11 (arch-review → amend → Spec B → backend plan)
+
+Ran in parallel: architecture-reviewer(Spec A) ∥ spec-creator(Spec B).
+
+- **Architecture-reviewer on Spec A** → verdict "NOT safe as-is": 3 HIGH blockers, one root cause = studio↔CI parity (AC-5/19/23/24) relied on server-only files agent-runner can't import. The user-reinforced "no load-bearing workaround" review lens (see memory engineering-principle-fix-the-process) produced the 3 REJECT findings. Fixes: (a) canonical token-counter → reviewer-core (injected into run.ts), (b) canonical boilerplate classifier `classifyFile` → reviewer-core, (c) review_intent override resolution → platform/ (not reviews→settings). + MEDIUM: split §7 AC-1 (server post-hoc) vs AC-2/WS5 (in-engine); cache-control adapter-only; consolidate 2 intent call sites behind one service helper.
+- **Spec A AMENDED** (user approved all 3) — fresh spec-creator edited in place: AC-5/19/23/24 tightened, §7 split into 3, §8/§9 name reviewer-core as canonical home, §13 dated "Amended 2026-07-11 (architecture review)" block. Status stays `approved`. AC IDs unchanged.
+- **Spec B (UI) CREATED + APPROVED** — `docs/feature-requirements/2026-07-11-cost-surgery-ui.md`, 29 ACs, 3 surfaces + cross-cutting, 13 non-goals. All 9 R2 UI decisions resolved: even-split-labeled-estimate cost/category · 30d-live -$ delta (no migration) · agent_runs-only run-history (CI stays on CI Runs page) · skills-approx + memory-empty-state (no write instrumentation) · fix accept_rate_pct · Agent Stats reuses AgentStats contract + new fleet read (AgentCardStats unchanged) · RunTraceDrawer→client/src/components · Recharts-in-client/AGENTS.md + drawer-move = implementer follow-ups.
+- **implementation-planner → backend plan DONE** — `docs/plans/2026-07-11-cost-surgery-backend-plan.md`. 12 steps / 3 waves, **multi-agent** (user-chosen). All 30 ACs + §13 mapped 1:1 (§6). Confirmed planner recs: map-threshold seed 6000 (tunable, fixture-validated) · WS6 reuses `expected_output` JSONB (migration `0026` = `case_kind` + `passing_threshold` only) · AC-3 zero-code (query check) · shared/ additive-only. Baked-in design calls: `resolveRoutedFeatureModel` takes provider explicitly (preserves contextual provider selection; only model-tier changes); `settings/feature-models.ts` deleted only at Step 9 to avoid a non-compiling gap between waves.
 
 ## Handoff — NEXT SESSION(S)
 
-**State:** researcher ✅ (R1+R2) · Spec A (backend) ✅ approved. Pipeline position: spec done → next is architecture-reviewer → implementation-planner → plan-verifier → /implement → test → /verify.
+**State (updated session 2):** researcher ✅ · Spec A (backend) ✅ approved+amended · Spec B (UI) ✅ approved · backend plan ✅ written (multi-agent, 12 steps / 3 waves). Pipeline position: **plan done → next is /implement (Spec A backend) → test → /verify**.
 
 **Next actions (in order):**
-1. **Architecture-reviewer on Spec A** — sanity-check the 6 workstreams against onion/reviewer-core-isolation contracts (esp. WS5 injected token-counter into reviewer-core, WS4/5 agent-runner parity). Then implementation-planner → docs/plans/2026-07-11-cost-surgery-backend-plan.md.
-2. **Create Spec B (UI, all 3 surfaces)** with `spec-creator`, feeding R2's research (in this journal). Scope: Agent Performance page + Agent Stats tab + Skill Stats count→$. Resolve R2's 9 UI decisions (cost-per-category $ approximation, delta window 7d/30d live-vs-snapshot, run-history agent_runs-only-vs-⋃ci_runs, MOST-USED-SKILLS approx-vs-retrofit, MOST-PULLED-MEMORY empty-state-vs-instrument, fix accept_rate_pct now?, naming vs AgentCardStats, move RunTraceDrawer, document Recharts in client/AGENTS.md). KEY WIN for B: mature Recharts `charts/` layer already exists (MetricCard/Sparkline/Donut-$/BarRow) — only radial-gauge + weekly-stacked-bar need building.
-3. Spec A depends on nothing from B; B consumes A's data (per-block tokens, excluded-tokens, cost-by-model). Build A first.
+1. **/implement `docs/plans/2026-07-11-cost-surgery-backend-plan.md`** — multi-agent, 3 waves (Wave 1: 4∥ → Wave 2: 5∥ → Wave 3: 3∥). Use the user's own :3001/:3000 during testing — never start your own; pause+warn before restarts (memory use-manual-server-client). Migration `0026` (eval_cases `case_kind` + `passing_threshold`) needs `pnpm db:migrate` after Wave 1. Cross-package: reviewer-core + server + agent-runner — run each package's own typecheck/test.
+2. **After Spec A implemented + verified:** implementation-planner for **Spec B (UI)** → its own /implement. B consumes A's now-produced data (per-block tokens, excluded-boilerplate tokens, cost-by-model). KEY WIN for B: mature Recharts `charts/` layer already exists — only radial-gauge + weekly-stacked-bar to build.
 
-**Parallelizable next session:** architecture-reviewer(Spec A) ∥ spec-creator(Spec B) can run together.
+**Note:** /implement is a heavy multi-agent stage; fine to start it in a fresh session for clean implementer-orchestration context.
 
 #### R1 findings (backend, verified with file:line)
 1. **Per-block tokens (Ч.1):** `PromptAssembly` (`vendor/shared/contracts/trace.ts:39-53`) stores raw strings, NO token counts. Only diff (conditionally, `budgetDiff`) + per-context-doc (`RunTraceContextDoc`, `trace.ts:62-68`) are counted today. **Precedent to copy = `RunTraceContextDoc`**: add per-slot `tokenizer.count()` in `run-executor.ts` AFTER `reviewPullRequest` returns `outcome.assembly`; server-side, additive to `RunTrace`, NO migration. reviewer-core has no tokenizer (stays pure).
