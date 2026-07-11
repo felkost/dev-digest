@@ -8,7 +8,7 @@ import type {
   OnboardingTourEntry,
 } from '@devdigest/shared';
 import { loadPromptTemplate, renderTemplate } from '../../platform/prompts.js';
-import { resolveFeatureModel } from '../settings/feature-models.js';
+import { resolveFeatureModel } from '../../platform/feature-models.js';
 import { OnboardingRepository, type OnboardingRepoBasics } from './repository.js';
 import {
   buildLlmInput,

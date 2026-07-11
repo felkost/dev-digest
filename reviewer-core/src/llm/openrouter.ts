@@ -63,6 +63,13 @@ export class OpenRouterProvider implements LLMProvider {
     let tokensIn = 0;
     let tokensOut = 0;
     let costFromApi: number | null = null;
+    // Sum of `usage.prompt_tokens_details.cached_tokens` across attempts (the
+    // OpenAI-compatible cache-hit field, also reported by OpenRouter). Starts
+    // `undefined` ("never reported") and only becomes a number once the API
+    // actually reports one (including a genuine 0) — never coerced from a
+    // missing field. If a model genuinely never reports it, this correctly
+    // stays `undefined`.
+    let cachedTokens: number | undefined;
     let lastRaw = '';
 
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
@@ -96,6 +103,13 @@ export class OpenRouterProvider implements LLMProvider {
       // `usage.cost` is an OpenRouter extension (USD), absent from the OpenAI SDK type.
       const apiCost = (res.usage as { cost?: number } | null | undefined)?.cost;
       if (typeof apiCost === 'number') costFromApi = (costFromApi ?? 0) + apiCost;
+      // OpenAI-compatible cache-hit usage (`usage.prompt_tokens_details.cached_tokens`);
+      // read-only extraction, same shape OpenRouter proxies through for models that
+      // report it. No `cacheControlApplied` here — this adapter never sets cache_control.
+      const cacheReadTokens = res.usage?.prompt_tokens_details?.cached_tokens;
+      if (typeof cacheReadTokens === 'number') {
+        cachedTokens = (cachedTokens ?? 0) + cacheReadTokens;
+      }
 
       const parsed = parseWithRepair(req.schema, lastRaw);
       if (parsed.ok) {
@@ -107,6 +121,7 @@ export class OpenRouterProvider implements LLMProvider {
           costUsd: costFromApi ?? this.estimateCost?.(req.model, tokensIn, tokensOut) ?? null,
           raw: lastRaw,
           attempts: attempt,
+          cachedTokens,
         };
       }
       messages.push({ role: 'assistant', content: lastRaw });

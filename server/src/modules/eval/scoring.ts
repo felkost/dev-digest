@@ -10,7 +10,7 @@
  * they are never read anywhere in the matching/scoring logic below.
  */
 import { createHash } from 'node:crypto';
-import type { Expectation } from '@devdigest/shared';
+import type { Expectation, Intent } from '@devdigest/shared';
 
 /** Minimal shape of a finding this module needs to score against expectations. */
 export interface FindingLike {
@@ -238,4 +238,118 @@ export function computeFlakedStatus(lastThreeOutcomes: ('passed' | 'failed' | 'e
   const hasPass = lastThreeOutcomes.includes('passed');
   const hasFailure = lastThreeOutcomes.some((outcome) => outcome === 'failed' || outcome === 'error');
   return hasPass && hasFailure;
+}
+
+// ===========================================================================
+// WS6 — `intent` / `risk_brief_narrative` case scoring (Step 12)
+//
+// Same zero-I/O charter as the rest of this file. `scoreIntentCase` takes a
+// real `Intent` (from `@devdigest/shared` — an allowed import, same as
+// `Expectation` above). `scoreRiskBriefCase` deliberately does NOT import
+// `RiskBriefLlmResult` (defined in `platform/risk-brief.ts`, relocated there
+// from the reviews module's own constants file to resolve an R6
+// module-isolation violation — see `server/src/modules/AGENTS.md`). This file
+// keeps its own zero-I/O,
+// zero-adapter-import charter regardless of where that type lives, so it
+// still takes a local structural type (`RiskBriefLike`) containing only the
+// fields it reads, rather than importing the schema-derived type directly.
+// The orchestrator (which DOES import `RiskBriefLlmResult`/
+// `generateRiskBriefNarrative` from `platform/risk-brief.ts`) passes a real
+// `RiskBriefLlmResult` value here, and TypeScript's structural typing accepts
+// it without a cast.
+// ===========================================================================
+
+/** The structural subset of `platform/risk-brief.ts`'s `RiskBriefLlmResult`
+ *  that `scoreRiskBriefCase` needs — see the module-isolation note above. */
+export interface RiskBriefLike {
+  what: string;
+  why: string;
+  risks: { explanation: string }[];
+}
+
+/**
+ * Scores an `intent`-kind eval case: for each expected `in_scope`/
+ * `out_of_scope` entry, matched when its normalized (lowercased, trimmed)
+ * text appears as a SUBSTRING somewhere in the corresponding actual array
+ * (joined with newlines, case-insensitive) — e.g. expected `"rate limiting"`
+ * matches an actual entry `"Adds per-IP rate limiting to the public API"`.
+ *
+ * Matching strictness: this mirrors `matchesExpectation`'s PHILOSOPHY above
+ * (pragmatic overlap, never exact equality — free-text LLM phrasing almost
+ * never matches a hand-authored expectation string verbatim), not its literal
+ * line-range mechanism (line ranges don't apply to free text). It is also
+ * ONE-DIRECTIONAL (actual must contain expected, not the reverse) — same
+ * convention as `skills/eval-scoring.ts`'s `patternMatch()` — because the
+ * expected entry is a short human-authored phrase the classifier's longer
+ * free-text entry is expected to cover, not something the narrative should
+ * match word-for-word.
+ *
+ * `in_scope` and `out_of_scope` are scored and pooled independently before
+ * summing, so a case can mix both kinds of expectations in one `matched/total`.
+ */
+export function scoreIntentCase(
+  actual: Intent,
+  expected: { in_scope: string[]; out_of_scope: string[] },
+): { matched: number; total: number } {
+  const inScopeMatched = countSubstringMatches(expected.in_scope, actual.in_scope);
+  const outOfScopeMatched = countSubstringMatches(expected.out_of_scope, actual.out_of_scope);
+  return {
+    matched: inScopeMatched + outOfScopeMatched,
+    total: expected.in_scope.length + expected.out_of_scope.length,
+  };
+}
+
+function countSubstringMatches(expectedEntries: string[], actualEntries: string[]): number {
+  const haystack = actualEntries.join('\n').toLowerCase();
+  let matched = 0;
+  for (const expectedEntry of expectedEntries) {
+    const needle = expectedEntry.toLowerCase().trim();
+    if (needle.length > 0 && haystack.includes(needle)) matched++;
+  }
+  return matched;
+}
+
+/**
+ * True when an `intent`-kind case passes: vacuously true when there was
+ * nothing to check (`total === 0`, e.g. a case with only `out_of_scope`
+ * expectations and an empty `in_scope` array on both sides), else the
+ * matched ratio must reach `threshold`. Default `0.7` is the BUILT-IN
+ * fallback used ONLY when the case's own `passing_threshold` column is
+ * `null` — a lenient bar appropriate for free-text paraphrase matching.
+ */
+export function intentCasePassed(result: { matched: number; total: number }, threshold = 0.7): boolean {
+  return result.total === 0 || result.matched / result.total >= threshold;
+}
+
+/**
+ * Scores a `risk_brief_narrative`-kind eval case: a key point matches when
+ * its normalized (lowercased, trimmed) text appears as a SUBSTRING of the
+ * concatenated `${actual.what} ${actual.why} ${risks[].explanation joined}`
+ * text — the exact substring-presence convention `skills/eval-scoring.ts`'s
+ * `patternMatch()` uses for its own grounding gate (case-insensitive,
+ * one-directional: the narrative must contain the key point, not vice versa).
+ */
+export function scoreRiskBriefCase(
+  actual: RiskBriefLike,
+  expectedKeyPoints: string[],
+): { matched: number; total: number } {
+  const haystack = `${actual.what} ${actual.why} ${actual.risks.map((r) => r.explanation).join(' ')}`.toLowerCase();
+  let matched = 0;
+  for (const keyPoint of expectedKeyPoints) {
+    const needle = keyPoint.toLowerCase().trim();
+    if (needle.length > 0 && haystack.includes(needle)) matched++;
+  }
+  return { matched, total: expectedKeyPoints.length };
+}
+
+/**
+ * True when a `risk_brief_narrative`-kind case passes: vacuously true when
+ * there were no key points to check, else the matched ratio must reach
+ * `threshold`. Default `1.0` is the BUILT-IN fallback used ONLY when the
+ * case's own `passing_threshold` column is `null` — stricter than intent's
+ * 0.7 default because every hand-authored key point is expected to survive
+ * into the narrative verbatim-ish, not just be "mostly" covered.
+ */
+export function riskBriefCasePassed(result: { matched: number; total: number }, threshold = 1.0): boolean {
+  return result.total === 0 || result.matched / result.total >= threshold;
 }

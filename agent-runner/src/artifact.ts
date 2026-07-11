@@ -1,4 +1,4 @@
-import type { Finding } from '@devdigest/shared';
+import type { BlockTokenCount, Finding } from '@devdigest/shared';
 import { CiResultArtifact } from '@devdigest/shared';
 import { RunnerError } from './errors.js';
 
@@ -17,6 +17,20 @@ export interface BuildResultArtifactInput {
    * run status instead of a misleading zero-finding "no findings".
    */
   skippedReason?: string;
+  /**
+   * Cost-surgery instrumentation (CI parity with the studio's `cost_report`,
+   * mirrors `RunTraceCostReport` in `contracts/trace.ts`). All optional — the
+   * skipped-diff-too-large path (and any older caller) omits them entirely,
+   * which is fine since every corresponding `CiResultArtifact` field is
+   * `.nullish()`.
+   */
+  blockTokenCounts?: BlockTokenCount[];
+  cachedInputTokens?: number | null;
+  cacheControlApplied?: boolean;
+  excludedBoilerplateFiles?: string[];
+  excludedBoilerplateTokens?: number;
+  mapReduceThresholdTokens?: number | null;
+  mapReduceChunkCount?: number;
 }
 
 function severityCounts(findings: Finding[]): { critical: number; warning: number; suggestion: number } {
@@ -48,6 +62,13 @@ export function buildResultArtifact(input: BuildResultArtifactInput): CiResultAr
     version: RUNNER_VERSION,
     pr_number: input.prNumber,
     skipped_reason: input.skippedReason,
+    block_token_counts: input.blockTokenCounts,
+    cached_input_tokens: input.cachedInputTokens,
+    cache_control_applied: input.cacheControlApplied,
+    excluded_boilerplate_files: input.excludedBoilerplateFiles,
+    excluded_boilerplate_tokens: input.excludedBoilerplateTokens,
+    map_reduce_threshold_tokens: input.mapReduceThresholdTokens,
+    map_reduce_chunk_count: input.mapReduceChunkCount,
   };
   const result = CiResultArtifact.safeParse(candidate);
   if (!result.success) {

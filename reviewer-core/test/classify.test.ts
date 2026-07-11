@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { classifyFile } from '../src/modules/reviews/smart-diff-rules.js';
+import { classifyFile } from '../src/index.js';
 
+/**
+ * classifyFile — ported verbatim from the server's
+ * `test/smart-diff-rules.test.ts`. This is the single canonical
+ * classification behavior; both the server and the CI runner rely on it
+ * producing identical results.
+ */
 describe('classifyFile', () => {
   describe('lock files → boilerplate', () => {
     it('classifies package-lock.json as boilerplate', () => {
@@ -112,6 +118,24 @@ describe('classifyFile', () => {
 
     it('classifies a plain config file as wiring (no core/boilerplate pattern)', () => {
       expect(classifyFile('src/config.ts')).toBe('wiring');
+    });
+  });
+
+  describe('infrastructure files → never boilerplate (AC-18)', () => {
+    // AC-18: Dockerfile / GHA workflow / .env.example must never be classified
+    // as boilerplate, so they are never silently excluded from review.
+    // None of these match a core pattern either, so they fall through to the
+    // 'wiring' role — the important assertion is "not boilerplate".
+    it('classifies Dockerfile as wiring, not boilerplate', () => {
+      expect(classifyFile('Dockerfile')).toBe('wiring');
+    });
+
+    it('classifies a GitHub Actions workflow as wiring, not boilerplate', () => {
+      expect(classifyFile('.github/workflows/ci.yml')).toBe('wiring');
+    });
+
+    it('classifies .env.example as wiring, not boilerplate', () => {
+      expect(classifyFile('.env.example')).toBe('wiring');
     });
   });
 

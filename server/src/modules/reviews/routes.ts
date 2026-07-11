@@ -8,8 +8,8 @@ import { classifyIntent } from '@devdigest/reviewer-core';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
-import { routeModel } from '../../platform/model-router.js';
 import { ReviewService } from './service.js';
+import { resolveIntentModel } from './helpers.js';
 import * as pullRepo from './repository/pull.repo.js';
 import * as t from '../../db/schema.js';
 import { loadDiff } from './diff-loader.js';
@@ -239,10 +239,13 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
       .delete(t.prIntent)
       .where(eq(t.prIntent.prId, req.params.id));
 
-    // Cheap model — 'anthropic' provider, intent task routes to haiku.
+    // Cheap model — 'anthropic' provider, intent task routes to haiku (unless
+    // the workspace has an active `review_intent` feature-model override,
+    // which may point at a DIFFERENT provider — the resolved provider always
+    // drives which LLM client is built, never the passed-in default).
     const DEFAULT_PROVIDER = 'anthropic' as const;
-    const model = routeModel('intent', DEFAULT_PROVIDER);
-    const llm = await container.llm(DEFAULT_PROVIDER);
+    const { provider: intentProvider, model } = await resolveIntentModel(container, workspaceId, DEFAULT_PROVIDER);
+    const llm = await container.llm(intentProvider);
 
     const result = await classifyIntent({
       title: pull.title,

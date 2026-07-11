@@ -8,7 +8,8 @@ import type { SecretsProvider } from '@devdigest/shared';
 import {
   resolveFeatureModel,
   getFeatureModelOverride,
-} from '../src/modules/settings/feature-models.js';
+  resolveRoutedFeatureModel,
+} from '../src/platform/feature-models.js';
 
 const hasDocker = await dockerAvailable();
 const d = hasDocker ? describe : describe.skip;
@@ -55,6 +56,46 @@ d('Settings: feature models + secrets status (Testcontainers pg)', () => {
       provider: 'openai',
       model: 'gpt-4.1',
     });
+
+    await app.close();
+  });
+
+  it('resolveRoutedFeatureModel: no override → cheap-tier model for the given provider', async () => {
+    const app = await buildApp({ config: config(), db: pg.handle.db, overrides: {} });
+
+    // No workspace override configured for `review_intent` at this point — the
+    // caller-supplied provider ('openai') is routed to its cheap-tier model
+    // because 'intent' is a cheap task in `routeModel`'s task list.
+    expect(
+      await resolveRoutedFeatureModel(app.container, workspaceId, 'review_intent', 'intent', 'openai'),
+    ).toEqual({ provider: 'openai', model: 'gpt-4o-mini' });
+
+    await app.close();
+  });
+
+  it('resolveRoutedFeatureModel: an active override wins, ignoring the passed-in provider', async () => {
+    const app = await buildApp({ config: config(), db: pg.handle.db, overrides: {} });
+
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/settings',
+      payload: {
+        feature_models: {
+          review_intent: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+          risk_brief: { provider: 'openrouter', model: 'z-ai/glm-4.7-flash' },
+        },
+      },
+    });
+    expect(put.statusCode).toBe(200);
+
+    // The override is returned verbatim — the passed-in provider ('openai') is
+    // ignored entirely, for both a review-time task and a summary-tier task.
+    expect(
+      await resolveRoutedFeatureModel(app.container, workspaceId, 'review_intent', 'review', 'openai'),
+    ).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6' });
+    expect(
+      await resolveRoutedFeatureModel(app.container, workspaceId, 'risk_brief', 'risks', 'openai'),
+    ).toEqual({ provider: 'openrouter', model: 'z-ai/glm-4.7-flash' });
 
     await app.close();
   });

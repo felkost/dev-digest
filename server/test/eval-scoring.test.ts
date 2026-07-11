@@ -19,10 +19,14 @@ import {
   casePassed,
   computeAgentSnapshot,
   computeFlakedStatus,
+  scoreIntentCase,
+  intentCasePassed,
+  scoreRiskBriefCase,
+  riskBriefCasePassed,
   type FindingLike,
   type CaseScoreResult,
 } from '../src/modules/eval/scoring.js';
-import type { Expectation } from '@devdigest/shared';
+import type { Expectation, Intent } from '@devdigest/shared';
 
 function mustFind(overrides: Partial<Expectation> = {}): Expectation {
   return {
@@ -367,5 +371,148 @@ describe('computeAgentSnapshot', () => {
       provider: 'anthropic',
       skills: ['security', 'zod'],
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WS6 — `intent` / `risk_brief_narrative` case scoring (Step 12)
+// ---------------------------------------------------------------------------
+
+function intent(overrides: Partial<Intent> = {}): Intent {
+  return {
+    intent: 'Adds per-IP rate limiting to the public API.',
+    in_scope: ['Adds a token-bucket rate limiter middleware', 'Wires the limiter into the public router'],
+    out_of_scope: ['Does not touch the internal admin API'],
+    ...overrides,
+  };
+}
+
+describe('scoreIntentCase', () => {
+  it('matches an expected in_scope entry via case-insensitive substring presence', () => {
+    const result = scoreIntentCase(intent(), {
+      in_scope: ['rate limiter middleware'],
+      out_of_scope: [],
+    });
+    expect(result).toEqual({ matched: 1, total: 1 });
+  });
+
+  it('matches an expected out_of_scope entry independently of in_scope', () => {
+    const result = scoreIntentCase(intent(), {
+      in_scope: [],
+      out_of_scope: ['admin api'],
+    });
+    expect(result).toEqual({ matched: 1, total: 1 });
+  });
+
+  it('does not match when the expected phrase is absent from the corresponding actual array', () => {
+    const result = scoreIntentCase(intent(), {
+      in_scope: ['deletes the database'],
+      out_of_scope: [],
+    });
+    expect(result).toEqual({ matched: 0, total: 1 });
+  });
+
+  it('an in_scope expectation never matches against out_of_scope entries (arrays scored independently)', () => {
+    const result = scoreIntentCase(intent(), {
+      in_scope: ['admin api'], // this phrase only exists in the actual out_of_scope array
+      out_of_scope: [],
+    });
+    expect(result).toEqual({ matched: 0, total: 1 });
+  });
+
+  it('sums matched/total across both in_scope and out_of_scope', () => {
+    const result = scoreIntentCase(intent(), {
+      in_scope: ['rate limiter middleware', 'nonexistent phrase'],
+      out_of_scope: ['admin api'],
+    });
+    expect(result).toEqual({ matched: 2, total: 3 });
+  });
+
+  it('empty expected arrays produce total=0 (vacuous)', () => {
+    const result = scoreIntentCase(intent(), { in_scope: [], out_of_scope: [] });
+    expect(result).toEqual({ matched: 0, total: 0 });
+  });
+});
+
+describe('intentCasePassed', () => {
+  it('is vacuously true when total is 0', () => {
+    expect(intentCasePassed({ matched: 0, total: 0 })).toBe(true);
+  });
+
+  it('passes at the default 0.7 threshold when ratio meets it', () => {
+    expect(intentCasePassed({ matched: 7, total: 10 })).toBe(true);
+  });
+
+  it('fails at the default 0.7 threshold when ratio falls short', () => {
+    expect(intentCasePassed({ matched: 6, total: 10 })).toBe(false);
+  });
+
+  it('respects an explicit per-case threshold override', () => {
+    expect(intentCasePassed({ matched: 5, total: 10 }, 0.5)).toBe(true);
+    expect(intentCasePassed({ matched: 5, total: 10 }, 0.6)).toBe(false);
+  });
+});
+
+function riskBrief(overrides: Partial<{ what: string; why: string; risks: { explanation: string }[] }> = {}) {
+  return {
+    what: 'Adds a rate limiter middleware to public endpoints.',
+    why: 'Prevents abuse of unauthenticated endpoints by capping request bursts.',
+    risks: [{ explanation: 'The limiter window is short and may block legitimate bursts.' }],
+    ...overrides,
+  };
+}
+
+describe('scoreRiskBriefCase', () => {
+  it('matches a key point found in `what`', () => {
+    const result = scoreRiskBriefCase(riskBrief(), ['rate limiter middleware']);
+    expect(result).toEqual({ matched: 1, total: 1 });
+  });
+
+  it('matches a key point found in `why`', () => {
+    const result = scoreRiskBriefCase(riskBrief(), ['prevents abuse']);
+    expect(result).toEqual({ matched: 1, total: 1 });
+  });
+
+  it('matches a key point found in a risk explanation', () => {
+    const result = scoreRiskBriefCase(riskBrief(), ['legitimate bursts']);
+    expect(result).toEqual({ matched: 1, total: 1 });
+  });
+
+  it('does not match a key point absent from what/why/risk explanations', () => {
+    const result = scoreRiskBriefCase(riskBrief(), ['deletes user data']);
+    expect(result).toEqual({ matched: 0, total: 1 });
+  });
+
+  it('is case-insensitive', () => {
+    const result = scoreRiskBriefCase(riskBrief(), ['RATE LIMITER MIDDLEWARE']);
+    expect(result).toEqual({ matched: 1, total: 1 });
+  });
+
+  it('empty expectedKeyPoints produces total=0 (vacuous)', () => {
+    const result = scoreRiskBriefCase(riskBrief(), []);
+    expect(result).toEqual({ matched: 0, total: 0 });
+  });
+
+  it('multiple risks are all concatenated into the searchable haystack', () => {
+    const brief = riskBrief({
+      risks: [{ explanation: 'First risk about caching.' }, { explanation: 'Second risk about retries.' }],
+    });
+    const result = scoreRiskBriefCase(brief, ['caching', 'retries']);
+    expect(result).toEqual({ matched: 2, total: 2 });
+  });
+});
+
+describe('riskBriefCasePassed', () => {
+  it('is vacuously true when total is 0', () => {
+    expect(riskBriefCasePassed({ matched: 0, total: 0 })).toBe(true);
+  });
+
+  it('requires a perfect ratio at the default 1.0 threshold', () => {
+    expect(riskBriefCasePassed({ matched: 2, total: 2 })).toBe(true);
+    expect(riskBriefCasePassed({ matched: 1, total: 2 })).toBe(false);
+  });
+
+  it('respects an explicit per-case threshold override', () => {
+    expect(riskBriefCasePassed({ matched: 1, total: 2 }, 0.5)).toBe(true);
   });
 });

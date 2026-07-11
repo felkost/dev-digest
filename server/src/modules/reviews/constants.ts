@@ -1,8 +1,6 @@
 /**
  * Review module constants.
  */
-import { z } from 'zod';
-import { RiskLevel, RiskSeverity } from '@devdigest/shared';
 
 /**
  * Studio review strategy. 'single-pass' = send the WHOLE diff in ONE LLM call.
@@ -16,43 +14,13 @@ export const REVIEW_STRATEGY = 'single-pass' as const;
 // ---------------------------------------------------------------------------
 // PR Why + Risk Brief (Step 4/5) — LLM-facing structured-output schema.
 //
-// Narrower than the full `LlmBrief`/`Risk` shared types (co-located here per
-// `onboarding/constants.ts`'s precedent of keeping a module's LLM schema next
-// to its other constants). NO `github_link` field on either `risks[]` or
-// `review_focus[]` entries — that is computed server-side, post-validation,
-// by `BriefGeneratorService` (Step 4g) via `buildGithubBlobLink`.
-//
-// NOTE: Step 5 (serialized after this step) adds `BRIEF_GENERATE_RATE_LIMIT`
-// and `BRIEF_INPUT_TOKEN_BUDGET` to this same file — nothing here should be
-// removed/renamed to make room for that addition.
+// Relocated to `platform/risk-brief.ts` (module-isolation fix, R6): the
+// `eval` module also needs this schema/function and could not reach into
+// `modules/reviews` for it. Re-exported here so existing `reviews/*` imports
+// of `RiskBriefLlmResult` from this file keep working without a rename.
 // ---------------------------------------------------------------------------
 
-const RiskBriefLlmRisk = z.object({
-  title: z.string(),
-  explanation: z.string(),
-  severity: RiskSeverity,
-  kind: z.string(),
-  file: z.string().nullish(),
-  line: z.number().int().nullish(),
-  endpoint: z.string().nullish(),
-  symbol: z.string().nullish(),
-});
-
-const RiskBriefLlmReviewFocusItem = z.object({
-  path: z.string(),
-  line: z.number().int().nullish(),
-  reason: z.string(),
-  priority: z.number().int(),
-});
-
-export const RiskBriefLlmResult = z.object({
-  what: z.string(),
-  why: z.string(),
-  risk_level: RiskLevel,
-  risks: z.array(RiskBriefLlmRisk),
-  review_focus: z.array(RiskBriefLlmReviewFocusItem),
-});
-export type RiskBriefLlmResult = z.infer<typeof RiskBriefLlmResult>;
+export { RiskBriefLlmResult } from '../../platform/risk-brief.js';
 
 // ---------------------------------------------------------------------------
 // Step 5 additions — rate limit for the explicit generate/regenerate route,

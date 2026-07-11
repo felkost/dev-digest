@@ -79,6 +79,10 @@ export interface StructuredResult<T> {
   costUsd: number | null;
   raw: string;
   attempts: number;
+  /** Prompt-cache-hit input tokens (cost-surgery instrumentation), when the provider reports it. */
+  cachedTokens?: number | null;
+  /** Whether cache-control breakpoints were applied to this request. */
+  cacheControlApplied?: boolean;
 }
 
 export interface LLMProvider {

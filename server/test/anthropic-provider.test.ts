@@ -153,3 +153,104 @@ describe('AnthropicProvider temperature-deprecation self-heal', () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Cost-surgery instrumentation: completeStructured marks the system prefix as
+ * an Anthropic prompt-cache breakpoint (`cache_control: { type: 'ephemeral' }`
+ * on the system content block) and surfaces `usage.cache_read_input_tokens` as
+ * `StructuredResult.cachedTokens` — without ever coercing a missing/unreported
+ * field to `0`.
+ */
+describe('AnthropicProvider completeStructured — prompt caching', () => {
+  const validInput = {
+    verdict: 'approve',
+    summary: 'looks fine',
+    score: 90,
+    findings: [],
+  };
+
+  it('sends the system prompt as an array-shaped content block with an ephemeral cache_control breakpoint', async () => {
+    const provider = new AnthropicProvider('test-key');
+    const create = vi.fn().mockImplementationOnce(() => Promise.resolve(fakeToolUseResult(validInput)));
+    withStubbedCreate(provider, create);
+
+    await provider.completeStructured({
+      model: 'claude-sonnet-5',
+      schema: Review,
+      schemaName: 'Review',
+      messages: [
+        { role: 'system', content: 'You are a reviewer.' },
+        { role: 'user', content: 'review this' },
+      ],
+    });
+
+    const sentSystem = (create.mock.calls[0]![0] as { system: unknown }).system;
+    expect(sentSystem).toEqual([
+      { type: 'text', text: 'You are a reviewer.', cache_control: { type: 'ephemeral' } },
+    ]);
+  });
+
+  it('extracts a reported cache_read_input_tokens value into cachedTokens and always sets cacheControlApplied: true', async () => {
+    const provider = new AnthropicProvider('test-key');
+    const create = vi.fn().mockImplementationOnce(() =>
+      Promise.resolve(
+        fakeMessageResult({
+          content: [{ type: 'tool_use', id: 'tool_1', name: 'Review', input: validInput }],
+          usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 42 },
+        }),
+      ),
+    );
+    withStubbedCreate(provider, create);
+
+    const result = await provider.completeStructured({
+      model: 'claude-sonnet-5',
+      schema: Review,
+      schemaName: 'Review',
+      messages: [
+        { role: 'system', content: 'You are a reviewer.' },
+        { role: 'user', content: 'review this' },
+      ],
+    });
+
+    expect(result.cachedTokens).toBe(42);
+    expect(result.cacheControlApplied).toBe(true);
+  });
+
+  it('cachedTokens stays undefined (not 0) when the mocked response omits the usage field entirely', async () => {
+    const provider = new AnthropicProvider('test-key');
+    const create = vi.fn().mockImplementationOnce(() => Promise.resolve(fakeToolUseResult(validInput)));
+    withStubbedCreate(provider, create);
+
+    const result = await provider.completeStructured({
+      model: 'claude-sonnet-5',
+      schema: Review,
+      schemaName: 'Review',
+      messages: [
+        { role: 'system', content: 'You are a reviewer.' },
+        { role: 'user', content: 'review this' },
+      ],
+    });
+
+    // fakeMessageResult's usage is { input_tokens, output_tokens } only — no
+    // cache_read_input_tokens key at all — so the field is genuinely `undefined`
+    // at runtime, and must NOT be defaulted to 0.
+    expect(result.cachedTokens).toBeUndefined();
+    expect(result.cacheControlApplied).toBe(true);
+  });
+
+  it('cacheControlApplied stays true even when there is no system message to mark', async () => {
+    const provider = new AnthropicProvider('test-key');
+    const create = vi.fn().mockImplementationOnce(() => Promise.resolve(fakeToolUseResult(validInput)));
+    withStubbedCreate(provider, create);
+
+    const result = await provider.completeStructured({
+      model: 'claude-sonnet-5',
+      schema: Review,
+      schemaName: 'Review',
+      messages: [{ role: 'user', content: 'review this' }],
+    });
+
+    expect((create.mock.calls[0]![0] as { system: unknown }).system).toBeUndefined();
+    expect(result.cacheControlApplied).toBe(true);
+  });
+});

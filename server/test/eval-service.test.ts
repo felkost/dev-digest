@@ -91,11 +91,30 @@ function buildContainer(opts: {
   agent?: typeof AGENT_ROW | undefined;
   findingContext?: { finding: Record<string, unknown>; review: Record<string, unknown>; pull: Record<string, unknown> } | undefined;
   prFiles?: { path: string; patch: string | null }[];
+  /**
+   * `settings` table rows (key/value) — feeds `resolveRoutedFeatureModel`'s
+   * (WS6, Step 12) `getFeatureModelOverride` read for the `intent`/
+   * `risk_brief_narrative` orchestrator branches. Empty by default (no
+   * workspace override configured, so routing falls back to
+   * `routeModel(task, provider)`) — same convention as
+   * `brief-generator-service.test.ts`'s `settingsRows` option.
+   */
+  settingsRows?: Record<string, unknown>[];
 }): Container {
   const llm = opts.llm ?? new MockLLMProvider('openai', { structured: { verdict: 'comment', summary: 's', score: 80, findings: [] } });
+  const settingsRows = opts.settingsRows ?? [];
 
   const container = {
-    db: {} as never,
+    db: {
+      // Only `getFeatureModelOverride`'s `select({key,value}).from(settings)
+      // .where(...)` shape is exercised by anything under test in this file —
+      // no other db call is ever routed through this fake.
+      select: () => ({
+        from: () => ({
+          where: () => Promise.resolve(settingsRows),
+        }),
+      }),
+    } as never,
     agentsRepo: {
       getById: vi.fn().mockResolvedValue('agent' in opts ? opts.agent : AGENT_ROW),
       linkedSkills: vi.fn().mockResolvedValue(opts.linkedSkills ?? []),
@@ -435,6 +454,95 @@ describe('EvalService.createCaseManual', () => {
 });
 
 // ---------------------------------------------------------------------------
+// WS6 (Step 12) — `case_kind`/`passing_threshold` pass-through + the
+// intent/risk_brief_narrative-are-agent-owned-only guard.
+//
+// `createCaseManual` only ever backs the agent-scoped `POST /agents/:id/evals`
+// route and hardcodes `ownerKind: 'agent'` internally (confirmed by reading
+// `service.ts`) — `EvalCaseCreateInput` itself has no `owner_kind` field at
+// all, so there is no way to drive this method into producing a skill-owned
+// case through its public signature. The "intent/risk_brief_narrative cases
+// are agent-owned only" guard is therefore UNREACHABLE through this method
+// today; it exists as defensive documentation of the invariant for a future
+// caller. What IS testable here — and is what these tests cover — is that
+// `case_kind`/`passing_threshold` pass through to `repo.insertCase` correctly
+// for the one real caller this method has.
+// ---------------------------------------------------------------------------
+
+describe('EvalService.createCaseManual — WS6 case_kind/passing_threshold', () => {
+  it('passes case_kind and passing_threshold through to repo.insertCase for an intent-kind case', async () => {
+    const container = buildContainer({});
+    const insertSpy = vi.spyOn(EvalRepository.prototype, 'insertCase').mockImplementation(async (data: any) => ({
+      ...makeCaseRow(),
+      ...data,
+    }));
+
+    const service = new EvalService(container);
+    const result = await service.createCaseManual(WS_ID, AGENT_ID, {
+      owner_id: AGENT_ID,
+      name: 'Intent case',
+      input_diff: VALID_DIFF,
+      expected_output: [] as unknown as Expectation[],
+      notes: null,
+      case_kind: 'intent',
+      passing_threshold: 0.8,
+    } as any);
+
+    expect(insertSpy).toHaveBeenCalledOnce();
+    expect(insertSpy.mock.calls[0]![0]).toMatchObject({
+      ownerKind: 'agent',
+      caseKind: 'intent',
+      passingThreshold: 0.8,
+    });
+    expect(result.case_kind).toBe('intent');
+    expect(result.passing_threshold).toBe(0.8);
+  });
+
+  it('defaults passing_threshold to null when omitted (kind default resolved later, not persisted)', async () => {
+    const container = buildContainer({});
+    const insertSpy = vi.spyOn(EvalRepository.prototype, 'insertCase').mockImplementation(async (data: any) => ({
+      ...makeCaseRow(),
+      ...data,
+    }));
+
+    const service = new EvalService(container);
+    await service.createCaseManual(WS_ID, AGENT_ID, {
+      owner_id: AGENT_ID,
+      name: 'Risk brief case',
+      input_diff: VALID_DIFF,
+      expected_output: [] as unknown as Expectation[],
+      notes: null,
+      case_kind: 'risk_brief_narrative',
+    } as any);
+
+    expect(insertSpy.mock.calls[0]![0]).toMatchObject({
+      caseKind: 'risk_brief_narrative',
+      passingThreshold: null,
+    });
+  });
+
+  it('a review_finding-kind case (the pre-WS6 default) is unaffected by the agent-owned-only guard', async () => {
+    const container = buildContainer({});
+    vi.spyOn(EvalRepository.prototype, 'insertCase').mockImplementation(async (data: any) => ({
+      ...makeCaseRow(),
+      ...data,
+    }));
+
+    const service = new EvalService(container);
+    await expect(
+      service.createCaseManual(WS_ID, AGENT_ID, {
+        owner_id: AGENT_ID,
+        name: 'Ordinary case',
+        input_diff: VALID_DIFF,
+        expected_output: [],
+        notes: null,
+        case_kind: 'review_finding',
+      } as any),
+    ).resolves.toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Edit-in-place (updateCase)
 // ---------------------------------------------------------------------------
 
@@ -736,6 +844,299 @@ describe('EvalService.runBatch — degraded path', () => {
     // exactly as if the batch had a single successfully-scored case.
     expect(aggArg.recall).toBe(1);
     expect(aggArg.precision).toBe(1);
+    expect(aggArg.status).toBe('degraded');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WS6 (Step 12) — `intent`-kind cases run through the SAME cheap-tier
+// `classifyIntent()` pre-pass production uses, scored via `scoreIntentCase`.
+// ---------------------------------------------------------------------------
+
+describe('EvalRunOrchestrator — WS6 intent-kind cases (Step 12)', () => {
+  it('runs an intent-kind case through classifyIntent and records a passed outcome scored against expected in_scope/out_of_scope', async () => {
+    const intentCase = makeCaseRow({
+      id: 'case-intent',
+      caseKind: 'intent',
+      inputMeta: { title: 'Add rate limiting', body: 'Adds a limiter', filesSummary: 'src/limiter.ts (+10/-0)' },
+      expectedOutput: { in_scope: ['rate limiter middleware'], out_of_scope: [] },
+    });
+
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([intentCase] as any);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockResolvedValue(makeBatchRow() as any);
+    const insertRunSpy = vi.spyOn(EvalRepository.prototype, 'insertRun').mockResolvedValue({} as any);
+    vi.spyOn(EvalRepository.prototype, 'updateBatchAggregate').mockResolvedValue(undefined);
+
+    const llm = new MockLLMProvider('openai', {
+      structuredBySchema: {
+        PRIntent: {
+          intent: 'Adds a rate limiter to the public API.',
+          in_scope: ['Adds a token-bucket rate limiter middleware'],
+          out_of_scope: [],
+        },
+      },
+    });
+
+    const container = buildContainer({ llm });
+    const service = new EvalService(container);
+
+    const result = await service.runBatch(WS_ID, AGENT_ID);
+
+    expect(result.status).toBe('clean');
+    expect(insertRunSpy).toHaveBeenCalledOnce();
+    const runArg = insertRunSpy.mock.calls[0]![0] as any;
+    expect(runArg.pass).toBe(true);
+    expect(runArg.matchedCount).toBe(1);
+    expect(runArg.expectedCount).toBe(1);
+    // The generic `recall` column is reused to carry the intent match ratio.
+    expect(runArg.recall).toBe(1);
+    expect(runArg.precision).toBeNull();
+    expect(runArg.citationAccuracy).toBeNull();
+  });
+
+  it('marks an intent-kind case failed (not errored) when its match ratio falls below the default 0.7 threshold', async () => {
+    const intentCase = makeCaseRow({
+      id: 'case-intent-fail',
+      caseKind: 'intent',
+      inputMeta: { title: 'Add rate limiting', body: '', filesSummary: '' },
+      expectedOutput: { in_scope: ['rate limiter', 'redis cache', 'circuit breaker'], out_of_scope: [] },
+    });
+
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([intentCase] as any);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockResolvedValue(makeBatchRow() as any);
+    const insertRunSpy = vi.spyOn(EvalRepository.prototype, 'insertRun').mockResolvedValue({} as any);
+    const updateAggSpy = vi.spyOn(EvalRepository.prototype, 'updateBatchAggregate').mockResolvedValue(undefined);
+
+    const llm = new MockLLMProvider('openai', {
+      structuredBySchema: {
+        PRIntent: {
+          intent: 'Adds a rate limiter.',
+          in_scope: ['Adds a token-bucket rate limiter middleware'], // only 1 of 3 expected phrases present
+          out_of_scope: [],
+        },
+      },
+    });
+
+    const container = buildContainer({ llm });
+    const service = new EvalService(container);
+
+    await service.runBatch(WS_ID, AGENT_ID);
+
+    const runArg = insertRunSpy.mock.calls[0]![0] as any;
+    expect(runArg.pass).toBe(false); // 1/3 < 0.7 default threshold
+    expect(runArg.errorMessage).toBeUndefined(); // deterministic score, not a runtime error
+
+    // A deterministic 'failed' score does NOT by itself flip the batch's
+    // clean/degraded status — only a genuine runtime 'error' does (the
+    // EXISTING review_finding convention, unchanged by WS6; see the next
+    // test for the batch-level degraded case).
+    const aggArg = updateAggSpy.mock.calls[0]![1];
+    expect(aggArg.status).toBe('clean');
+  });
+
+  it('a below-threshold failed intent case does not itself degrade the batch, but a genuinely-erroring case in the SAME batch does', async () => {
+    const failingIntentCase = makeCaseRow({
+      id: 'case-intent-fail',
+      caseKind: 'intent',
+      inputMeta: { title: 'x', body: '', filesSummary: '' },
+      expectedOutput: { in_scope: ['a phrase that will never appear'], out_of_scope: [] },
+    });
+    const erroringReviewCase = makeCaseRow({ id: 'case-boom', expectedOutput: [] });
+
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([failingIntentCase, erroringReviewCase] as any);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockResolvedValue(makeBatchRow() as any);
+    const insertRunSpy = vi.spyOn(EvalRepository.prototype, 'insertRun').mockResolvedValue({} as any);
+    const updateAggSpy = vi.spyOn(EvalRepository.prototype, 'updateBatchAggregate').mockResolvedValue(undefined);
+
+    // Differentiate by schemaName (not call order) — robust regardless of the
+    // concurrency worker pool's interleaving of the two cases.
+    const throwingLlm = {
+      id: 'openai' as const,
+      listModels: vi.fn(),
+      complete: vi.fn(),
+      embed: vi.fn(),
+      completeStructured: vi.fn(async (req: any) => {
+        if (req.schemaName === 'PRIntent') {
+          return {
+            data: { intent: 'x', in_scope: ['something entirely different'], out_of_scope: [] },
+            model: req.model,
+            tokensIn: 10,
+            tokensOut: 5,
+            costUsd: 0.001,
+            raw: '{}',
+            attempts: 1,
+          };
+        }
+        // The review_finding case's own structured call — throws.
+        throw new Error('provider timeout');
+      }),
+    };
+
+    const container = buildContainer({ llm: throwingLlm as unknown as MockLLMProvider });
+    const service = new EvalService(container);
+
+    const result = await service.runBatch(WS_ID, AGENT_ID);
+
+    expect(result.status).toBe('degraded');
+
+    const intentRunCall = insertRunSpy.mock.calls.find((c) => (c[0] as any).caseId === 'case-intent-fail');
+    expect(intentRunCall).toBeDefined();
+    expect((intentRunCall![0] as any).pass).toBe(false); // failed, not errored
+    expect((intentRunCall![0] as any).errorMessage).toBeUndefined();
+
+    const aggArg = updateAggSpy.mock.calls[0]![1];
+    // Driven by the OTHER case's genuine runtime error, not by the failed one.
+    expect(aggArg.status).toBe('degraded');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WS6 (Step 12) — `risk_brief_narrative`-kind cases run through the SAME
+// `generateRiskBriefNarrative()` call production's risk-brief pipeline uses,
+// scored via `scoreRiskBriefCase`.
+// ---------------------------------------------------------------------------
+
+describe('EvalRunOrchestrator — WS6 risk_brief_narrative-kind cases (Step 12)', () => {
+  it('runs a risk_brief_narrative-kind case through generateRiskBriefNarrative and records a passed outcome scored against expected key_points', async () => {
+    const briefCase = makeCaseRow({
+      id: 'case-brief',
+      caseKind: 'risk_brief_narrative',
+      expectedOutput: { key_points: ['rate limiter'] },
+    });
+
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([briefCase] as any);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockResolvedValue(makeBatchRow() as any);
+    const insertRunSpy = vi.spyOn(EvalRepository.prototype, 'insertRun').mockResolvedValue({} as any);
+    vi.spyOn(EvalRepository.prototype, 'updateBatchAggregate').mockResolvedValue(undefined);
+
+    const llm = new MockLLMProvider('openai', {
+      structuredBySchema: {
+        RiskBriefLlmResult: {
+          what: 'Adds a rate limiter middleware.',
+          why: 'Prevents abuse.',
+          risk_level: 'medium',
+          risks: [],
+          review_focus: [],
+        },
+      },
+    });
+
+    const container = buildContainer({ llm });
+    const service = new EvalService(container);
+
+    const result = await service.runBatch(WS_ID, AGENT_ID);
+
+    expect(result.status).toBe('clean');
+    expect(insertRunSpy).toHaveBeenCalledOnce();
+    const runArg = insertRunSpy.mock.calls[0]![0] as any;
+    expect(runArg.pass).toBe(true);
+    expect(runArg.matchedCount).toBe(1);
+    expect(runArg.expectedCount).toBe(1);
+    expect(runArg.precision).toBeNull();
+    expect(runArg.citationAccuracy).toBeNull();
+  });
+
+  it('marks a risk_brief_narrative-kind case failed when a key point is missing (default 1.0 threshold)', async () => {
+    const briefCase = makeCaseRow({
+      id: 'case-brief-fail',
+      caseKind: 'risk_brief_narrative',
+      expectedOutput: { key_points: ['rate limiter', 'circuit breaker'] },
+    });
+
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([briefCase] as any);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockResolvedValue(makeBatchRow() as any);
+    const insertRunSpy = vi.spyOn(EvalRepository.prototype, 'insertRun').mockResolvedValue({} as any);
+    vi.spyOn(EvalRepository.prototype, 'updateBatchAggregate').mockResolvedValue(undefined);
+
+    const llm = new MockLLMProvider('openai', {
+      structuredBySchema: {
+        RiskBriefLlmResult: {
+          what: 'Adds a rate limiter middleware.',
+          why: 'Prevents abuse.',
+          risk_level: 'medium',
+          risks: [],
+          review_focus: [],
+        },
+      },
+    });
+
+    const container = buildContainer({ llm });
+    const service = new EvalService(container);
+
+    await service.runBatch(WS_ID, AGENT_ID);
+
+    const runArg = insertRunSpy.mock.calls[0]![0] as any;
+    expect(runArg.pass).toBe(false);
+    expect(runArg.matchedCount).toBe(1);
+    expect(runArg.expectedCount).toBe(2);
+  });
+
+  it('respects a lenient per-case passing_threshold override, passing a case that would fail at the kind default (1.0)', async () => {
+    const briefCase = makeCaseRow({
+      id: 'case-brief-lenient',
+      caseKind: 'risk_brief_narrative',
+      passingThreshold: 0.5,
+      expectedOutput: { key_points: ['rate limiter', 'circuit breaker'] }, // only 1/2 will match -> 0.5
+    });
+
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([briefCase] as any);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockResolvedValue(makeBatchRow() as any);
+    const insertRunSpy = vi.spyOn(EvalRepository.prototype, 'insertRun').mockResolvedValue({} as any);
+    vi.spyOn(EvalRepository.prototype, 'updateBatchAggregate').mockResolvedValue(undefined);
+
+    const llm = new MockLLMProvider('openai', {
+      structuredBySchema: {
+        RiskBriefLlmResult: {
+          what: 'Adds a rate limiter middleware.',
+          why: 'Prevents abuse.',
+          risk_level: 'medium',
+          risks: [],
+          review_focus: [],
+        },
+      },
+    });
+
+    const container = buildContainer({ llm });
+    const service = new EvalService(container);
+
+    await service.runBatch(WS_ID, AGENT_ID);
+
+    const runArg = insertRunSpy.mock.calls[0]![0] as any;
+    expect(runArg.pass).toBe(true); // 0.5 >= 0.5 override, though it would fail at the 1.0 default
+  });
+
+  it('records an error outcome (not a scored failure) when generateRiskBriefNarrative throws', async () => {
+    const briefCase = makeCaseRow({
+      id: 'case-brief-error',
+      caseKind: 'risk_brief_narrative',
+      expectedOutput: { key_points: [] },
+    });
+
+    vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([briefCase] as any);
+    vi.spyOn(EvalRepository.prototype, 'insertBatch').mockResolvedValue(makeBatchRow() as any);
+    const insertRunSpy = vi.spyOn(EvalRepository.prototype, 'insertRun').mockResolvedValue({} as any);
+    const updateAggSpy = vi.spyOn(EvalRepository.prototype, 'updateBatchAggregate').mockResolvedValue(undefined);
+
+    const throwingLlm = {
+      id: 'openai' as const,
+      listModels: vi.fn(),
+      complete: vi.fn(),
+      embed: vi.fn(),
+      completeStructured: vi.fn(async () => {
+        throw new Error('provider unavailable');
+      }),
+    };
+
+    const container = buildContainer({ llm: throwingLlm as unknown as MockLLMProvider });
+    const service = new EvalService(container);
+
+    const result = await service.runBatch(WS_ID, AGENT_ID);
+
+    expect(result.status).toBe('degraded');
+    const runArg = insertRunSpy.mock.calls[0]![0] as any;
+    expect(runArg.pass).toBeNull();
+    expect(runArg.errorMessage).toContain('provider unavailable');
+    const aggArg = updateAggSpy.mock.calls[0]![1];
     expect(aggArg.status).toBe('degraded');
   });
 });

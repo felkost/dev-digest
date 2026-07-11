@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Verdict, Finding } from './findings.js';
 import { EvalRun, EvalOwnerKind, Conformance, Provider, CiFailOn } from './knowledge.js';
+import { BlockTokenCount } from './trace.js';
 
 /**
  * A4 — Eval / CI / Compose / Conformance API contracts (L06).
@@ -264,6 +265,16 @@ export const CiResultArtifact = z.object({
    * Ingest maps a present value to the `skipped_large` run status.
    */
   skipped_reason: z.string().nullish(),
+  // Cost-surgery instrumentation (mirrors RunTraceCostReport in contracts/trace.ts).
+  // This is CI's durable per-run record — NOT persisted onto `ci_runs` or any DB
+  // table; all seven fields are nullish because older CI runners omit them entirely.
+  block_token_counts: z.array(BlockTokenCount).nullish(),
+  cached_input_tokens: z.number().int().nullish(),
+  cache_control_applied: z.boolean().nullish(),
+  excluded_boilerplate_files: z.array(z.string()).nullish(),
+  excluded_boilerplate_tokens: z.number().int().nullish(),
+  map_reduce_threshold_tokens: z.number().int().nullish(),
+  map_reduce_chunk_count: z.number().int().nullish(),
 });
 export type CiResultArtifact = z.infer<typeof CiResultArtifact>;
 

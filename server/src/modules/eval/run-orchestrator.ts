@@ -1,6 +1,6 @@
 import type { Container } from '../../platform/container.js';
 import type { AgentRow } from '../../db/rows.js';
-import { reviewPullRequest } from '@devdigest/reviewer-core';
+import { reviewPullRequest, classifyIntent } from '@devdigest/reviewer-core';
 import type { Provider } from '@devdigest/shared';
 import { NotFoundError, ValidationError } from '../../platform/errors.js';
 import { parseUnifiedDiff } from '../../adapters/git/diff-parser.js';
@@ -13,9 +13,33 @@ import {
   casePassed,
   computeAgentSnapshot,
   computeCitationAccuracy,
+  intentCasePassed,
+  riskBriefCasePassed,
   scoreCase,
+  scoreIntentCase,
+  scoreRiskBriefCase,
 } from './scoring.js';
-import { expectationsFromJson, formatErrorMessage } from './helpers.js';
+import { expectationsFromJson, expectedIntentFromJson, expectedRiskBriefFromJson, formatErrorMessage } from './helpers.js';
+import { resolveRoutedFeatureModel } from '../../platform/feature-models.js';
+import { loadPromptTemplate, renderTemplate } from '../../platform/prompts.js';
+// `generateRiskBriefNarrative` lives in `platform/risk-brief.ts` (not
+// `modules/reviews`) precisely so this module can reuse the risk-brief
+// pipeline's ONE structured LLM call verbatim without a forbidden
+// `modules/eval` → `modules/reviews` cross-import (R6, see
+// `server/src/modules/AGENTS.md`).
+import { generateRiskBriefNarrative } from '../../platform/risk-brief.js';
+
+/**
+ * System-prompt template filename for the risk-brief narrative pipeline —
+ * mirrors `modules/reviews/brief-generator.ts`'s own (unexported)
+ * `RISK_BRIEF_SYSTEM_PROMPT_PATH` constant/value exactly. Kept as a literal
+ * duplicate of the FILENAME only (not the prompt TEXT — that stays loaded
+ * live via `loadPromptTemplate`, never copy-pasted) because the source
+ * constant isn't exported and this module may not reach into another
+ * module's internals even for a re-export (R6). If that filename ever
+ * changes, update both copies.
+ */
+const RISK_BRIEF_SYSTEM_PROMPT_TEMPLATE = 'risk-brief.system.md';
 
 type EvalCaseRow = typeof t.evalCases.$inferSelect;
 type EvalBatchRow = typeof t.evalBatches.$inferSelect;
@@ -168,7 +192,7 @@ export class EvalRunOrchestrator {
     let anyError = false;
 
     await this.runWithConcurrencyCap(targetCases, CONCURRENCY, async (caseRow) => {
-      const outcome = await this.runOneCase(agent, skillBodies, caseRow, batch.id).catch(async (err: unknown) => {
+      const outcome = await this.runOneCase(agent, skillBodies, caseRow, batch.id, batch.workspaceId).catch(async (err: unknown) => {
         log?.error({ err, caseId: caseRow.id, batchId: batch.id }, 'eval: unexpected case-run failure');
         // `runOneCase` itself never throws (its own try/catch always resolves
         // with a CaseRunOutcome) — reaching here means the failure happened
@@ -281,14 +305,25 @@ export class EvalRunOrchestrator {
     return { batchId: batch.id, kind: batch.kind, status };
   }
 
-  /** Run one case's review + score it; never throws — runtime failures are
-   *  captured as an 'error' outcome so the rest of the batch proceeds (AC-15/16). */
+  /**
+   * Run one case's review + score it; never throws — runtime failures are
+   * captured as an 'error' outcome so the rest of the batch proceeds
+   * (AC-15/16). WS6 (Step 12): dispatches to a dedicated method per
+   * `caseRow.caseKind` — the `'review_finding'` branch below (the historical
+   * default, `?? 'review_finding'` defensive against pre-WS6/legacy rows) is
+   * UNCHANGED from before WS6.
+   */
   private async runOneCase(
     agent: AgentRow,
     skillBodies: string[],
     caseRow: EvalCaseRow,
     batchId: string,
+    workspaceId: string,
   ): Promise<CaseRunOutcome> {
+    const kind = caseRow.caseKind ?? 'review_finding';
+    if (kind === 'intent') return this.runOneIntentCase(agent, caseRow, batchId, workspaceId);
+    if (kind === 'risk_brief_narrative') return this.runOneRiskBriefCase(agent, caseRow, batchId, workspaceId);
+
     const start = Date.now();
     const expectations = expectationsFromJson(caseRow.expectedOutput);
 
@@ -389,6 +424,264 @@ export class EvalRunOrchestrator {
         actualFindingsCount: 0,
       };
     }
+  }
+
+  /**
+   * Run a single `intent`-kind eval case (WS6, Step 12): classify the case's
+   * stored PR-like metadata via the SAME `classifyIntent()` cheap-tier
+   * pre-pass production uses (`run-executor.ts`), routed through
+   * `resolveRoutedFeatureModel` exactly like `risk_brief` below, then score
+   * the result against the case's `{ in_scope, out_of_scope }` expectations
+   * (`scoreIntentCase`/`intentCasePassed`). Never throws — same never-throw
+   * contract as the `review_finding` branch above; a runtime failure
+   * (provider error/timeout, malformed `expected_output`) is caught and
+   * turned into an 'error' outcome so the rest of the batch proceeds.
+   *
+   * `recall` REUSE (documented once here, applies identically to
+   * `runOneRiskBriefCase` below): intent cases have no must_find/
+   * must_not_flag concept, so `precision`/`citationAccuracy` stay `null` on
+   * the persisted run — the generic `recall` column is reused to carry this
+   * case kind's own `matched/total` ratio instead, so the Case Editor's
+   * existing "recall X%" read path keeps working without a new column.
+   */
+  private async runOneIntentCase(
+    agent: AgentRow,
+    caseRow: EvalCaseRow,
+    batchId: string,
+    workspaceId: string,
+  ): Promise<CaseRunOutcome> {
+    const start = Date.now();
+
+    try {
+      const meta = (caseRow.inputMeta as { title?: string; body?: string; filesSummary?: string } | null) ?? {};
+      const title = meta.title ?? caseRow.name;
+      const body = meta.body ?? '';
+      const filesSummary = meta.filesSummary ?? this.deriveFilesSummary(caseRow);
+
+      const { provider, model } = await resolveRoutedFeatureModel(
+        this.container,
+        workspaceId,
+        'review_intent',
+        'intent',
+        agent.provider as Provider,
+      );
+      const llm = await this.container.llm(provider);
+
+      const classifyResult = await classifyIntent({
+        title,
+        body,
+        filesSummary,
+        llm,
+        model,
+        sessionId: `eval:${batchId}:${caseRow.id}`,
+      });
+      // Same destructure shape `run-executor.ts` uses at its own classifyIntent
+      // call site — strips the token/cost accounting fields, leaving the plain
+      // `Intent` shape (`intent`/`in_scope`/`out_of_scope`) for scoring/storage.
+      // (`tokensIn`/`tokensOut` are intentionally unused here — only `costUsd`
+      // is persisted; `noUnusedLocals` is off in this project's tsconfig.)
+      const { tokensIn: _tokensInUnused, tokensOut: _tokensOutUnused, costUsd, ...intent } = classifyResult;
+
+      const expected = expectedIntentFromJson(caseRow.expectedOutput);
+      const scoreResult = scoreIntentCase(intent, expected);
+      const passed = intentCasePassed(scoreResult, caseRow.passingThreshold ?? undefined);
+      const durationMs = Date.now() - start;
+
+      await this.repo.insertRun({
+        caseId: caseRow.id,
+        batchId,
+        actualOutput: intent,
+        pass: passed,
+        recall: scoreResult.total === 0 ? null : scoreResult.matched / scoreResult.total,
+        precision: null,
+        citationAccuracy: null,
+        durationMs,
+        costUsd,
+        matchedCount: scoreResult.matched,
+        expectedCount: scoreResult.total,
+      } satisfies EvalRunInsert);
+
+      return {
+        caseRow,
+        status: passed ? 'passed' : 'failed',
+        scoreResult: null,
+        keptFindingsCount: null,
+        droppedFindingsCount: null,
+        citationAccuracy: null,
+        costUsd,
+        durationMs,
+        actualFindingsCount: 0,
+      };
+    } catch (err) {
+      const durationMs = Date.now() - start;
+      await this.repo
+        .insertRun({
+          caseId: caseRow.id,
+          batchId,
+          actualOutput: null,
+          pass: null,
+          recall: null,
+          precision: null,
+          citationAccuracy: null,
+          durationMs,
+          costUsd: null,
+          matchedCount: null,
+          expectedCount: null,
+          errorMessage: formatErrorMessage(err),
+        } satisfies EvalRunInsert)
+        .catch(() => undefined);
+
+      return {
+        caseRow,
+        status: 'error',
+        scoreResult: null,
+        keptFindingsCount: null,
+        droppedFindingsCount: null,
+        citationAccuracy: null,
+        costUsd: null,
+        durationMs,
+        actualFindingsCount: 0,
+      };
+    }
+  }
+
+  /**
+   * Run a single `risk_brief_narrative`-kind eval case (WS6, Step 12):
+   * generate the SAME structured risk-brief narrative production uses
+   * (`generateRiskBriefNarrative`, reused directly per this file's top-level
+   * cross-module-import note — never a duplicated LLM call), then score it
+   * against the case's `{ key_points }` expectations
+   * (`scoreRiskBriefCase`/`riskBriefCasePassed`). The `input` string is built
+   * DIRECTLY from `caseRow.inputDiff` — `BriefGeneratorService.generate`'s
+   * full live-PR fact-gathering pipeline (blast radius, context docs, prior
+   * findings) is deliberately SKIPPED here; the stored diff alone is a
+   * proportionate eval input for scoring the narrative pipeline's prompt/
+   * model behavior. Never throws — same never-throw contract as the other
+   * two branches.
+   */
+  private async runOneRiskBriefCase(
+    agent: AgentRow,
+    caseRow: EvalCaseRow,
+    batchId: string,
+    workspaceId: string,
+  ): Promise<CaseRunOutcome> {
+    const start = Date.now();
+
+    try {
+      const { provider, model } = await resolveRoutedFeatureModel(
+        this.container,
+        workspaceId,
+        'risk_brief',
+        'summary',
+        agent.provider as Provider,
+      );
+      const llm = await this.container.llm(provider);
+
+      // Same loader MECHANISM `brief-generator.ts`'s own (unexported)
+      // `loadSystemPrompt()` uses (`loadPromptTemplate` + `renderTemplate`) —
+      // never a duplicated copy of the prompt TEXT. A missing template file
+      // throws ENOENT here, caught by this method's own try/catch below
+      // (unlike `brief-generator.ts`, which degrades to an inline
+      // placeholder — an eval run failing loudly on a missing prompt file is
+      // preferable to silently scoring against placeholder text).
+      const template = await loadPromptTemplate(RISK_BRIEF_SYSTEM_PROMPT_TEMPLATE);
+      const systemPrompt = renderTemplate(template, {});
+
+      const input = caseRow.inputDiff ?? '';
+      const result = await generateRiskBriefNarrative(llm, model, systemPrompt, input);
+
+      const expected = expectedRiskBriefFromJson(caseRow.expectedOutput);
+      const scoreResult = scoreRiskBriefCase(result.data, expected.key_points);
+      const passed = riskBriefCasePassed(scoreResult, caseRow.passingThreshold ?? undefined);
+      const durationMs = Date.now() - start;
+
+      await this.repo.insertRun({
+        caseId: caseRow.id,
+        batchId,
+        actualOutput: result.data,
+        pass: passed,
+        recall: scoreResult.total === 0 ? null : scoreResult.matched / scoreResult.total,
+        precision: null,
+        citationAccuracy: null,
+        durationMs,
+        costUsd: result.costUsd,
+        matchedCount: scoreResult.matched,
+        expectedCount: scoreResult.total,
+      } satisfies EvalRunInsert);
+
+      return {
+        caseRow,
+        status: passed ? 'passed' : 'failed',
+        scoreResult: null,
+        keptFindingsCount: null,
+        droppedFindingsCount: null,
+        citationAccuracy: null,
+        costUsd: result.costUsd,
+        durationMs,
+        actualFindingsCount: 0,
+      };
+    } catch (err) {
+      const durationMs = Date.now() - start;
+      await this.repo
+        .insertRun({
+          caseId: caseRow.id,
+          batchId,
+          actualOutput: null,
+          pass: null,
+          recall: null,
+          precision: null,
+          citationAccuracy: null,
+          durationMs,
+          costUsd: null,
+          matchedCount: null,
+          expectedCount: null,
+          errorMessage: formatErrorMessage(err),
+        } satisfies EvalRunInsert)
+        .catch(() => undefined);
+
+      return {
+        caseRow,
+        status: 'error',
+        scoreResult: null,
+        keptFindingsCount: null,
+        droppedFindingsCount: null,
+        citationAccuracy: null,
+        costUsd: null,
+        durationMs,
+        actualFindingsCount: 0,
+      };
+    }
+  }
+
+  /**
+   * Fallback `filesSummary` for an `intent`-kind case whose `inputMeta`
+   * doesn't carry one: first try `caseRow.inputFiles` (jsonb; may hold a
+   * plain array of file path strings or `{ path, ... }` objects, depending on
+   * how the case was authored), else derive one from the case's OWN stored
+   * diff — always present/valid per `createCaseManual`'s own diff-parses-to-
+   * at-least-one-file validation — using the same shape (`path
+   * (+additions/-deletions)` + `@@` hunk headers) `run-executor.ts`'s
+   * `buildFilesSummary` builds for the production intent pre-pass,
+   * reimplemented locally per module isolation (R6 — cannot import
+   * `reviews/run-executor.ts`).
+   */
+  private deriveFilesSummary(caseRow: EvalCaseRow): string {
+    if (Array.isArray(caseRow.inputFiles) && caseRow.inputFiles.length > 0) {
+      const paths = caseRow.inputFiles
+        .map((f) => (typeof f === 'string' ? f : (f as { path?: unknown })?.path))
+        .filter((p): p is string => typeof p === 'string' && p.length > 0);
+      if (paths.length > 0) return paths.join('\n');
+    }
+
+    const diff = parseUnifiedDiff(caseRow.inputDiff ?? '');
+    return diff.files
+      .map((f) => {
+        const hunkHeaders = f.hunks
+          .map((h) => `  @@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`)
+          .join('\n');
+        return `${f.path} (+${f.additions}/-${f.deletions})${hunkHeaders ? '\n' + hunkHeaders : ''}`;
+      })
+      .join('\n\n');
   }
 
   /** Bounded-concurrency map over `items`, awaiting all before returning

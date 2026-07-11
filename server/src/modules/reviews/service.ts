@@ -10,7 +10,7 @@ import { actOnFinding as actOnFindingImpl } from './findings.js';
 import { reviewToDto } from './helpers.js';
 import * as pullRepo from './repository/pull.repo.js';
 import * as reviewRepo from './repository/review.repo.js';
-import { classifyFile } from './smart-diff-rules.js';
+import { classifyFile } from '@devdigest/reviewer-core';
 import { eq, and, desc } from 'drizzle-orm';
 import * as t from '../../db/schema.js';
 

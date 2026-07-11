@@ -134,6 +134,10 @@ export class AnthropicProvider implements LLMProvider {
     const messages: Anthropic.MessageParam[] = [...rest];
     let tokensIn = 0;
     let tokensOut = 0;
+    // Sum of `usage.cache_read_input_tokens` across attempts. Starts `undefined`
+    // ("never reported") and only becomes a number once the SDK actually reports
+    // one (including a genuine 0) — never coerced from a missing/null field.
+    let cachedTokens: number | undefined;
     let lastRaw = '';
     let lastError = '';
 
@@ -142,7 +146,14 @@ export class AnthropicProvider implements LLMProvider {
         withTimeout(
           this.createMessage({
             model: req.model,
-            system: system || undefined,
+            // Mark the system prefix as a cacheable breakpoint (Anthropic prompt
+            // caching): the array-of-blocks form lets us attach `cache_control`,
+            // which a plain string `system` param cannot express. This flows
+            // through createMessage's temperature-strip retry unchanged, since
+            // that retry only destructures `temperature` out of the same params.
+            system: system
+              ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+              : undefined,
             messages,
             max_tokens: req.maxTokens ?? STRUCTURED_MAX_TOKENS,
             temperature: req.temperature ?? 0,
@@ -160,6 +171,10 @@ export class AnthropicProvider implements LLMProvider {
       );
       tokensIn += res.usage.input_tokens;
       tokensOut += res.usage.output_tokens;
+      const cacheReadTokens = res.usage.cache_read_input_tokens;
+      if (typeof cacheReadTokens === 'number') {
+        cachedTokens = (cachedTokens ?? 0) + cacheReadTokens;
+      }
 
       const toolUse = res.content.find(
         (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
@@ -176,6 +191,11 @@ export class AnthropicProvider implements LLMProvider {
           costUsd: estimateCost(req.model, tokensIn, tokensOut),
           raw: lastRaw,
           attempts: attempt,
+          cachedTokens,
+          // The system-prefix cache_control breakpoint above is always applied
+          // (when a system prompt is present); whether it produced a cache hit
+          // is reported separately via `cachedTokens`.
+          cacheControlApplied: true,
         };
       }
       lastError = parsed.error;

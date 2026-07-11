@@ -1,17 +1,23 @@
 import type { Container } from '../../platform/container.js';
 import type { Provider, Review, RunTrace, RunTraceContextDoc, UnifiedDiff } from '@devdigest/shared';
-import { reviewPullRequest, countBlockers, classifyIntent } from '@devdigest/reviewer-core';
+import {
+  reviewPullRequest,
+  countBlockers,
+  classifyIntent,
+  classifyFile,
+  excludeBoilerplateFiles,
+  countPromptAssemblyBlocks,
+} from '@devdigest/reviewer-core';
 import type { Intent } from '@devdigest/shared';
 import { RunLogger } from '../../platform/run-logger.js';
 import * as schema from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
 import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './repository.js';
 import { REVIEW_STRATEGY, MULTI_AGENT_CONCURRENCY_CAP } from './constants.js';
-import { taskLine } from './helpers.js';
+import { taskLine, resolveIntentModel } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
 import { composePrBrief } from './brief-composer.js';
-import { routeModel } from '../../platform/model-router.js';
-import { classifyFile } from './smart-diff-rules.js';
+import type { Provider as ModelRouterProvider } from '../../platform/model-router.js';
 import { resolveConfinedPath } from '../context-docs/helpers.js';
 
 /**
@@ -229,9 +235,16 @@ export class ReviewRunExecutor {
     try {
       intent = await this.repo.getIntent(pull.id);
       if (!intent) {
-        const firstProvider = (jobs[0]?.agent.provider ?? 'anthropic') as Parameters<typeof routeModel>[1];
-        const intentModel = routeModel('intent', firstProvider);
-        const intentLlm = await this.container.llm(firstProvider);
+        const firstProvider = (jobs[0]?.agent.provider ?? 'anthropic') as ModelRouterProvider;
+        // A `review_intent` feature-model override may point at a DIFFERENT
+        // provider than `firstProvider` — the resolved provider always drives
+        // which LLM client is built, never the fallback passed in above.
+        const { provider: intentProvider, model: intentModel } = await resolveIntentModel(
+          this.container,
+          workspaceId,
+          firstProvider,
+        );
+        const intentLlm = await this.container.llm(intentProvider);
         const filesSummary = buildFilesSummary(diff);
         const intentStart = Date.now();
         const result = await classifyIntent({
@@ -440,12 +453,26 @@ export class ReviewRunExecutor {
       //
       // Trim the diff to fit within the model's context window BEFORE sending.
       // Core files are kept first; boilerplate dropped last when over budget.
-      const budgetedDiff = this.budgetDiff(diff, agent.model, runLog);
+      // Boilerplate exclusion runs UNCONDITIONALLY — before the token-budget
+      // trim below — so lockfiles/generated/minified files never reach the LLM
+      // even when the whole diff already fits comfortably under budget. This is
+      // a distinct step from `budgetDiff`, which only trims when OVER budget.
+      const { diff: unboilerplatedDiff, excludedFiles, excludedTokensEstimate } = excludeBoilerplateFiles(
+        diff,
+        this.container.tokenizer.count.bind(this.container.tokenizer),
+      );
+      runLog.info(
+        excludedFiles.length > 0
+          ? `boilerplate filter: ${excludedFiles.length} file(s) excluded (~${excludedTokensEstimate} tokens avoided)`
+          : 'boilerplate filter: 0 files excluded',
+      );
+      const budgetedDiff = this.budgetDiff(unboilerplatedDiff, agent.model, runLog);
       const outcome = await reviewPullRequest({
         systemPrompt: agent.systemPrompt,
         model: agent.model,
         diff: budgetedDiff,
         llm,
+        countTokens: this.container.tokenizer.count.bind(this.container.tokenizer),
         // Per-agent review strategy (configured in the Agent editor); falls back
         // to the studio default. single-pass = whole diff in one call.
         strategy: agent.strategy ?? REVIEW_STRATEGY,
@@ -478,7 +505,19 @@ export class ReviewRunExecutor {
       partialOutcomeKnown = true;
       partialGrounding = outcome.grounding;
       partialFindingsCount = outcome.review.findings.length;
-      const { tokensIn, tokensOut, grounding } = outcome;
+      const {
+        tokensIn,
+        tokensOut,
+        grounding,
+        cachedInputTokens,
+        cacheControlApplied,
+        mapReduceThresholdTokens,
+        mapReduceChunkCount,
+      } = outcome;
+      const blockTokens = countPromptAssemblyBlocks(
+        outcome.assembly,
+        this.container.tokenizer.count.bind(this.container.tokenizer),
+      );
 
       const keptFindings = outcome.review.findings;
 
@@ -539,6 +578,15 @@ export class ReviewRunExecutor {
           findings: findingRows.length,
           grounding,
           cost_usd: outcome.costUsd ?? null,
+        },
+        cost_report: {
+          block_token_counts: blockTokens,
+          cached_input_tokens: cachedInputTokens,
+          cache_control_applied: cacheControlApplied,
+          excluded_boilerplate_files: excludedFiles,
+          excluded_boilerplate_tokens: excludedTokensEstimate,
+          map_reduce_threshold_tokens: mapReduceThresholdTokens,
+          map_reduce_chunk_count: mapReduceChunkCount,
         },
         prompt_assembly: outcome.assembly,
         tool_calls: outcome.chunks.map((c) => ({

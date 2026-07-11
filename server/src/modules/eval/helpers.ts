@@ -28,6 +28,34 @@ export function expectationsFromJson(raw: unknown): Expectation[] {
   return raw as Expectation[];
 }
 
+/**
+ * `eval_cases.expected_output` for an `intent`-kind case (WS6) — parse
+ * defensively to `{ in_scope: string[]; out_of_scope: string[] }`. Missing/
+ * malformed fields default to empty arrays rather than throwing, mirroring
+ * `expectationsFromJson`'s defensive-parse convention for untyped JSONB.
+ */
+export function expectedIntentFromJson(raw: unknown): { in_scope: string[]; out_of_scope: string[] } {
+  const obj = (raw as { in_scope?: unknown; out_of_scope?: unknown } | null) ?? {};
+  return {
+    in_scope: Array.isArray(obj.in_scope) ? obj.in_scope.filter((v): v is string => typeof v === 'string') : [],
+    out_of_scope: Array.isArray(obj.out_of_scope)
+      ? obj.out_of_scope.filter((v): v is string => typeof v === 'string')
+      : [],
+  };
+}
+
+/**
+ * `eval_cases.expected_output` for a `risk_brief_narrative`-kind case (WS6) —
+ * parse defensively to `{ key_points: string[] }`. Same defensive-parse
+ * convention as `expectedIntentFromJson`/`expectationsFromJson` above.
+ */
+export function expectedRiskBriefFromJson(raw: unknown): { key_points: string[] } {
+  const obj = (raw as { key_points?: unknown } | null) ?? {};
+  return {
+    key_points: Array.isArray(obj.key_points) ? obj.key_points.filter((v): v is string => typeof v === 'string') : [],
+  };
+}
+
 /** Cap on the persisted `error_message` string — long provider stack traces
  *  or response bodies must not bloat the `eval_runs` row. */
 const ERROR_MESSAGE_MAX_LENGTH = 2000;
@@ -147,6 +175,12 @@ export function caseListItem(
     last_run_duration_ms: latestRun?.durationMs ?? null,
     last_run_cost_usd: latestRun?.costUsd ?? null,
     notes: row.notes,
+    // WS6 — eval methodology + per-case threshold override (migration 0026).
+    // `caseKind` defaults 'review_finding' at the DB level (never actually
+    // null), but `?? 'review_finding'` is defensive against pre-migration
+    // fixtures/rows a test or a stale read might still produce.
+    case_kind: row.caseKind ?? 'review_finding',
+    passing_threshold: row.passingThreshold,
   };
 }
 

@@ -117,6 +117,9 @@ interface FakeDbOpts {
   intentRow?: Record<string, unknown> | null;
   findingRows?: Record<string, unknown>[];
   briefRow?: Record<string, unknown> | null;
+  /** `settings` table rows (key/value) — used to simulate a workspace's
+   * `feature_models` override for `resolveRoutedFeatureModel` (AC-13). */
+  settingsRows?: Record<string, unknown>[];
   transactionSpy?: (kind: 'select' | 'insert' | 'update') => void;
 }
 
@@ -147,6 +150,7 @@ function makeFakeDb(opts: FakeDbOpts) {
   const prFileRows = opts.prFileRows ?? PR_FILE_ROWS;
   const intentRow = 'intentRow' in opts ? opts.intentRow : null;
   const findingRows = opts.findingRows ?? [];
+  const settingsRows = opts.settingsRows ?? [];
   let briefRow = 'briefRow' in opts ? opts.briefRow : null;
   let noColsCallIndex = 0;
 
@@ -172,8 +176,10 @@ function makeFakeDb(opts: FakeDbOpts) {
         return makeChain(() => findingRows);
       }
       if ('key' in cols && 'value' in cols) {
-        // resolveFeatureModel's settings read — no workspace override configured.
-        return makeChain(() => []);
+        // resolveRoutedFeatureModel's settings read — empty by default (no
+        // workspace override configured); tests inject `settingsRows` to
+        // simulate an active override.
+        return makeChain(() => settingsRows);
       }
       return makeChain(() => []);
     },
@@ -341,6 +347,39 @@ describe('BriefGeneratorService.generate — happy path', () => {
     expect(focusItem).toBeDefined();
     expect(focusItem?.line).toBe(22);
     expect(focusItem?.github_link).toBe('https://github.com/acme/api/blob/deadbeef/src/middleware/ratelimit.ts#L22');
+  });
+
+  it('with no workspace `risk_brief` override, routes to the cheap-tier model for the registry default provider (AC-12)', async () => {
+    const llm = new MockLLMProvider('openrouter', { structured: NARRATIVE_FIXTURE });
+    const container = makeContainer({ llm });
+    const service = new BriefGeneratorService(container);
+
+    await service.generate(WS_ID, PR_ID);
+
+    const call = llm.calls.find((c) => c.method === 'completeStructured');
+    expect(call).toBeDefined();
+    // 'risk_brief' registry default provider is 'openai' (contracts/platform.ts);
+    // 'summary' is a cheap task in model-router.ts → gpt-4o-mini, not the
+    // capable-tier gpt-4.1 the un-routed resolver used to select.
+    expect((call!.req as { model: string }).model).toBe('gpt-4o-mini');
+  });
+
+  it('an active workspace `risk_brief` override wins verbatim over the cheap-tier route (AC-13)', async () => {
+    const llm = new MockLLMProvider('openrouter', { structured: NARRATIVE_FIXTURE });
+    const settingsRows = [
+      {
+        key: 'feature_models',
+        value: { risk_brief: { provider: 'anthropic', model: 'claude-sonnet-4-6' } },
+      },
+    ];
+    const container = makeContainer({ llm, dbOpts: { settingsRows } });
+    const service = new BriefGeneratorService(container);
+
+    await service.generate(WS_ID, PR_ID);
+
+    const call = llm.calls.find((c) => c.method === 'completeStructured');
+    expect(call).toBeDefined();
+    expect((call!.req as { model: string }).model).toBe('claude-sonnet-4-6');
   });
 
   it('logs exactly one structured completion line (AC-11/§12)', async () => {

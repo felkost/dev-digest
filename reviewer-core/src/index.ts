@@ -38,6 +38,7 @@ export { reduceReviews, sliceDiff } from './review/reduce.js';
 export {
   reviewPullRequest,
   DEFAULT_MAP_THRESHOLD_LINES,
+  DEFAULT_MAP_THRESHOLD_TOKENS,
   DEFAULT_REVIEW_MAX_RETRIES,
   type ReviewInput,
   type ReviewOutcome,
@@ -60,3 +61,16 @@ export { OpenRouterProvider, type OpenRouterProviderOptions } from './llm/openro
 
 // Intent classifier — cheap-model pre-pass that infers PR scope before the main review.
 export { classifyIntent, type IntentInput } from './intent/classify.js';
+
+// Token counting + boilerplate exclusion + per-block token reporting — the
+// single canonical implementations shared by the server (repo-map budget
+// search, cost surgery) and the CI runner. Zero I/O.
+export { countTokens, type TokenCounter } from './tokens.js';
+export {
+  classifyFile,
+  LOCK_FILE_NAMES,
+  BOILERPLATE_EXTENSIONS,
+  ROLE_PATTERNS,
+} from './review/classify.js';
+export { excludeBoilerplateFiles } from './review/boilerplate.js';
+export { countPromptAssemblyBlocks } from './review/token-report.js';

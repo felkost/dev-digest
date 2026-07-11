@@ -12,10 +12,10 @@ import type { Container } from '../../platform/container.js';
 import { NotFoundError, AppError } from '../../platform/errors.js';
 import type { Intent, PrBrief, Risk } from '@devdigest/shared';
 import { loadPromptTemplate, renderTemplate } from '../../platform/prompts.js';
-import { resolveFeatureModel } from '../settings/feature-models.js';
-import { classifyFile } from './smart-diff-rules.js';
+import { resolveRoutedFeatureModel, defaultFeatureModel } from '../../platform/feature-models.js';
+import { generateRiskBriefNarrative, type RiskBriefLlmResult } from '../../platform/risk-brief.js';
+import { classifyFile } from '@devdigest/reviewer-core';
 import * as pullRepo from './repository/pull.repo.js';
-import { RiskBriefLlmResult } from './constants.js';
 import {
   assembleLlmInput,
   validateReferences,
@@ -180,23 +180,22 @@ export class BriefGeneratorService {
       container.tokenizer.count.bind(container.tokenizer),
     );
 
-    // e. Resolve the pre-registered feature model.
-    const { provider, model } = await resolveFeatureModel(container, workspaceId, 'risk_brief');
+    // e. Resolve the feature model — cheap-tier by default (AC-12), unless the
+    // workspace has an active `risk_brief` override, which wins verbatim (AC-13).
+    const { provider, model } = await resolveRoutedFeatureModel(
+      container,
+      workspaceId,
+      'risk_brief',
+      'summary',
+      defaultFeatureModel('risk_brief').provider,
+    );
     const llm = await container.llm(provider);
     const systemPrompt = await loadSystemPrompt();
 
     // f. The ONE structured LLM call.
     let result;
     try {
-      result = await llm.completeStructured({
-        model,
-        schema: RiskBriefLlmResult,
-        schemaName: 'RiskBriefLlmResult',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: input },
-        ],
-      });
+      result = await generateRiskBriefNarrative(llm, model, systemPrompt, input);
     } catch (err) {
       log.error({ prId, err: (err as Error).message }, 'risk-brief: generation failed');
       throw new AppError('brief_generation_failed', 'Risk brief generation failed', 502);

@@ -39,6 +39,63 @@ strategy: "single-pass"
 ci_fail_on: "critical"
 `;
 
+/** Same as `VALID_MANIFEST_YAML` but forces map-reduce mode (any multi-file
+ *  diff, regardless of size — see `selectMode` in reviewer-core/review/run.ts). */
+const MAP_REDUCE_MANIFEST_YAML = `
+name: "Security Reviewer"
+provider: "openrouter"
+model: "deepseek/deepseek-v4-flash"
+system_prompt: "Review this PR for security issues."
+skills: []
+strategy: "map-reduce"
+ci_fail_on: "critical"
+`;
+
+/** A real file change plus a `pnpm-lock.yaml` change — the lock file is
+ *  boilerplate (`classifyFile`) and must be excluded from the diff sent to
+ *  the LLM before it ever reaches `reviewPullRequest` (CI parity with the
+ *  studio's boilerplate exclusion). */
+const FIXTURE_DIFF_WITH_LOCKFILE_RAW = `diff --git a/src/config.ts b/src/config.ts
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -9,3 +9,4 @@
+ host: 'localhost',
++apiKey: 'sk_live_abcdef123456',
+ port: 3000,
+ timeout: 30,
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -1,2 +1,3 @@
+ lockfileVersion: '6.0'
++  some-package: 1.2.3
+ settings:
+`;
+
+/** A zero-finding review — used by the map-reduce chunk-count test, where
+ *  the specific findings don't matter, only how many `completeStructured`
+ *  calls (chunks) the engine made. */
+const EMPTY_REVIEW: Review = {
+  verdict: 'approve',
+  summary: 'no findings',
+  score: 100,
+  findings: [],
+};
+
+/** Build a raw unified diff with `count` tiny, independent single-line-change
+ *  files (per the reviewer-core insights.md fixture pattern: chained
+ *  `diff --git`/`---`/`+++`/`@@` blocks; hunk header counts don't need to
+ *  match the real line counts). Each file's diff text is small (well under
+ *  the default 6000-token map-reduce threshold, even summed across `count`
+ *  files), so the token-budgeted bin-packer in `buildMapReduceChunks` should
+ *  merge them all into far fewer chunks than files. */
+function manySmallFilesDiff(count: number): string {
+  return Array.from({ length: count }, (_, i) => {
+    const p = `src/file${i}.ts`;
+    return `diff --git a/${p} b/${p}\n--- a/${p}\n+++ b/${p}\n@@ -1,1 +1,2 @@\n const a = 1;\n+const b = ${i};\n`;
+  }).join('');
+}
+
 /** A grounded CRITICAL finding (line 10 is covered by the fixture hunk) plus a
  *  hallucinated finding on line 999 (outside every hunk) the grounding gate
  *  must drop. The model's self-reported verdict is deliberately WRONG
@@ -391,5 +448,62 @@ describe('runCi (T8 agent-runner orchestrator)', () => {
     });
 
     expect(result.posted!.payload).toEqual(directPayload);
+  });
+
+  it('CI reach: boilerplate exclusion — a lock-file change is excluded from the reviewed diff and never surfaces as a posted finding', async () => {
+    const stub = makeStubLlm(GROUNDED_PLUS_HALLUCINATED_REVIEW);
+    const { fetchImpl, calls } = makeFetchRecorder();
+    const result = await runCi(
+      baseDeps({
+        llm: stub.llm,
+        fetchDiff: async () => FIXTURE_DIFF_WITH_LOCKFILE_RAW,
+        fetchImpl,
+        postAs: 'github_review',
+      }),
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.artifact).not.toBeNull();
+    expect(result.artifact!.excluded_boilerplate_files).toContain('pnpm-lock.yaml');
+    expect(result.artifact!.excluded_boilerplate_tokens).toBeGreaterThan(0);
+
+    // The assembled prompt sent to the LLM never included the lock-file diff —
+    // proof the exclusion actually shaped what reviewPullRequest saw, not just
+    // what got reported on the artifact.
+    expect(stub.capturedMessages).toHaveLength(1);
+    const userMessage = stub.capturedMessages[0]!.find((m) => m.role === 'user')!.content;
+    expect(userMessage).not.toContain('pnpm-lock.yaml');
+    expect(userMessage).toContain('src/config.ts');
+
+    // The posted review never anchors an inline comment to the excluded file.
+    const body = JSON.parse(calls[0]!.body!) as { comments?: { path: string }[] };
+    for (const c of body.comments ?? []) {
+      expect(c.path).not.toBe('pnpm-lock.yaml');
+    }
+
+    // Written artifact still round-trips through the shared Zod contract.
+    const onDisk = JSON.parse(readFileSync(resultPath, 'utf8')) as unknown;
+    expect(CiResultArtifactSchema.safeParse(onDisk).success).toBe(true);
+  });
+
+  it('CI reach: map-reduce chunk count — many small files bin-pack into far fewer chunks than files under the default token threshold', async () => {
+    writeFileSync(path.join(dir, 'agents', 'security-reviewer.yaml'), MAP_REDUCE_MANIFEST_YAML);
+    const NUM_FILES = 12;
+    const stub = makeStubLlm(EMPTY_REVIEW);
+    const result = await runCi(
+      baseDeps({ llm: stub.llm, fetchDiff: async () => manySmallFilesDiff(NUM_FILES) }),
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.artifact).not.toBeNull();
+    const chunkCount = result.artifact!.map_reduce_chunk_count;
+    expect(chunkCount).not.toBeNull();
+    expect(chunkCount).not.toBeUndefined();
+    expect(chunkCount!).toBeGreaterThan(0);
+    expect(chunkCount!).toBeLessThan(NUM_FILES);
+    // One completeStructured call per chunk — the engine actually ran fewer
+    // LLM calls than there were files, not just fewer chunks on paper.
+    expect(stub.capturedMessages).toHaveLength(chunkCount!);
+    expect(result.artifact!.map_reduce_threshold_tokens).not.toBeNull();
   });
 });

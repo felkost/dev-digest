@@ -26,6 +26,18 @@ const RECENT_BATCHES_CAP = 25;
 const SPARKLINE_POINTS_CAP = 8;
 
 /**
+ * WS6 — the owner kind `createCaseManual` writes (always `'agent'`: this
+ * method only ever backs the agent-scoped `POST /agents/:id/evals` route).
+ * Declared as a function (not an inline `const`) so its return type — the
+ * full `'agent' | 'skill'` union — survives at call sites for the
+ * intent/risk_brief_narrative-are-agent-owned-only guard's comparison; see
+ * that guard's call site for why an inline literal `const` doesn't work.
+ */
+function manualCaseOwnerKind(): 'agent' | 'skill' {
+  return 'agent';
+}
+
+/**
  * EvalService — case CRUD + read-side batch/trend/compare composition. Batch
  * *execution* lives in `EvalRunOrchestrator` (kept separate to stay under the
  * ~300-line sub-plugin threshold documented in `server/insights.md`).
@@ -170,23 +182,52 @@ export class EvalService {
     return caseListItem(row, null, false);
   }
 
-  /** Hand-authored case (AC-7/AC-8): the diff fragment must parse to at least
-   *  one file, or the save fails without persisting anything. */
+  /**
+   * Hand-authored case (AC-7/AC-8): the diff fragment must parse to at least
+   * one file, or the save fails without persisting anything.
+   *
+   * WS6 — `case_kind`/`passing_threshold` pass through to `repo.insertCase`
+   * as-is (no repository signature change: `insertCase` already accepts the
+   * full generic `EvalCaseInsert`). `ownerKind` is hardcoded `'agent'` in
+   * THIS method (it only ever backs `POST /agents/:id/evals`, the agent-
+   * scoped route) — the intent/risk_brief_narrative-are-agent-owned-only
+   * guard below is therefore always satisfied here today; it exists as
+   * defensive documentation of the invariant in case this method is ever
+   * reused for a skill-owned creation path (skill-owned cases are currently
+   * created via `skills/eval-service.ts`'s own, separate method, never this
+   * one — see `server/insights.md`). `ownerKind` is typed as the full
+   * `'agent' | 'skill'` union (not left to narrow to the literal `'agent'`)
+   * so the comparison below type-checks without a TS2367 "no overlap" error.
+   */
   async createCaseManual(workspaceId: string, agentId: string, input: EvalCaseCreateInput) {
     const parsed = parseUnifiedDiff(input.input_diff);
     if (parsed.files.length === 0) {
       throw new ValidationError('Diff fragment must reference at least one file');
     }
 
+    // `manualCaseOwnerKind()` (not an inline `const ownerKind: 'agent' | 'skill' = 'agent'`)
+    // because TypeScript's control-flow narrowing collapses a locally-declared
+    // `const` back to its literal initializer type regardless of a wider
+    // annotation, which makes `ownerKind === 'skill'` below a TS2367
+    // "no overlap" compile error even with the union annotation in place. A
+    // function call's return type does not carry that narrowing across the
+    // call boundary, so the comparison below type-checks as intended.
+    const ownerKind = manualCaseOwnerKind();
+    if (input.case_kind !== 'review_finding' && ownerKind === 'skill') {
+      throw new ValidationError('intent/risk_brief_narrative cases are agent-owned only');
+    }
+
     const row = await this.repo.insertCase({
       workspaceId,
-      ownerKind: 'agent',
+      ownerKind,
       ownerId: agentId,
       name: input.name,
       inputDiff: input.input_diff,
       inputMeta: { source: 'manual' },
       expectedOutput: input.expected_output,
       notes: input.notes ?? null,
+      caseKind: input.case_kind,
+      passingThreshold: input.passing_threshold ?? null,
     });
 
     return caseListItem(row, null, false);

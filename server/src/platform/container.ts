@@ -21,7 +21,7 @@ import { OpenAIProvider } from '../adapters/llm/openai.js';
 import { AnthropicProvider } from '../adapters/llm/anthropic.js';
 import { OpenAIEmbedder } from '../adapters/embedder/openai.js';
 import { NccRunnerBundler } from '../adapters/runner-bundle/ncc.js';
-import { OpenRouterProvider } from '@devdigest/reviewer-core';
+import { countTokens, OpenRouterProvider } from '@devdigest/reviewer-core';
 import { estimateCost } from '../adapters/llm/pricing.js';
 import { PriceBook } from './price-book.js';
 import { ConfigError } from './errors.js';
@@ -34,7 +34,6 @@ import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { BlastService } from '../modules/blast/service.js';
 import { ContextDocsService } from '../modules/context-docs/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
-import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.js';
 
 /**
  * DI container. One per app instance. Holds config, db, the JobRunner,
@@ -43,6 +42,12 @@ import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.j
  * Tests construct a container with `overrides` to inject mock adapters; the
  * Services depend on these interfaces, not the concrete classes.
  */
+
+/** Token counter used for the repo-map budget search. Swappable in tests. */
+export interface Tokenizer {
+  count(text: string): number;
+}
+
 export interface ContainerOverrides {
   secrets?: SecretsProvider;
   auth?: AuthProvider;
@@ -190,10 +195,15 @@ export class Container {
     return this._depgraph;
   }
 
-  /** Token counter (js-tiktoken) for the repo-map budget search. */
+  /**
+   * Token counter for the repo-map budget search. Backed by the canonical
+   * `countTokens` from `@devdigest/reviewer-core` (`cl100k_base` BPE encoder,
+   * falling back to a char-based heuristic) — shared with the CI runner so
+   * both count tokens identically.
+   */
   get tokenizer(): Tokenizer {
     if (this.overrides.tokenizer) return this.overrides.tokenizer;
-    this._tokenizer ??= new TiktokenTokenizer();
+    this._tokenizer ??= { count: countTokens };
     return this._tokenizer;
   }
 

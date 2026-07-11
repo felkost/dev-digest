@@ -1,6 +1,14 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import type { LLMProvider, GitHubReviewPayload, CiResultArtifact } from '@devdigest/shared';
-import { reviewPullRequest, toReviewPayload, gateTriggered, countBlockers } from '@devdigest/reviewer-core';
+import {
+  reviewPullRequest,
+  toReviewPayload,
+  gateTriggered,
+  countBlockers,
+  excludeBoilerplateFiles,
+  countTokens,
+  countPromptAssemblyBlocks,
+} from '@devdigest/reviewer-core';
 import { loadManifest } from './manifest.js';
 import { loadSkillBodies } from './skills.js';
 import { resolvePrContext, type CiEnv } from './context.js';
@@ -150,6 +158,18 @@ export async function runCi(deps: RunCiDeps): Promise<RunCiResult> {
     }
     const diff = parseUnifiedDiff(stripIgnoredFiles(rawDiff));
 
+    // 3b. Boilerplate exclusion (cost-surgery instrumentation, CI parity with
+    //     the studio's run-executor): drop lockfiles/dist/minified/generated
+    //     files from the diff BEFORE it reaches the engine, so token budget and
+    //     review attention go to files that actually matter. CI has no
+    //     separate over-budget trim step, so this is the only diff-shaping
+    //     step here — exclusion runs once, before the engine call.
+    const { diff: unboilerplatedDiff, excludedFiles, excludedTokensEstimate } =
+      excludeBoilerplateFiles(diff, countTokens);
+    console.log(
+      `[agent-runner] boilerplate filter: ${excludedFiles.length} file(s) excluded (~${excludedTokensEstimate} tokens avoided)`,
+    );
+
     // 4. Run the SAME engine the studio uses. `reviewPullRequest` internally
     //    calls `assemblePrompt`/`wrapUntrusted` (diff → `<untrusted
     //    source="diff">`, prDescription → `<untrusted source="pr-description">`,
@@ -160,12 +180,13 @@ export async function runCi(deps: RunCiDeps): Promise<RunCiResult> {
     const outcome = await reviewPullRequest({
       systemPrompt: manifest.system_prompt,
       model: manifest.model,
-      diff,
+      diff: unboilerplatedDiff,
       llm: deps.llm,
       strategy: manifest.strategy,
       skills,
       prDescription: ctx.body,
       task: `Review PR #${ctx.prNumber}: ${ctx.title}`,
+      countTokens,
     });
     const durationMs = now() - start;
 
@@ -181,12 +202,22 @@ export async function runCi(deps: RunCiDeps): Promise<RunCiResult> {
 
     // 6. Build + write the artifact before posting, so a GitHub-side posting
     //    failure never loses the already-computed, already-grounded result.
+    //    Cost-surgery instrumentation (per-block token report + cache/exclusion
+    //    accounting) is computed here, mirroring the studio's cost_report.
+    const blockTokenCounts = countPromptAssemblyBlocks(outcome.assembly, countTokens);
     const artifact = buildResultArtifact({
       findings: outcome.review.findings,
       costUsd: outcome.costUsd,
       durationMs,
       agent: manifest.name,
       prNumber: ctx.prNumber,
+      blockTokenCounts,
+      cachedInputTokens: outcome.cachedInputTokens,
+      cacheControlApplied: outcome.cacheControlApplied,
+      excludedBoilerplateFiles: excludedFiles,
+      excludedBoilerplateTokens: excludedTokensEstimate,
+      mapReduceThresholdTokens: outcome.mapReduceThresholdTokens,
+      mapReduceChunkCount: outcome.mapReduceChunkCount,
     });
     writeFile(deps.resultPath, `${JSON.stringify(artifact, null, 2)}\n`);
 

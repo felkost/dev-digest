@@ -19,6 +19,19 @@ export const evalCases = pgTable('eval_cases', {
   inputMeta: jsonb('input_meta'),
   expectedOutput: jsonb('expected_output'),
   notes: text('notes'),
+  // Which eval methodology this case uses; `expected_output`'s shape is
+  // per-kind (see `EvalCaseCreateInput`'s doc comment in
+  // `@devdigest/shared`'s `eval-batch.ts` for the exact per-kind shapes).
+  // Defaults to the pre-existing behavior for all rows written before WS6.
+  caseKind: text('case_kind', {
+    enum: ['review_finding', 'intent', 'risk_brief_narrative'],
+  })
+    .notNull()
+    .default('review_finding'),
+  // Per-case override of the kind's built-in default passing threshold.
+  // `null` means "use the kind's built-in default" — resolved at the
+  // service/scoring layer, never in the DB.
+  passingThreshold: doublePrecision('passing_threshold'),
 });
 
 export const evalBatches = pgTable(

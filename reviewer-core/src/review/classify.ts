@@ -1,3 +1,11 @@
+/**
+ * classify — file-role classification for smart-diff boilerplate exclusion.
+ *
+ * Relocated verbatim from the server's
+ * `src/modules/reviews/smart-diff-rules.ts` — this is the single canonical
+ * implementation, now shared by the server and the CI runner. Zero I/O.
+ */
+
 export const LOCK_FILE_NAMES: string[] = [
   'package-lock.json',
   'pnpm-lock.yaml',
