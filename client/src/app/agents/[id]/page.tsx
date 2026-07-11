@@ -9,6 +9,7 @@ import { Button, Dropdown, ErrorState, Skeleton, Icon, Badge } from "@devdigest/
 import { AppShell } from "../../../components/app-shell";
 import { AgentCard } from "../_components/AgentCard";
 import { AgentEditor } from "./_components/AgentEditor";
+import { RunOnPrMenu } from "./_components/RunOnPrMenu";
 import { TABS } from "./_components/AgentEditor/constants";
 import { useAgents, useAgent, useAgentStats, useUpdateAgent } from "../../../lib/hooks/agents";
 import { ApiError } from "../../../lib/api";
@@ -123,9 +124,7 @@ export default function AgentEditorPage() {
               </Badge>
               {!agent.enabled && <Badge color="var(--text-muted)">disabled</Badge>}
               <div style={{ marginLeft: "auto" }}>
-                <Button kind="secondary" size="sm" icon="GitPullRequest" onClick={() => router.push("/")}>
-                  Run on a PR...
-                </Button>
+                <RunOnPrMenu agentId={agent.id} agentName={agent.name} />
               </div>
             </div>
             <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>

@@ -6,6 +6,7 @@ import type {
   CodeIndex,
   Embedder,
   LLMProvider,
+  RunnerBundler,
 } from '@devdigest/shared';
 import type { AppConfig } from './config.js';
 import type { Db } from '../db/client.js';
@@ -19,6 +20,7 @@ import { RipgrepCodeIndex } from '../adapters/codeindex/ripgrep.js';
 import { OpenAIProvider } from '../adapters/llm/openai.js';
 import { AnthropicProvider } from '../adapters/llm/anthropic.js';
 import { OpenAIEmbedder } from '../adapters/embedder/openai.js';
+import { NccRunnerBundler } from '../adapters/runner-bundle/ncc.js';
 import { OpenRouterProvider } from '@devdigest/reviewer-core';
 import { estimateCost } from '../adapters/llm/pricing.js';
 import { PriceBook } from './price-book.js';
@@ -59,6 +61,8 @@ export interface ContainerOverrides {
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
+  /** CI export's agent-runner `ncc` bundle builder — tests inject a fixture bundler. */
+  runnerBundler?: RunnerBundler;
 }
 
 export class Container {
@@ -88,6 +92,7 @@ export class Container {
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
+  private _runnerBundler?: RunnerBundler;
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
@@ -102,6 +107,17 @@ export class Container {
     if (this.overrides.git) return this.overrides.git;
     this._git ??= new SimpleGitClient(this.config.cloneDir);
     return this._git;
+  }
+
+  /**
+   * Builds the agent-runner `ncc` bundle for CI export (L07/export-to-ci).
+   * Tests inject a fixture via `ContainerOverrides.runnerBundler` — never
+   * invoke `NccRunnerBundler.build()` for real in a hermetic test.
+   */
+  get runnerBundler(): RunnerBundler {
+    if (this.overrides.runnerBundler) return this.overrides.runnerBundler;
+    this._runnerBundler ??= new NccRunnerBundler();
+    return this._runnerBundler;
   }
 
   get agentsRepo(): AgentsRepository {

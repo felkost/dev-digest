@@ -25,6 +25,17 @@ import { BRIEF_GENERATE_RATE_LIMIT } from './constants.js';
  *   POST   /findings/:id/(accept|dismiss)              → finding actions
  */
 const FINDING_ACTIONS = ['accept', 'dismiss'] as const;
+
+/**
+ * Optional per-request agent selection for `POST /repos/:id/review-all`.
+ * When omitted or empty, every ENABLED agent runs on each open PR (the
+ * historical behavior); when a non-empty list is provided, ONLY those agents
+ * run. Body itself is optional so existing no-body callers keep working.
+ */
+const ReviewAllBody = z
+  .object({ agent_ids: z.array(z.string().uuid()).min(1).optional() })
+  .optional();
+
 export default async function reviewsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
   const { container } = app;
@@ -268,7 +279,7 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
 
   // ---- Bulk: trigger reviews for all open PRs in a repo -------------------
   // Fire-and-forget: reviews run in background, returns count immediately.
-  app.post('/repos/:id/review-all', { schema: { params: IdParams }, config: { rateLimit: { max: 2, timeWindow: '1 minute' } } }, async (req) => {
+  app.post('/repos/:id/review-all', { schema: { params: IdParams, body: ReviewAllBody }, config: { rateLimit: { max: 2, timeWindow: '1 minute' } } }, async (req) => {
     const { workspaceId } = await getContext(container, req);
     // Verify repo belongs to this workspace before touching any data.
     const [repo] = await container.db
@@ -299,7 +310,14 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     const runningPrIds = new Set(runningRows.map((r) => r.prId));
     const eligiblePrs = openPrs.filter((p) => !runningPrIds.has(p.id));
     if (eligiblePrs.length === 0) return { triggered: 0 };
-    const targets = await service.resolveTargets(workspaceId, { all: true });
+    // Honor an explicit agent selection when the client sends one (the Review
+    // All picker); fall back to every enabled agent otherwise. `resolveTargets`
+    // throws NotFoundError for an unknown id, surfacing as a 404.
+    const selectedAgentIds = req.body?.agent_ids;
+    const targets =
+      selectedAgentIds && selectedAgentIds.length > 0
+        ? await service.resolveTargets(workspaceId, { agentIds: selectedAgentIds })
+        : await service.resolveTargets(workspaceId, { all: true });
     // Detach a child logger before the response is sent — Fastify recycles req
     // once the handler returns, so req.log is invalid inside the background tasks.
     const log = req.log.child({ route: 'review-all', repoId: req.params.id });

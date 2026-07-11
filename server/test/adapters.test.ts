@@ -6,6 +6,7 @@ import {
   MockGitHubClient,
   MockCodeIndex,
   MockEmbedder,
+  MockRunnerBundler,
 } from '../src/adapters/mocks.js';
 import { assemblePrompt } from '../src/platform/prompt.js';
 import { groundFindings } from '../src/platform/grounding.js';
@@ -57,6 +58,20 @@ describe('mock adapters (no network)', () => {
     expect(tree).toEqual(customTree);
   });
 
+  it('MockGitHubClient.getDefaultBranch returns "main" by default and records the call', async () => {
+    const gh = new MockGitHubClient();
+    const repo = { owner: 'a', name: 'b' };
+    const branch = await gh.getDefaultBranch(repo);
+    expect(branch).toBe('main');
+    expect(gh.gotDefaultBranches).toEqual([repo]);
+  });
+
+  it('MockGitHubClient.getDefaultBranch respects a MockGitHubOptions.defaultBranch override', async () => {
+    const gh = new MockGitHubClient({ defaultBranch: 'master' });
+    const branch = await gh.getDefaultBranch({ owner: 'a', name: 'b' });
+    expect(branch).toBe('master');
+  });
+
   it('MockGitHubClient.getFileContents returns the fixture content for a known path', async () => {
     const gh = new MockGitHubClient();
     const contents = await gh.getFileContents({ owner: 'a', name: 'b' }, 'package.json', 'main');
@@ -67,6 +82,63 @@ describe('mock adapters (no network)', () => {
     const gh = new MockGitHubClient();
     const contents = await gh.getFileContents({ owner: 'a', name: 'b' }, 'does/not/exist.ts', 'main');
     expect(contents).toBeNull();
+  });
+
+  it('MockGitHubClient.listWorkflowRuns returns the default fixture (one completed/success + one in_progress run) and records the call', async () => {
+    const gh = new MockGitHubClient();
+    const repo = { owner: 'a', name: 'b' };
+    const runs = await gh.listWorkflowRuns(repo, 'devdigest-review.yml');
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toMatchObject({ status: 'completed', conclusion: 'success' });
+    expect(runs[1]).toMatchObject({ status: 'in_progress', conclusion: null });
+    expect(gh.listedRuns).toEqual([{ repo, workflowFile: 'devdigest-review.yml' }]);
+  });
+
+  it('MockGitHubClient.listWorkflowRuns respects a MockGitHubOptions.workflowRuns override', async () => {
+    const customRuns = [
+      { id: 42, status: 'completed', conclusion: 'failure', html_url: 'https://x/42', created_at: '2026-07-01T00:00:00Z' },
+    ];
+    const gh = new MockGitHubClient({ workflowRuns: customRuns });
+    const runs = await gh.listWorkflowRuns({ owner: 'a', name: 'b' }, 'devdigest-review.yml');
+    expect(runs).toEqual(customRuns);
+  });
+
+  it('MockGitHubClient.getWorkflowRun returns the matching fixture run by id and records the call', async () => {
+    const gh = new MockGitHubClient();
+    const repo = { owner: 'a', name: 'b' };
+    const run = await gh.getWorkflowRun(repo, 1002);
+    expect(run).toEqual({
+      id: 1002,
+      status: 'in_progress',
+      conclusion: null,
+      html_url: 'https://github.com/mock/mock/actions/runs/1002',
+    });
+    expect(gh.gotRuns).toEqual([{ repo, runId: 1002 }]);
+  });
+
+  it('MockGitHubClient.listRunArtifacts returns the default fixture and records the call', async () => {
+    const gh = new MockGitHubClient();
+    const repo = { owner: 'a', name: 'b' };
+    const artifacts = await gh.listRunArtifacts(repo, 1001);
+    expect(artifacts).toEqual([{ id: 2001, name: 'devdigest-result', expired: false }]);
+    expect(gh.listedArtifacts).toEqual([{ repo, runId: 1001 }]);
+  });
+
+  it('MockGitHubClient.downloadArtifact returns the configured fixture buffer and records the call', async () => {
+    const fixture = Buffer.from('zip-bytes');
+    const gh = new MockGitHubClient({ artifactContents: fixture });
+    const repo = { owner: 'a', name: 'b' };
+    const contents = await gh.downloadArtifact(repo, 2001);
+    expect(contents).toBe(fixture);
+    expect(gh.downloadedArtifacts).toEqual([{ repo, artifactId: 2001 }]);
+  });
+
+  it('MockRunnerBundler.build returns the configured fixture and counts calls', async () => {
+    const bundler = new MockRunnerBundler();
+    const result = await bundler.build();
+    expect(result).toEqual({ contents: '// mock runner bundle\n' });
+    await bundler.build();
+    expect(bundler.buildCalls).toBe(2);
   });
 
   // NOTE: OctokitGitHubClient (src/adapters/github/octokit.ts) is not unit-tested at the

@@ -11,23 +11,36 @@
       "last7Days": "Last 7 days",
       "allAgents": "All agents",
       "allRepos": "All repos",
-      "allStatuses": "All statuses"
+      "allStatuses": "All statuses",
+      "allSources": "All sources"
     },
     "table": {
       "timestamp": "Timestamp",
       "pullRequest": "Pull request",
+      "agent": "Agent",
       "source": "Source",
+      "duration": "Dur.",
       "findings": "Findings",
       "cost": "Cost",
-      "status": "Status"
+      "status": "Status",
+      "trace": "Trace"
     },
     "view": "View",
+    "trace": "Trace",
     "status": {
       "succeeded": "Succeeded",
       "noFindings": "No findings",
       "failed": "Failed",
-      "running": "Running"
-    }
+      "running": "Running",
+      "skippedFork": "Skipped (fork)"
+    },
+    "edgeCases": {
+      "neverRun": "This agent has never run in CI.",
+      "noMatch": "No runs match the current filters.",
+      "checkFailed": "Last check failed — try refreshing again."
+    },
+    "lastChecked": "Last checked {time}",
+    "viewJob": "View job"
   },
   "exportWizard": {
     "title": "Export to CI",
@@ -69,20 +82,42 @@
     },
     "blockMergeTitle": "Block merge on findings",
     "blockMergeDesc": "Requires a GitHub App — not available with PAT in local mode",
+    "failCiInfo": "To block merges: set <b>Fail CI on</b> (CI tab) so the run exits non-zero, then add a <b>required status check</b> in the repo's GitHub branch protection. No GitHub App needed.",
     "installCardTitle": "Open a PR with these files",
     "installCardBody": "DevDigest opens a PR in {repo} titled “Add DevDigest CI review” with the {count} generated files.",
+    "copyZipTitle": "Copy files as a zip",
+    "copyZipHint": "add them manually",
+    "installHelp": "Need help?",
+    "installDocsLink": "See the GitHub Action setup docs →",
     "ownerRepo": "owner/repo",
-    "secretNote": "Add {key} to the repo's Actions secrets before the workflow runs."
+    "secretNote": "Add {key} to the repo's Actions secrets before the workflow runs.",
+    "downloadArchive": "Download files (.zip)",
+    "downloading": "Downloading…"
   },
   "ciTab": {
-    "heading": "Continuous Integration",
+    "heading": "CI deployment",
     "subtitle": "Run this agent automatically on pull requests in a target repo.",
     "exportToCi": "Export to CI",
+    "addToCi": "Add to CI",
+    "addRepository": "Add repository",
     "publish": "Publish to CI",
     "update": "Update CI",
+    "updateConfig": "Update CI config",
     "noRepo": "Connect a repository first",
-    "empty": "Not deployed to CI yet. Use “Publish to CI” to open a PR that adds the workflow + agent config.",
-    "installed": "installed {date}"
+    "empty": "Not deployed to CI yet. Use “Add to CI” to open a PR that adds the workflow + agent config.",
+    "installed": "installed {date}",
+    "activeInstallations": "{count} active",
+    "activeInRepos": "Active in {count} repos",
+    "noInstallations": "Not connected to any repository yet.",
+    "workflowVersion": "v{version}",
+    "failOnLabel": "CI gate",
+    "failOnHint": "In GitHub Actions only: when should this agent's review block the PR (request changes + fail the check) vs just comment? Decided by finding severity, not the model. No effect on reviews shown in the studio.",
+    "last7Days": "{runs} runs · {findings} findings · {cost}",
+    "disconnect": "Disconnect",
+    "disconnectConfirm": "Disconnect this installation? DevDigest stops tracking CI runs for this repo — the already-committed workflow file is not removed.",
+    "updating": "Updating…",
+    "updateOutcome": "{ok} of {total} installations updated",
+    "viewPr": "View PR"
   },
   "publishDialog": {
     "title": "Publish to CI",

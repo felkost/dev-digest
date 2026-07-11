@@ -18,13 +18,13 @@ import { AppShell } from "@/components/app-shell";
 import { RepoNotFound } from "@/components/repo-not-found";
 import { usePulls, useRefreshRepo, useSettings } from "@/lib/hooks";
 import { useAgents } from "@/lib/hooks/agents";
-import { useReviewAll } from "@/lib/hooks/reviews";
 import { useActiveRepo, useRepoNotFound } from "@/lib/repo-context";
 import { ApiError } from "@/lib/api";
 import { COLUMN_KEYS, SKELETON_ROWS } from "./constants";
 import { s } from "./styles";
 import { PRRow } from "./_components/PRRow";
 import { FilterBar } from "./_components/FilterBar";
+import { ReviewAllButton } from "./_components/ReviewAllButton";
 
 /** Open PRs carry a derived review status; everything else is merged/closed. */
 const OPEN_STATUSES = new Set(["needs_review", "reviewed", "stale"]);
@@ -41,7 +41,6 @@ function PullsPageContent() {
   const refresh = useRefreshRepo();
   const { data: settings } = useSettings();
   const { data: agents } = useAgents();
-  const reviewAll = useReviewAll(repoId);
 
   const autoReviewOn = settings?.automatic_reviews ?? false;
   const pollingMin = settings?.polling_interval_min ?? 5;
@@ -103,16 +102,7 @@ function PullsPageContent() {
           >
             {t("list.triageQueue")}
           </Button>
-          <Button
-            kind="primary"
-            size="sm"
-            icon="Sparkles"
-            loading={reviewAll.isPending}
-            disabled={reviewAll.isPending}
-            onClick={() => reviewAll.mutate()}
-          >
-            {reviewAll.isPending ? t("list.reviewAllRunning") : t("list.reviewAll")}
-          </Button>
+          <ReviewAllButton repoId={repoId} />
         </div>
       </div>
 

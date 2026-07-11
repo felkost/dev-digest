@@ -106,6 +106,8 @@
     "triageQueue": "Triage queue",
     "reviewAll": "Review all",
     "reviewAllRunning": "Reviewing…",
+    "reviewAllStarted": "Reviewing {count} pull request(s)…",
+    "reviewAllNoneOpen": "No open pull requests to review.",
     "filterPlaceholder": "Filter pull requests…",
     "sort": {
       "newest": "Sort: Newest",

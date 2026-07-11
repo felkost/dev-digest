@@ -22,7 +22,8 @@
     "skills": "Skills",
     "agents": "Agents",
     "conventions": "Conventions",
-    "evals": "Eval Dashboard"
+    "evals": "Eval Dashboard",
+    "ci-runs": "CI Runs"
   },
   "featurePlaceholder": {
     "defaultBody": "This screen is owned by {owner}. The app shell, routing, theming and data layer are wired — {owner} fills in the screen here."

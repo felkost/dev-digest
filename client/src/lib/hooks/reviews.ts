@@ -181,12 +181,17 @@ export function useCreatePrComment(prId: string | null | undefined) {
   });
 }
 
-// ---- Bulk review: trigger all enabled agents for every open PR in a repo --
+// ---- Bulk review: trigger a chosen set of agents (or all enabled) for every
+//      open PR in a repo. Passing no `agentIds` (or an empty array) keeps the
+//      historical "all enabled agents" behavior; the Review All picker passes
+//      the member's selection so only those agents run. -----------------------
 export function useReviewAll(repoId: string | null | undefined) {
   return useMutation({
-    mutationFn: () => {
+    mutationFn: (vars?: { agentIds?: string[] }) => {
       if (!repoId) throw new Error('repoId required');
-      return api.post<{ triggered: number }>(`/repos/${repoId}/review-all`);
+      const body =
+        vars?.agentIds && vars.agentIds.length > 0 ? { agent_ids: vars.agentIds } : undefined;
+      return api.post<{ triggered: number }>(`/repos/${repoId}/review-all`, body);
     },
   });
 }
