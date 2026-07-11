@@ -45,6 +45,10 @@ export function mapGithubRunToStatus(
     // Fallback: no artifact to trust — GitHub's own reported outcome only.
     return run.conclusion === 'success' ? 'no_findings' : 'failed';
   }
+  // The review was SKIPPED, not run (e.g. the PR diff exceeded GitHub's
+  // 300-file cap): surface it as its own status rather than a misleading clean
+  // "no findings" (the runner exits 0 with an empty, skipped artifact).
+  if (artifact.skipped_reason) return 'skipped_large';
   // An artifact exists = the review actually RAN and produced a grounded
   // result, so the DevDigest status is derived from the FINDINGS, not from the
   // GitHub run conclusion. A `failure` conclusion here means the `ci_fail_on`

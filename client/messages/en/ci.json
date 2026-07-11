@@ -32,7 +32,8 @@
       "noFindings": "No findings",
       "failed": "Failed",
       "running": "Running",
-      "skippedFork": "Skipped (fork)"
+      "skippedFork": "Skipped (fork)",
+      "skippedLarge": "Skipped (too large)"
     },
     "edgeCases": {
       "neverRun": "This agent has never run in CI.",

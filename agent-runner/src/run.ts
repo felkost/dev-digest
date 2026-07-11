@@ -7,7 +7,7 @@ import { resolvePrContext, type CiEnv } from './context.js';
 import { parseUnifiedDiff, stripIgnoredFiles } from './diff.js';
 import { fetchPrDiff, postGithubReview, postPrComment, type FetchLike } from './github.js';
 import { buildResultArtifact } from './artifact.js';
-import { RunnerError } from './errors.js';
+import { RunnerError, PrDiffTooLargeError } from './errors.js';
 
 /**
  * `runCi` — the runner's single orchestration entry point (T8). Mirrors the
@@ -80,6 +80,16 @@ export interface RunCiFailure {
 
 export type RunCiResult = RunCiSuccess | RunCiFailure;
 
+/** PR comment posted when the diff is too large to fetch (graceful skip path). */
+function tooLargeComment(agentName: string): string {
+  return (
+    `## ${agentName} — Skipped ⏭️\n\n` +
+    `_This pull request changes more files than GitHub's diff API will return ` +
+    `(over 300), so DevDigest couldn't fetch a diff to review it. Split it into ` +
+    `smaller pull requests to get an automated review._`
+  );
+}
+
 export async function runCi(deps: RunCiDeps): Promise<RunCiResult> {
   const readFile = deps.readFile ?? readFileSync;
   const readDir = deps.readDir ?? readdirSync;
@@ -105,7 +115,39 @@ export async function runCi(deps: RunCiDeps): Promise<RunCiResult> {
     //    artifacts (`.devdigest/**`, the generated workflow) BEFORE parse: the
     //    minified runner bundle would otherwise fail the whole review with a
     //    GitHub 422 "diff too large", and reviewing our own config is noise.
-    const rawDiff = await fetchDiffImpl(ctx, githubToken ?? '', fetchImpl);
+    let rawDiff: string;
+    try {
+      rawDiff = await fetchDiffImpl(ctx, githubToken ?? '', fetchImpl);
+    } catch (err) {
+      if (err instanceof PrDiffTooLargeError) {
+        // Graceful degradation (NOT a hard crash): the PR changes more files
+        // than GitHub's diff API returns (>300 → 406 too_large). We can't fetch
+        // a diff to review, but a failed run is the wrong signal — write a
+        // SKIPPED artifact, tell the author to split the PR, and exit 0 so the
+        // check doesn't block them. Distinct from the Q5 hard-fail path below,
+        // which still fires for every OTHER error.
+        const artifact = buildResultArtifact({
+          findings: [],
+          costUsd: 0,
+          durationMs: 0,
+          agent: manifest.name,
+          prNumber: ctx.prNumber,
+          skippedReason: 'diff_too_large',
+        });
+        writeFile(deps.resultPath, `${JSON.stringify(artifact, null, 2)}\n`);
+        if (deps.postAs !== 'none' && githubToken) {
+          await postPrComment(ctx, githubToken, tooLargeComment(manifest.name), fetchImpl);
+        }
+        return {
+          exitCode: 0,
+          artifact,
+          posted: { kind: deps.postAs },
+          blockers: 0,
+          gateTriggered: false,
+        };
+      }
+      throw err;
+    }
     const diff = parseUnifiedDiff(stripIgnoredFiles(rawDiff));
 
     // 4. Run the SAME engine the studio uses. `reviewPullRequest` internally

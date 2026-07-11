@@ -189,7 +189,7 @@ export type CiExportInputBody = z.input<typeof CiExportInput>;
 // Declared here (before `CiInstallation`) because `CiInstallation.latest_run_status`
 // references it as a runtime value, not just a type — Zod schemas are values, so the
 // enum must be defined before anything that embeds it.
-export const CiRunStatus = z.enum(['succeeded', 'failed', 'no_findings', 'running', 'skipped_fork']);
+export const CiRunStatus = z.enum(['succeeded', 'failed', 'no_findings', 'running', 'skipped_fork', 'skipped_large']);
 export type CiRunStatus = z.infer<typeof CiRunStatus>;
 
 /** A persisted CI installation (mirrors `ci_installations`). */
@@ -258,6 +258,12 @@ export const CiResultArtifact = z.object({
   agent: z.string(),
   version: z.string().nullish(),
   pr_number: z.number().int().nullish(),
+  /**
+   * Set when the review was SKIPPED rather than run (e.g. `'diff_too_large'` —
+   * the PR exceeded GitHub's 300-file diff cap). Absent on a normal review.
+   * Ingest maps a present value to the `skipped_large` run status.
+   */
+  skipped_reason: z.string().nullish(),
 });
 export type CiResultArtifact = z.infer<typeof CiResultArtifact>;
 

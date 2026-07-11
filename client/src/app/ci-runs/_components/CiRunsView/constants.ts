@@ -33,7 +33,7 @@ export const RECENCY_DAYS = 7;
 export const REFRESH_INTERVAL_MS = 15_000;
 
 /** `CiRun.status` raw values, in display order (status filter + row badges). */
-export const STATUS_VALUES = ["succeeded", "no_findings", "failed", "running", "skipped_fork"] as const;
+export const STATUS_VALUES = ["succeeded", "no_findings", "failed", "running", "skipped_fork", "skipped_large"] as const;
 
 /**
  * Raw status → visual + i18n mapping (`runs.status.*`). Shared by the status
@@ -49,6 +49,9 @@ export const STATUS_META: Record<string, { labelKey: string; color: string; bg: 
   failed: { labelKey: "failed", color: "var(--crit)", bg: "var(--crit-bg)", icon: "XCircle" },
   running: { labelKey: "running", color: "var(--accent)", bg: "var(--accent-bg)", icon: "RefreshCw" },
   skipped_fork: { labelKey: "skippedFork", color: "var(--text-muted)", bg: "var(--bg-hover)", icon: "Slash" },
+  // Review skipped because the PR diff exceeded GitHub's 300-file cap — muted,
+  // same neutral treatment as a fork-skip (it isn't a pass, a fail, or "clean").
+  skipped_large: { labelKey: "skippedLarge", color: "var(--text-muted)", bg: "var(--bg-hover)", icon: "Slash" },
 };
 
 /** Fallback for a null/unrecognized status value — a row must never crash. */

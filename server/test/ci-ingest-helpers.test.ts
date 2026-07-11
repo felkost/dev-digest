@@ -114,6 +114,15 @@ describe('mapGithubRunToStatus', () => {
     ).toBe('succeeded');
   });
 
+  it('with artifact: a skipped_reason (diff_too_large) maps to "skipped_large", ahead of the findings check', () => {
+    expect(
+      mapGithubRunToStatus(
+        { status: 'completed', conclusion: 'success' },
+        makeArtifact({ findings_count: 0, skipped_reason: 'diff_too_large' }),
+      ),
+    ).toBe('skipped_large');
+  });
+
   it('with artifact: maps completed+non-failure with zero findings to "no_findings"', () => {
     expect(
       mapGithubRunToStatus(

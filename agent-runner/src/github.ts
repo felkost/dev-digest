@@ -1,5 +1,5 @@
 import type { GitHubReviewPayload } from '@devdigest/shared';
-import { RunnerError } from './errors.js';
+import { RunnerError, PrDiffTooLargeError } from './errors.js';
 import type { PrContext } from './context.js';
 
 /**
@@ -37,9 +37,16 @@ export async function fetchPrDiff(
     headers: authHeaders(token, 'application/vnd.github.v3.diff'),
   });
   if (!res.ok) {
-    throw new RunnerError(
-      `GitHub API error fetching PR diff (${url}): ${res.status} ${await res.text().catch(() => '')}`,
-    );
+    const body = await res.text().catch(() => '');
+    // GitHub's diff media type caps a PR at 300 changed files and returns
+    // `406 { code: "too_large" }` for anything larger. Signal it distinctly so
+    // `runCi` degrades gracefully (skip + comment + exit 0) instead of crashing.
+    if (res.status === 406 && body.includes('too_large')) {
+      throw new PrDiffTooLargeError(
+        `PR #${ctx.prNumber} diff exceeds GitHub's 300-file limit (${url}): ${res.status} ${body}`,
+      );
+    }
+    throw new RunnerError(`GitHub API error fetching PR diff (${url}): ${res.status} ${body}`);
   }
   return res.text();
 }

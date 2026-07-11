@@ -11,6 +11,12 @@ export interface BuildResultArtifactInput {
   durationMs: number;
   agent: string;
   prNumber: number;
+  /**
+   * Set when the review was SKIPPED rather than run (e.g. `'diff_too_large'`).
+   * Findings are empty in that case; ingest maps this to the `skipped_large`
+   * run status instead of a misleading zero-finding "no findings".
+   */
+  skippedReason?: string;
 }
 
 function severityCounts(findings: Finding[]): { critical: number; warning: number; suggestion: number } {
@@ -41,6 +47,7 @@ export function buildResultArtifact(input: BuildResultArtifactInput): CiResultAr
     agent: input.agent,
     version: RUNNER_VERSION,
     pr_number: input.prNumber,
+    skipped_reason: input.skippedReason,
   };
   const result = CiResultArtifact.safeParse(candidate);
   if (!result.success) {
