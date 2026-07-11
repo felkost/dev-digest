@@ -4,10 +4,6 @@ import React from "react";
 import type { useTranslations } from "next-intl";
 import { Badge, Button, Icon } from "@devdigest/ui";
 import type { CiInstallation } from "@devdigest/shared";
-// Reused directly (not duplicated) from the CI Runs page's own canonical
-// status→color/label map, which exists specifically so its filter dropdown and
-// row badge never drift apart (see that file's doc comment).
-import { STATUS_META, DEFAULT_STATUS_META } from "@/app/ci-runs/_components/CiRunsView/constants";
 import { s } from "../styles";
 
 /** "4m ago" / "1h ago" / "3d ago" for the latest run; null when never run. */
@@ -32,10 +28,16 @@ interface InstallationRowProps {
 
 export function InstallationRow({ t, installation, onDisconnect, disconnectPending }: InstallationRowProps) {
   const [hover, setHover] = React.useState(false);
-  const status = installation.latest_run_status;
-  // `null` (never run) keeps its own "—" fallback below — distinct from
-  // DEFAULT_STATUS_META, which only guards an unrecognized non-null string.
-  const meta = status ? (STATUS_META[status] ?? DEFAULT_STATUS_META) : null;
+  // The badge reflects DEPLOYMENT health, not the last review run's outcome. An
+  // installation row only exists once the export PR was successfully created
+  // (`upsertPublished` is the LAST step of `exportInstallation` — "no
+  // installation recorded on failure"), so its very existence proves CI is
+  // deployed → "Active". Review outcomes (findings / no findings / a genuinely
+  // failed run) belong on the CI Runs page, never here: a green "Active" must
+  // never flip to "Failed" just because one review run failed. "Failed" here
+  // would only mean the PR itself could not be created — in which case there is
+  // no installation row to render at all.
+  const isActive = installation.disconnected_at === null;
   const lastRun = relativeAgo(installation.latest_run_at);
   return (
     <div
@@ -49,12 +51,14 @@ export function InstallationRow({ t, installation, onDisconnect, disconnectPendi
       </div>
       <div style={s.rowMeta}>
         <Badge icon="Workflow">{t(`exportWizard.targets.${installation.target_type}`)}</Badge>
-        {meta ? (
-          <Badge dot color={meta.color} bg={meta.bg}>
-            {t(`runs.status.${meta.labelKey}`)}
+        {isActive ? (
+          <Badge dot color="var(--ok)" bg="var(--ok-bg)">
+            {t("ciTab.statusActive")}
           </Badge>
         ) : (
-          <span style={s.rowMuted}>—</span>
+          <Badge dot color="var(--text-muted)" bg="var(--bg-hover)">
+            {t("ciTab.statusDisconnected")}
+          </Badge>
         )}
         {lastRun && <span style={s.rowVersion}>{lastRun}</span>}
         {/* Revealed on row hover via opacity so the row keeps a calm, clean

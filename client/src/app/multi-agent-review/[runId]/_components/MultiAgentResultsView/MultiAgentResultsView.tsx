@@ -13,14 +13,16 @@ import { useTranslations } from "next-intl";
 import { Button, ErrorState, Icon, Skeleton } from "@devdigest/ui";
 import { AppShell } from "@/components/app-shell";
 import RunTraceDrawer from "@/app/repos/[repoId]/pulls/[number]/_components/RunTraceDrawer";
+import type { FindingRecord } from "@devdigest/shared";
 import { useMultiAgentRun } from "@/lib/hooks/multi-agent-review";
 import { usePullDetail } from "@/lib/hooks/core";
-import { usePrReviews, useRunEvents } from "@/lib/hooks/reviews";
+import { useRunEvents } from "@/lib/hooks/reviews";
 import { ApiError } from "@/lib/api";
 import { formatCost } from "@/lib/format";
 import { formatDurationMs, formatTokenCount } from "@/app/multi-agent-review/format";
 import { ColumnsView } from "./_components/ColumnsView";
 import { TabsView } from "./_components/TabsView";
+import { FindingsSummary } from "./_components/FindingsSummary/FindingsSummary";
 import { DisagreementSection } from "./_components/DisagreementSection";
 
 export function MultiAgentResultsView({ runId }: { runId: string }) {
@@ -32,21 +34,22 @@ export function MultiAgentResultsView({ runId }: { runId: string }) {
   // pr_number, so the title is joined client-side from this existing endpoint
   // (no server/contract change, no restart). Disabled until pr_id is known.
   const { data: pr } = usePullDetail(data?.pr_id ?? null);
-  const { data: reviews, refetch: refetchReviews } = usePrReviews(data?.pr_id ?? null);
-  const reviewsByRunId = React.useMemo(
-    () => new Map((reviews ?? []).filter((r) => r.run_id != null).map((r) => [r.run_id as string, r])),
-    [reviews],
+  // Full per-run findings come straight from the composed run's own
+  // `findings_by_run` map — the SINGLE finding-detail source for this page
+  // (Tabs view + the reused RunTraceDrawer). Deliberately NOT sourced from
+  // usePrReviews / GET /pulls/:id/reviews, which excludes multi-agent fan-out
+  // runs and would leave the Tabs/drawer showing an empty findings list while
+  // the columns show findings.
+  const findingsByRun = React.useMemo(
+    () => new Map<string, FindingRecord[]>(Object.entries(data?.findings_by_run ?? {})),
+    [data],
   );
 
   // Live per-agent nudge (NFR): one independent SSE subscription per
   // participating run (useRunEvents already does exactly that, unmodified).
-  // When every still-running run's stream settles, refetch immediately
-  // instead of waiting for the next 4s poll tick — same
-  // was-running -> now-settled -> refresh pattern as RunStatus.tsx.
-  // Also refetch usePrReviews here: TabsView sources full finding detail
-  // from that cache (reviewsByRunId), not from the polled AgentColumn.findings,
-  // so without this an agent that finishes after the initial page load would
-  // leave its Tabs-view tab stuck on "No findings yet" indefinitely.
+  // When every still-running run's stream settles, refetch the composed run
+  // immediately instead of waiting for the next poll tick — it carries columns,
+  // conflicts AND findings_by_run, so this one refetch refreshes everything.
   const runningRunIds = React.useMemo(
     () => (data?.columns ?? []).filter((c) => c.status === "running").map((c) => c.run_id),
     [data],
@@ -58,9 +61,8 @@ export function MultiAgentResultsView({ runId }: { runId: string }) {
     else if (wasRunning.current) {
       wasRunning.current = false;
       refetch();
-      refetchReviews();
     }
-  }, [liveRunning, refetch, refetchReviews]);
+  }, [liveRunning, refetch]);
 
   const [view, setView] = React.useState<"columns" | "tabs">("columns");
   const [traceRunId, setTraceRunId] = React.useState<string | null>(null);
@@ -170,8 +172,10 @@ export function MultiAgentResultsView({ runId }: { runId: string }) {
         {view === "columns" ? (
           <ColumnsView columns={data.columns} onOpenTrace={setTraceRunId} />
         ) : (
-          <TabsView columns={data.columns} reviewsByRunId={reviewsByRunId} prId={data.pr_id} onOpenTrace={setTraceRunId} />
+          <TabsView columns={data.columns} findingsByRun={findingsByRun} prId={data.pr_id} onOpenTrace={setTraceRunId} />
         )}
+
+        <FindingsSummary columns={data.columns} findingsByRun={findingsByRun} prId={data.pr_id} />
 
         <DisagreementSection conflicts={data.conflicts} doneCount={doneCount} />
       </div>
@@ -181,7 +185,7 @@ export function MultiAgentResultsView({ runId }: { runId: string }) {
           runId={traceRunId}
           agentName={traceColumn?.agent_name ?? null}
           prNumber={data.pr_number ?? null}
-          findings={reviewsByRunId.get(traceRunId)?.findings ?? []}
+          findings={findingsByRun.get(traceRunId) ?? []}
           running={traceColumn?.status === "running"}
           onClose={() => setTraceRunId(null)}
         />

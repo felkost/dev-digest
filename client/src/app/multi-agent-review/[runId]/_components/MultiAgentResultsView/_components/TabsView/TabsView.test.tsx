@@ -9,7 +9,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NextIntlClientProvider } from "next-intl";
-import type { AgentColumn, FindingRecord, ReviewRecord } from "@devdigest/shared";
+import type { AgentColumn, FindingRecord } from "@devdigest/shared";
 import maResultsMessages from "../../../../../../../../messages/en/multi-agent-review.json";
 import prReviewMessages from "../../../../../../../../messages/en/prReview.json";
 
@@ -59,21 +59,9 @@ const FINDING: FindingRecord = {
   dismissed_at: null,
 };
 
-const REVIEW: ReviewRecord = {
-  id: "review-1",
-  pr_id: "pr-1",
-  agent_id: "a2",
-  run_id: "run-done",
-  agent_name: "Performance",
-  kind: "review",
-  verdict: "approve",
-  summary: "Looks solid.",
-  score: 90,
-  model: "gpt-5",
-  grounding: null,
-  created_at: "2026-07-09T00:00:00Z",
-  findings: [FINDING],
-};
+// findings_by_run maps run_id -> full FindingRecord[] (the composed run's own
+// finding-detail source, replacing the old usePrReviews cache-join).
+const FINDINGS_BY_RUN = new Map<string, FindingRecord[]>([["run-done", [FINDING]]]);
 
 const COLUMN_A: AgentColumn = {
   run_id: "run-done",
@@ -131,18 +119,16 @@ const COLUMN_FAILED: AgentColumn = {
 
 describe("TabsView", () => {
   it("renders one tab per agent, labeled with name and score (AC-21)", () => {
-    const reviewsByRunId = new Map([["run-done", REVIEW]]);
     renderWithIntl(
-      <TabsView columns={[COLUMN_A, COLUMN_B]} reviewsByRunId={reviewsByRunId} prId="pr-1" onOpenTrace={vi.fn()} />,
+      <TabsView columns={[COLUMN_A, COLUMN_B]} findingsByRun={FINDINGS_BY_RUN} prId="pr-1" onOpenTrace={vi.fn()} />,
     );
     expect(screen.getByText("Performance · 90")).toBeInTheDocument();
     expect(screen.getByText("Security · 60")).toBeInTheDocument();
   });
 
   it("shows the active tab's findings as full expandable FindingCards, sourced from the reviews cache (AC-23-25)", () => {
-    const reviewsByRunId = new Map([["run-done", REVIEW]]);
     renderWithIntl(
-      <TabsView columns={[COLUMN_A]} reviewsByRunId={reviewsByRunId} prId="pr-1" onOpenTrace={vi.fn()} />,
+      <TabsView columns={[COLUMN_A]} findingsByRun={FINDINGS_BY_RUN} prId="pr-1" onOpenTrace={vi.fn()} />,
     );
     expect(screen.getByText("N+1 query")).toBeInTheDocument();
     expect(screen.getByText("src/db.ts:22")).toBeInTheDocument();
@@ -152,28 +138,25 @@ describe("TabsView", () => {
   });
 
   it("Accept/Dismiss call the same finding-action mutation used elsewhere in the product (AC-24)", async () => {
-    const reviewsByRunId = new Map([["run-done", REVIEW]]);
     const user = userEvent.setup();
     renderWithIntl(
-      <TabsView columns={[COLUMN_A]} reviewsByRunId={reviewsByRunId} prId="pr-1" onOpenTrace={vi.fn()} />,
+      <TabsView columns={[COLUMN_A]} findingsByRun={FINDINGS_BY_RUN} prId="pr-1" onOpenTrace={vi.fn()} />,
     );
     await user.click(screen.getByText("Accept"));
     expect(findingActionMutate).toHaveBeenCalledWith({ findingId: "f1", action: "accept", prId: "pr-1" });
   });
 
   it("renders Learn and Reply-to-author as visibly disabled stubs (AC-26)", () => {
-    const reviewsByRunId = new Map([["run-done", REVIEW]]);
     renderWithIntl(
-      <TabsView columns={[COLUMN_A]} reviewsByRunId={reviewsByRunId} prId="pr-1" onOpenTrace={vi.fn()} />,
+      <TabsView columns={[COLUMN_A]} findingsByRun={FINDINGS_BY_RUN} prId="pr-1" onOpenTrace={vi.fn()} />,
     );
     expect(screen.getByRole("button", { name: "Learn" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reply to author" })).toBeDisabled();
   });
 
   it("uses the same CircularScore banding as ColumnsView for the same score", () => {
-    const reviewsByRunId = new Map([["run-done", REVIEW]]);
     renderWithIntl(
-      <TabsView columns={[COLUMN_A]} reviewsByRunId={reviewsByRunId} prId="pr-1" onOpenTrace={vi.fn()} />,
+      <TabsView columns={[COLUMN_A]} findingsByRun={FINDINGS_BY_RUN} prId="pr-1" onOpenTrace={vi.fn()} />,
     );
     // The header CircularScore renders the score itself as text.
     expect(screen.getAllByText("90").length).toBeGreaterThan(0);
@@ -181,35 +164,31 @@ describe("TabsView", () => {
 
   it("'View trace' opens the trace for the active tab's run_id", async () => {
     const onOpenTrace = vi.fn();
-    const reviewsByRunId = new Map([["run-done", REVIEW]]);
     const user = userEvent.setup();
     renderWithIntl(
-      <TabsView columns={[COLUMN_A]} reviewsByRunId={reviewsByRunId} prId="pr-1" onOpenTrace={onOpenTrace} />,
+      <TabsView columns={[COLUMN_A]} findingsByRun={FINDINGS_BY_RUN} prId="pr-1" onOpenTrace={onOpenTrace} />,
     );
     await user.click(screen.getByText("View trace"));
     expect(onOpenTrace).toHaveBeenCalledWith("run-done");
   });
 
   it("shows the agent's own failure reason (agent_runs.error) for a failed tab (AC-17)", () => {
-    const reviewsByRunId = new Map([["run-done", REVIEW]]);
     renderWithIntl(
-      <TabsView columns={[COLUMN_FAILED]} reviewsByRunId={reviewsByRunId} prId="pr-1" onOpenTrace={vi.fn()} />,
+      <TabsView columns={[COLUMN_FAILED]} findingsByRun={FINDINGS_BY_RUN} prId="pr-1" onOpenTrace={vi.fn()} />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("Provider timeout after 60s");
   });
 
   it("falls back to the generic failure string when the failed column has no error text", () => {
-    const reviewsByRunId = new Map([["run-done", REVIEW]]);
     renderWithIntl(
-      <TabsView columns={[{ ...COLUMN_FAILED, error: null }]} reviewsByRunId={reviewsByRunId} prId="pr-1" onOpenTrace={vi.fn()} />,
+      <TabsView columns={[{ ...COLUMN_FAILED, error: null }]} findingsByRun={FINDINGS_BY_RUN} prId="pr-1" onOpenTrace={vi.fn()} />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("This run failed.");
   });
 
   it("renders per-agent token usage alongside cost/duration, with an 'unknown' affordance (never 0) when a count is null (AC-33)", () => {
-    const reviewsByRunId = new Map([["run-done", REVIEW]]);
     const { rerender } = renderWithIntl(
-      <TabsView columns={[COLUMN_A]} reviewsByRunId={reviewsByRunId} prId="pr-1" onOpenTrace={vi.fn()} />,
+      <TabsView columns={[COLUMN_A]} findingsByRun={FINDINGS_BY_RUN} prId="pr-1" onOpenTrace={vi.fn()} />,
     );
     expect(screen.getByText("Tokens in: 12.0k")).toBeInTheDocument();
     expect(screen.getByText("Tokens out: 1.5k")).toBeInTheDocument();
@@ -219,7 +198,7 @@ describe("TabsView", () => {
         locale="en"
         messages={{ "multi-agent-review": maResultsMessages, prReview: prReviewMessages }}
       >
-        <TabsView columns={[COLUMN_B]} reviewsByRunId={reviewsByRunId} prId="pr-1" onOpenTrace={vi.fn()} />
+        <TabsView columns={[COLUMN_B]} findingsByRun={FINDINGS_BY_RUN} prId="pr-1" onOpenTrace={vi.fn()} />
       </NextIntlClientProvider>,
     );
     expect(screen.getByText("Tokens in: unknown")).toBeInTheDocument();

@@ -1,15 +1,15 @@
 /* TabsView — one tab per participating agent (AC-20-22). Tab body: summary,
    verdict-adjacent stats, trace link, then that agent's findings as full
-   expandable FindingCards — sourced from the already-fetched usePrReviews
-   cache mapped run_id -> ReviewRecord (zero new server code, AC-23-25) —
-   plus "Learn"/"Reply to author" as visibly disabled stubs (AC-26).
-   FindingCard itself is reused verbatim, unmodified. */
+   expandable FindingCards — sourced from the composed run's own
+   `findings_by_run` map (keyed by run_id), NOT usePrReviews (which excludes
+   multi-agent fan-out runs) — plus "Learn"/"Reply to author" as visibly
+   disabled stubs (AC-26). FindingCard itself is reused verbatim, unmodified. */
 "use client";
 
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Button, CircularScore, EmptyState, MonoLink, Tabs } from "@devdigest/ui";
-import type { AgentColumn, ReviewRecord } from "@devdigest/shared";
+import type { AgentColumn, FindingRecord } from "@devdigest/shared";
 import { FindingCard } from "@/app/repos/[repoId]/pulls/[number]/_components/FindingCard";
 import { useFindingAction } from "@/lib/hooks/reviews";
 import { formatCost } from "@/lib/format";
@@ -18,12 +18,12 @@ import { personaStyle } from "@/app/multi-agent-review/persona";
 
 export function TabsView({
   columns,
-  reviewsByRunId,
+  findingsByRun,
   prId,
   onOpenTrace,
 }: {
   columns: AgentColumn[];
-  reviewsByRunId: Map<string, ReviewRecord>;
+  findingsByRun: Map<string, FindingRecord[]>;
   prId: string;
   onOpenTrace: (runId: string) => void;
 }) {
@@ -35,7 +35,7 @@ export function TabsView({
 
   if (!activeCol) return null;
 
-  const findings = reviewsByRunId.get(active)?.findings ?? [];
+  const findings = findingsByRun.get(active) ?? [];
   const activePersona = personaStyle(activeCol.agent_name);
   const tabs = columns.map((c) => {
     const p = personaStyle(c.agent_name);

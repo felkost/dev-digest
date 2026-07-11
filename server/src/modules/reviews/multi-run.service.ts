@@ -4,12 +4,14 @@ import type {
   AgentColumn,
   AgentColumnFinding,
   AgentEstimate,
+  FindingRecord,
   MultiAgentRun,
   MultiAgentRunStartResponse,
   Severity,
 } from '@devdigest/shared';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewRepository } from './repository.js';
+import { findingRowToDto } from './helpers.js';
 import { ReviewRunExecutor, type Logger } from './run-executor.js';
 import { ReviewService } from './service.js';
 import * as multiRunRepo from './repository/multi-run.repo.js';
@@ -167,6 +169,17 @@ export class MultiRunService {
     // unconditionally rather than re-implementing the same gate here.
     const conflicts = computeConflicts(matcherColumns);
 
+    // Full per-run findings for the Tabs view + reused RunTraceDrawer — the
+    // page's SINGLE finding-detail source, so it never has to fall back to the
+    // PR-detail `reviewsForPull` (which excludes multi-agent fan-out runs and
+    // would leave the drawer/Tabs showing an empty list while columns show
+    // findings). Only 'done' runs have a review/findings, so absent run_ids map
+    // to [] on the client.
+    const findings_by_run: Record<string, FindingRecord[]> = {};
+    for (const [runId, rf] of findingsByRun) {
+      findings_by_run[runId] = rf.findings.map(findingRowToDto);
+    }
+
     return {
       id: group.id,
       pr_id: group.prId,
@@ -179,6 +192,7 @@ export class MultiRunService {
       total_tokens_out: computeTotalTokensOut(runs),
       columns,
       conflicts,
+      findings_by_run,
     };
   }
 

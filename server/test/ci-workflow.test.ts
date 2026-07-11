@@ -2,7 +2,7 @@
  * Hermetic tests for `ci/workflow.ts` — pure function, no DB/network.
  * Covers: standard `pull_request` trigger (never `pull_request_target`), the
  * fork-skip job-level `if:` guard, no inlined secret values, no
- * `DEVDIGEST_DIR`, and the `actions/upload-artifact@v4` step positioned
+ * `DEVDIGEST_DIR`, and the `actions/upload-artifact@v6` step positioned
  * after the runner step (what makes the whole ingest half of the feature
  * reachable at all).
  */
@@ -22,6 +22,7 @@ interface WorkflowStep {
 
 interface ParsedWorkflow {
   on: { pull_request?: { types: string[] }; pull_request_target?: unknown };
+  permissions?: Record<string, string>;
   jobs: { review: { if?: string; steps: WorkflowStep[] } };
 }
 
@@ -44,6 +45,15 @@ describe('generateWorkflowYaml — trigger', () => {
     const { parsed, yaml } = generate();
     expect(parsed.on.pull_request_target).toBeUndefined();
     expect(yaml).not.toContain('pull_request_target');
+  });
+});
+
+describe('generateWorkflowYaml — token permissions', () => {
+  it('declares least-privilege permissions so the runner can post the PR comment (contents:read + pull-requests:write)', () => {
+    const { parsed } = generate();
+    // Without this, GitHub's default read-only GITHUB_TOKEN 403s on posting a
+    // PR comment ("Resource not accessible by integration") and the job exits 1.
+    expect(parsed.permissions).toEqual({ contents: 'read', 'pull-requests': 'write' });
   });
 });
 
@@ -82,12 +92,12 @@ describe('generateWorkflowYaml — runner step + secrets', () => {
 });
 
 describe('generateWorkflowYaml — result artifact upload', () => {
-  it('uploads via actions/upload-artifact@v4, positioned after the runner step', () => {
+  it('uploads via actions/upload-artifact@v6, positioned after the runner step', () => {
     const { parsed } = generate();
     const steps = parsed.jobs.review.steps;
 
     const runnerIndex = steps.findIndex((s) => s.run === 'node .devdigest/runner/index.js');
-    const uploadIndex = steps.findIndex((s) => s.uses === 'actions/upload-artifact@v4');
+    const uploadIndex = steps.findIndex((s) => s.uses === 'actions/upload-artifact@v6');
 
     expect(runnerIndex).toBeGreaterThanOrEqual(0);
     expect(uploadIndex).toBeGreaterThan(runnerIndex);
@@ -95,7 +105,7 @@ describe('generateWorkflowYaml — result artifact upload', () => {
 
   it('references CI_RESULT_ARTIFACT_NAME as the artifact name, with if: always() and if-no-files-found: ignore', () => {
     const { parsed } = generate();
-    const uploadStep = parsed.jobs.review.steps.find((s) => s.uses === 'actions/upload-artifact@v4')!;
+    const uploadStep = parsed.jobs.review.steps.find((s) => s.uses === 'actions/upload-artifact@v6')!;
 
     expect(uploadStep.with).toMatchObject({
       name: CI_RESULT_ARTIFACT_NAME,

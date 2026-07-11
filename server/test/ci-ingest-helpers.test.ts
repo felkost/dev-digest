@@ -105,13 +105,13 @@ describe('mapGithubRunToStatus', () => {
     expect(mapGithubRunToStatus({ status: 'completed', conclusion: 'cancelled' }, null)).toBe('failed');
   });
 
-  it('with artifact: maps completed+failure conclusion to "failed" even with findings present', () => {
+  it('with artifact: a `failure` conclusion + findings maps to "succeeded" (the ci_fail_on gate exits non-zero BY DESIGN to block the PR — a review that surfaced findings is a success, not a crash)', () => {
     expect(
       mapGithubRunToStatus(
         { status: 'completed', conclusion: 'failure' },
         makeArtifact({ findings_count: 5 }),
       ),
-    ).toBe('failed');
+    ).toBe('succeeded');
   });
 
   it('with artifact: maps completed+non-failure with zero findings to "no_findings"', () => {

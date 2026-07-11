@@ -151,6 +151,10 @@ export class IngestService {
   private async runCheckLoop(workspaceId: string): Promise<CiCheckResult> {
     const gh = await this.container.github();
     const installations = await this.installationsRepo.listTracked(workspaceId);
+    // "CI history cleared at" marker (workspace-level, read once): runs created
+    // before it were intentionally deleted via the trash button and must NOT
+    // repopulate on this check — so a cleared history stays cleared.
+    const clearedAt = await this.runsRepo.getClearedAt(workspaceId);
     const updatedRows: CiRunRow[] = [];
     // Accumulated for the summary log line below — never surfaced on the
     // (frozen) CiCheckResult contract, but keeps the "N installations
@@ -178,6 +182,9 @@ export class IngestService {
         );
 
         for (const run of runs) {
+          // Skip runs created before the workspace last cleared its CI history
+          // — they were intentionally deleted and must not repopulate on refresh.
+          if (clearedAt && run.created_at && new Date(run.created_at) < clearedAt) continue;
           const values = await this.resolveRunValues(
             gh,
             repoRef,
@@ -357,6 +364,18 @@ export class IngestService {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Clear the workspace's CI run history (the CI Runs page trash action).
+   * Deletes every `ci_runs` row AND records a "cleared at" marker so the next
+   * `checkForNewResults` does NOT re-import the same GitHub runs — a cleared
+   * history stays cleared (only runs created AFTER the clear are ingested again).
+   */
+  async clearRuns(workspaceId: string): Promise<{ deleted: number }> {
+    const deleted = await this.runsRepo.deleteAllForWorkspace(workspaceId);
+    await this.runsRepo.setClearedAt(workspaceId, new Date());
+    return { deleted };
   }
 
   /** Run history for a workspace, plus the last successful check's timestamp. */

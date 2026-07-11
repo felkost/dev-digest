@@ -308,17 +308,35 @@ export class OctokitGitHubClient implements GitHubClient {
           }
 
           // New tree layered on the parent's tree (so unrelated files are kept).
+          // `deletePaths` are appended as `sha: null` entries — the git tree
+          // convention that REMOVES a path from the inherited `base_tree` (used
+          // to prune a superseded agent manifest so the runner sees exactly one).
           const parentCommit = await g.getCommit({ owner, repo: name, commit_sha: parentSha });
+          const treeEntries: {
+            path: string;
+            mode: '100644';
+            type: 'blob';
+            content?: string;
+            sha?: null;
+          }[] = [
+            ...payload.files.map((f) => ({
+              path: f.path,
+              mode: '100644' as const,
+              type: 'blob' as const,
+              content: f.contents,
+            })),
+            ...(payload.deletePaths ?? []).map((path) => ({
+              path,
+              mode: '100644' as const,
+              type: 'blob' as const,
+              sha: null,
+            })),
+          ];
           const tree = await g.createTree({
             owner,
             repo: name,
             base_tree: parentCommit.data.tree.sha,
-            tree: payload.files.map((f) => ({
-              path: f.path,
-              mode: '100644',
-              type: 'blob',
-              content: f.contents,
-            })),
+            tree: treeEntries,
           });
 
           const commit = await g.createCommit({

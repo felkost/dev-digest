@@ -9,6 +9,7 @@ import {
   slugify,
   dedupeSlug,
   composeCiFiles,
+  staleAgentManifests,
   CI_RESULT_ARTIFACT_NAME,
   type ComposeCiFilesParams,
 } from '../src/modules/ci/helpers.js';
@@ -38,6 +39,43 @@ function baseParams(overrides: Partial<ComposeCiFilesParams> = {}): ComposeCiFil
     ...overrides,
   };
 }
+
+describe('staleAgentManifests', () => {
+  const KEEP = '.devdigest/agents/security-reviewer.yaml';
+
+  it('returns OTHER agent manifests on the branch, excluding the one being written', () => {
+    const tree = [
+      'src/index.ts',
+      'package.json',
+      '.devdigest/runner/index.js',
+      '.devdigest/memory.jsonl',
+      '.devdigest/agents/performance-reviewer.yaml', // stale (previous agent)
+      '.devdigest/agents/security-reviewer.yaml', // the one we're re-writing
+      '.github/workflows/devdigest-review.yml',
+    ];
+    expect(staleAgentManifests(tree, KEEP)).toEqual([
+      '.devdigest/agents/performance-reviewer.yaml',
+    ]);
+  });
+
+  it('matches both .yaml and .yml, and only files directly under .devdigest/agents/', () => {
+    const tree = [
+      '.devdigest/agents/old-one.yml', // stale (.yml extension)
+      '.devdigest/agents/old-two.yaml', // stale
+      '.devdigest/agents/nested/deep.yaml', // NOT a manifest (subdir) — runner globs the dir flatly
+      '.devdigest/skills/boundary-cases.md', // not a manifest
+      KEEP,
+    ];
+    expect(staleAgentManifests(tree, KEEP)).toEqual([
+      '.devdigest/agents/old-one.yml',
+      '.devdigest/agents/old-two.yaml',
+    ]);
+  });
+
+  it('returns [] on a fresh export (no manifests on the branch yet)', () => {
+    expect(staleAgentManifests(['src/index.ts', 'package.json'], KEEP)).toEqual([]);
+  });
+});
 
 describe('slugify', () => {
   it('lowercases and collapses non-alphanumeric runs to a single hyphen', () => {

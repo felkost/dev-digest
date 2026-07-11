@@ -38,6 +38,28 @@ export function dedupeSlug(existing: ReadonlySet<string>, base: string): string 
   return `${base}-${n}`;
 }
 
+/**
+ * An agent manifest path under `.devdigest/agents/`. The runner
+ * (`agent-runner/src/manifest.ts`) globs `*.yaml`/`*.yml` there and requires
+ * EXACTLY one, so both extensions count as a manifest.
+ */
+const AGENT_MANIFEST_RE = /^\.devdigest\/agents\/[^/]+\.ya?ml$/;
+
+/**
+ * Given every path currently on the CI branch and the manifest path this
+ * export is about to (re-)write, returns the OTHER agent manifests that must be
+ * DELETED in the same commit. An earlier export for a DIFFERENT agent leaves
+ * its own `.devdigest/agents/<old-slug>.yaml` behind (`commitFiles` is additive
+ * — it never removes files), and two manifests hard-fail the runner (`Expected
+ * exactly one agent manifest ... found N` — see server/insights.md 2026-07-11).
+ * Anything matching the manifest shape except `keepPath` is stale and pruned.
+ * Pure: no I/O. `keepPath` is the path of the manifest in the freshly composed
+ * file set (never deleted), so the net post-commit state is exactly one.
+ */
+export function staleAgentManifests(treePaths: string[], keepPath: string | undefined): string[] {
+  return treePaths.filter((p) => AGENT_MANIFEST_RE.test(p) && p !== keepPath);
+}
+
 export interface ComposeCiFilesParams {
   /**
    * Frozen configuration-file identity for this installation. Taken as an

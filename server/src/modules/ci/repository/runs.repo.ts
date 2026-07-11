@@ -43,6 +43,14 @@ export interface CiRunsListFilters {
 const CI_LAST_CHECKED_AT_KEY = 'ci_last_checked_at';
 
 /**
+ * The `settings` key marking when the workspace last CLEARED its CI run
+ * history (the trash button). The ingest must NOT re-import GitHub runs older
+ * than this, so a cleared history stays cleared instead of repopulating on the
+ * next `checkForNewResults`. Same reused key/value `settings` table.
+ */
+const CI_RUNS_CLEARED_AT_KEY = 'ci_runs_cleared_at';
+
+/**
  * RunsRepository — CI ingest reads/writes for `ci_runs`, plus the
  * workspace-scoped "last checked at" marker.
  *
@@ -204,18 +212,46 @@ export class RunsRepository {
       .orderBy(sql`${t.ciRuns.ranAt} DESC NULLS LAST`);
   }
 
+  /**
+   * Delete every `ci_runs` row for a workspace — the CI Runs page "clear
+   * history" (trash) action. Workspace-scoped; returns how many rows were
+   * removed. Does not touch `ci_installations` (the CI deployment tab keeps
+   * its repos) or the `ci_last_checked_at` marker.
+   */
+  async deleteAllForWorkspace(workspaceId: string): Promise<number> {
+    const rows = await this.db
+      .delete(t.ciRuns)
+      .where(eq(t.ciRuns.workspaceId, workspaceId))
+      .returning({ id: t.ciRuns.id });
+    return rows.length;
+  }
+
   /** The workspace's last successful `checkForNewResults` completion time, or `null` if it never ran. */
   async getLastCheckedAt(workspaceId: string): Promise<Date | null> {
+    return this.getTimestampSetting(workspaceId, CI_LAST_CHECKED_AT_KEY);
+  }
+
+  /** Record `at` as the workspace's last `checkForNewResults` completion time. */
+  async setLastCheckedAt(workspaceId: string, at: Date): Promise<void> {
+    return this.setTimestampSetting(workspaceId, CI_LAST_CHECKED_AT_KEY, at);
+  }
+
+  /** When the workspace last cleared its CI run history, or `null` if never. */
+  async getClearedAt(workspaceId: string): Promise<Date | null> {
+    return this.getTimestampSetting(workspaceId, CI_RUNS_CLEARED_AT_KEY);
+  }
+
+  /** Record `at` as the workspace's "CI history cleared at" marker. */
+  async setClearedAt(workspaceId: string, at: Date): Promise<void> {
+    return this.setTimestampSetting(workspaceId, CI_RUNS_CLEARED_AT_KEY, at);
+  }
+
+  /** Read a workspace-level (`user_id IS NULL`) ISO-timestamp `settings` value, or `null`. */
+  private async getTimestampSetting(workspaceId: string, key: string): Promise<Date | null> {
     const rows = await this.db
       .select({ value: t.settings.value })
       .from(t.settings)
-      .where(
-        and(
-          eq(t.settings.workspaceId, workspaceId),
-          isNull(t.settings.userId),
-          eq(t.settings.key, CI_LAST_CHECKED_AT_KEY),
-        ),
-      )
+      .where(and(eq(t.settings.workspaceId, workspaceId), isNull(t.settings.userId), eq(t.settings.key, key)))
       .limit(1);
 
     const value = rows[0]?.value;
@@ -225,11 +261,11 @@ export class RunsRepository {
   }
 
   /**
-   * Record `at` as the workspace's last `checkForNewResults` completion time.
+   * Upsert a workspace-level (`user_id IS NULL`) ISO-timestamp `settings` value.
    *
    * Implemented as an explicit read-then-write, NOT `onConflictDoUpdate`,
    * even though `settings_ws_user_key_uq` covers exactly
-   * `(workspace_id, user_id, key)`. Reason: this key is workspace-level
+   * `(workspace_id, user_id, key)`. Reason: these keys are workspace-level
    * (`user_id IS NULL` by design), and Postgres unique indexes treat NULL as
    * distinct from NULL — an `ON CONFLICT (workspace_id, user_id, key)`
    * arbiter can never detect a conflict against an existing NULL-`user_id`
@@ -240,34 +276,23 @@ export class RunsRepository {
    * schema change needed.
    *
    * Not perfectly race-free under concurrent calls for the same workspace
-   * (a rare double-insert would just leave one harmless extra settings row
-   * for a display-only timestamp) — acceptable given this is only ever
-   * driven by a rate-limited, low-concurrency check endpoint.
+   * (a rare double-insert would just leave one harmless extra settings row) —
+   * acceptable given these are only ever driven by rate-limited, low-concurrency
+   * endpoints.
    */
-  async setLastCheckedAt(workspaceId: string, at: Date): Promise<void> {
+  private async setTimestampSetting(workspaceId: string, key: string, at: Date): Promise<void> {
     const value = at.toISOString();
     const existing = await this.db
       .select({ id: t.settings.id })
       .from(t.settings)
-      .where(
-        and(
-          eq(t.settings.workspaceId, workspaceId),
-          isNull(t.settings.userId),
-          eq(t.settings.key, CI_LAST_CHECKED_AT_KEY),
-        ),
-      )
+      .where(and(eq(t.settings.workspaceId, workspaceId), isNull(t.settings.userId), eq(t.settings.key, key)))
       .limit(1);
 
     const existingId = existing[0]?.id;
     if (existingId) {
       await this.db.update(t.settings).set({ value }).where(eq(t.settings.id, existingId));
     } else {
-      await this.db.insert(t.settings).values({
-        workspaceId,
-        userId: null,
-        key: CI_LAST_CHECKED_AT_KEY,
-        value,
-      });
+      await this.db.insert(t.settings).values({ workspaceId, userId: null, key, value });
     }
   }
 }

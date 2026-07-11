@@ -20,7 +20,7 @@ import * as t from '../../db/schema.js';
 import type { AgentRow } from '../../db/rows.js';
 import { InstallationsRepository, type CiInstallationRow } from './repository/installations.repo.js';
 import { RunsRepository, type CiRunRow } from './repository/runs.repo.js';
-import { composeCiFiles, slugify } from './helpers.js';
+import { composeCiFiles, slugify, staleAgentManifests } from './helpers.js';
 import type { ManifestAgentInput } from './manifest.js';
 
 /**
@@ -91,6 +91,33 @@ function toManifestAgentInput(agent: AgentRow): ManifestAgentInput {
     strategy: agent.strategy,
     ciFailOn: agent.ciFailOn,
   };
+}
+
+/**
+ * Guards that an agent's model can actually run in CI BEFORE any GitHub PR is
+ * opened. Every exported review executes through OpenRouter — the generated
+ * manifest hardcodes `provider: 'openrouter'` and the runner only ever builds
+ * `OpenRouterProvider` (see `agent-runner/AGENTS.md`) — so the model MUST be a
+ * fully-qualified OpenRouter slug (`vendor/model`, e.g.
+ * `anthropic/claude-sonnet-4.5`). A bare studio model name like
+ * `claude-sonnet-4-6` or `gpt-4o-mini` is rejected by OpenRouter at runtime
+ * with `400 <model> is not a valid model ID`, which previously surfaced ONLY as
+ * a silent hard-fail deep inside the target repo's own CI (exit 1, no artifact)
+ * — invisible in the studio until someone opened the Actions log. Catching it
+ * here turns that into a clear, actionable studio error, and is deliberately
+ * the ONLY thing this checks: it is a shape guard (is this an OpenRouter slug?),
+ * not an allow-list of known models (which would go stale on every new release).
+ */
+function assertExportableModel(model: string): void {
+  const [vendor, name] = model.trim().split('/');
+  if (!vendor || !name) {
+    throw new ValidationError(
+      `Agent model "${model}" is not a valid OpenRouter model ID. DevDigest runs every ` +
+        `CI review through OpenRouter, so the agent's model must be a fully-qualified ` +
+        `OpenRouter slug like "anthropic/claude-sonnet-4.5" or "deepseek/deepseek-v4-flash". ` +
+        `Update the model in the agent's Config tab, then export to CI again.`,
+    );
+  }
 }
 
 function toCiInstallationDto(
@@ -301,6 +328,11 @@ export class ExportService {
     const agent = await this.container.agentsRepo.getById(workspaceId, agentId);
     if (!agent) throw new NotFoundError('Agent not found');
 
+    // Fail fast on an unrunnable model BEFORE opening any GitHub PR — otherwise
+    // the invalid model only surfaces as a silent hard-fail inside the target
+    // repo's CI (AC-12 keeps the PR, but every review would crash).
+    assertExportableModel(agent.model);
+
     // The exported workflow runs the reviewer with
     // `${{ secrets.OPENROUTER_API_KEY }}`, so refuse to export until the user
     // has actually configured that key — but this is a presence check ONLY.
@@ -350,11 +382,32 @@ export class ExportService {
     if (input.action === 'open_pr') {
       // Any GitHub failure propagates unchanged (no catch here) — AC-12.
       const gh = await this.container.github();
+
+      // Prune a superseded agent's manifest left on the branch by an earlier
+      // export: a takeover writes THIS agent's `<slug>.yaml` but the previous
+      // agent's `.devdigest/agents/<old-slug>.yaml` lingers (commitFiles is
+      // additive), and the runner hard-fails on more than one manifest
+      // (server/insights.md 2026-07-11). Best-effort: a missing branch (fresh
+      // export) has nothing to prune, so a getRepoTree failure degrades to "no
+      // deletions" rather than aborting the export.
+      const manifestPath = files.find((f) => f.path.startsWith('.devdigest/agents/'))?.path;
+      let deletePaths: string[] = [];
+      try {
+        const tree = await gh.getRepoTree(repoRef, CI_BRANCH);
+        deletePaths = staleAgentManifests(
+          tree.map((e) => e.path),
+          manifestPath,
+        );
+      } catch {
+        deletePaths = [];
+      }
+
       await gh.commitFiles(repoRef, {
         branch: CI_BRANCH,
         base: input.base,
         message: `chore: configure DevDigest CI review (${agent.name})`,
         files: files.map((f) => ({ path: f.path, contents: f.contents })),
+        deletePaths,
       });
       const openPr = await gh.findOpenPr(repoRef, CI_BRANCH);
       if (openPr) {
@@ -400,6 +453,10 @@ export class ExportService {
   async bulkUpdate(workspaceId: string, agentId: string): Promise<CiBulkUpdateResult> {
     const agent = await this.container.agentsRepo.getById(workspaceId, agentId);
     if (!agent) throw new NotFoundError('Agent not found');
+
+    // A re-export pushes the agent's CURRENT model into every installation's
+    // manifest — reject an unrunnable one here too, before any GitHub write.
+    assertExportableModel(agent.model);
 
     const all = await this.installationsRepo.listByAgent(workspaceId, agentId);
     const active = all.filter((inst) => inst.disconnectedAt === null);

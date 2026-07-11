@@ -23,6 +23,7 @@ let checkState: { isPending: boolean; isError: boolean } = { isPending: false, i
 vi.mock("@/lib/hooks/ci", () => ({
   useCiRuns: (...args: unknown[]) => useCiRunsMock(...args),
   useCiCheck: () => ({ mutate: checkMutate, isPending: checkState.isPending, isError: checkState.isError }),
+  useClearCiRuns: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 let agentsData: { id: string; name: string }[] = [];

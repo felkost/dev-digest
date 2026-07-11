@@ -175,6 +175,17 @@ export default async function ciRoutes(appBase: FastifyInstance): Promise<void> 
     },
   );
 
+  // ---- Clear: wipe this workspace's CI run history (trash button) ---------
+  // Deletes ci_runs only — installations (CI deployment tab) are untouched.
+  app.delete(
+    '/ci/runs',
+    { schema: { response: { 200: z.object({ deleted: z.number().int() }) } } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return ingestService.clearRuns(workspaceId);
+    },
+  );
+
   // ---- Check: pull new GitHub Actions results (AC-16/17/26/27) ------------
   app.post(
     '/ci/check',

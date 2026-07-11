@@ -21,7 +21,7 @@ import { Button, Chip, EmptyState, ErrorState, Icon, Skeleton, SelectInput } fro
 import { AppShell } from "@/components/app-shell";
 import { useAgents } from "@/lib/hooks/agents";
 import { useRepos } from "@/lib/hooks/core";
-import { useCiRuns, useCiCheck, type CiRunsFilters } from "@/lib/hooks/ci";
+import { useCiRuns, useCiCheck, useClearCiRuns, type CiRunsFilters } from "@/lib/hooks/ci";
 import { RECENCY_DAYS, REFRESH_INTERVAL_MS, STATUS_VALUES, STATUS_META, DEFAULT_STATUS_META } from "./constants";
 import { RunRow } from "./_components/RunRow/RunRow";
 import { s } from "./styles";
@@ -57,6 +57,7 @@ export function CiRunsView() {
 
   const { data, isLoading, isError, refetch } = useCiRuns(filters, { refetchInterval: REFRESH_INTERVAL_MS });
   const check = useCiCheck();
+  const clear = useClearCiRuns();
 
   const runs = data?.runs ?? [];
   // Only GitHub Actions exists in v1, so any non-"gha" source selection yields
@@ -104,6 +105,17 @@ export function CiRunsView() {
           <Button kind="secondary" size="sm" icon="RefreshCw" onClick={() => check.mutate()} disabled={check.isPending}>
             {check.isPending ? t("runs.refreshing") : t("runs.refresh")}
           </Button>
+          <Button
+            kind="secondary"
+            size="sm"
+            icon="Trash"
+            onClick={() => {
+              if (window.confirm(t("runs.clearConfirm"))) clear.mutate();
+            }}
+            disabled={clear.isPending || runs.length === 0}
+            title={t("runs.clear")}
+            aria-label={t("runs.clear")}
+          />
         </div>
       </div>
 

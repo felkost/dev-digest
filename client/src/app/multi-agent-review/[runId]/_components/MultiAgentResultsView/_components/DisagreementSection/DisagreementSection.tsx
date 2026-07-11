@@ -14,9 +14,11 @@ export function DisagreementSection({ conflicts, doneCount }: { conflicts: Confl
   const t = useTranslations("multi-agent-review.results");
   const [onlyConflicts, setOnlyConflicts] = React.useState(true);
 
-  // AC-32: fewer than two completed agents → omit the section entirely.
-  if (doneCount < 2) return null;
-
+  // The section header is ALWAYS rendered so the "Where agents disagree" area
+  // is a stable part of the results interface. With fewer than two completed
+  // agents there is nothing to compare, so we show an explanatory message
+  // instead of the (meaningless) conflicts grid + filter toggle.
+  const belowThreshold = doneCount < 2;
   const shown = onlyConflicts ? conflicts.filter(isDisagreement) : conflicts;
 
   return (
@@ -24,16 +26,20 @@ export function DisagreementSection({ conflicts, doneCount }: { conflicts: Confl
       <SectionLabel
         icon="Activity"
         right={
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-secondary)" }}>
-            {t("showOnlyConflicts")}
-            <Toggle on={onlyConflicts} onChange={setOnlyConflicts} size={14} />
-          </label>
+          belowThreshold ? undefined : (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--text-secondary)" }}>
+              {t("showOnlyConflicts")}
+              <Toggle on={onlyConflicts} onChange={setOnlyConflicts} size={14} />
+            </label>
+          )
         }
       >
         {t("disagreementTitle")}
       </SectionLabel>
 
-      {shown.length === 0 ? (
+      {belowThreshold ? (
+        <div style={{ fontSize: 13, color: "var(--text-muted)" }}>{t("needsTwoAgents")}</div>
+      ) : shown.length === 0 ? (
         <div style={{ fontSize: 13, color: "var(--text-muted)" }}>{t("noConflictsFiltered")}</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

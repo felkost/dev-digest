@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { ExportService } from '../src/modules/ci/export-service.js';
 import { MockGitHubClient, MockRunnerBundler } from '../src/adapters/mocks.js';
-import { AppError, NotFoundError } from '../src/platform/errors.js';
+import { AppError, NotFoundError, ValidationError } from '../src/platform/errors.js';
 import type { Container } from '../src/platform/container.js';
 import type { AgentRow } from '../src/db/rows.js';
 import type {
@@ -229,6 +229,83 @@ const PREVIEW_INPUT: CiExportPreviewInput = {
   triggers: ['opened', 'synchronize'],
   post_as: 'github_review',
 };
+
+describe('ExportService — model must be an OpenRouter slug (assertExportableModel)', () => {
+  it('exportInstallation rejects a bare (non-OpenRouter) model BEFORE any GitHub write or persistence', async () => {
+    const github = new MockGitHubClient();
+    // The exact failure the user hit: an agent configured with a bare model
+    // name that OpenRouter rejects at runtime (`400 ... is not a valid model
+    // ID`) — previously a silent hard-fail deep inside the target repo's CI.
+    const container = makeContainer({ github, agent: makeAgentRow({ model: 'claude-sonnet-4-6' }) });
+    const { service, installationsRepo } = makeService(container);
+
+    await expect(
+      service.exportInstallation(WS_ID, REPO_ID, AGENT_ID, EXPORT_INPUT),
+    ).rejects.toThrow(ValidationError);
+
+    // Fail-fast: no commit, no PR opened, nothing persisted (AC-12 timing).
+    expect(github.committed).toHaveLength(0);
+    expect(github.openedPrs).toHaveLength(0);
+    expect(installationsRepo.upsertCalls).toHaveLength(0);
+  });
+
+  it('exportInstallation accepts a fully-qualified OpenRouter slug', async () => {
+    const container = makeContainer({ agent: makeAgentRow({ model: 'anthropic/claude-sonnet-4.5' }) });
+    const { service } = makeService(container);
+
+    await expect(
+      service.exportInstallation(WS_ID, REPO_ID, AGENT_ID, EXPORT_INPUT),
+    ).resolves.toMatchObject({ pr_url: expect.any(String) });
+  });
+
+  it('bulkUpdate rejects a bare (non-OpenRouter) model too', async () => {
+    const container = makeContainer({ agent: makeAgentRow({ model: 'gpt-4o-mini' }) });
+    const { service } = makeService(container);
+
+    await expect(service.bulkUpdate(WS_ID, AGENT_ID)).rejects.toThrow(ValidationError);
+  });
+});
+
+describe('ExportService.exportInstallation — prunes a superseded agent manifest (2-manifests bug)', () => {
+  it('deletes a previous agent manifest left on the branch, keeping only the current one', async () => {
+    // The branch already carries a PRIOR agent's manifest (a hard-deleted
+    // installation leaves the committed file behind); this export writes
+    // `security-reviewer.yaml` and must prune the stale `performance-reviewer.yaml`
+    // so the runner sees EXACTLY ONE manifest.
+    const github = new MockGitHubClient({
+      tree: [
+        { path: 'src/index.ts', type: 'blob' },
+        { path: '.devdigest/agents/performance-reviewer.yaml', type: 'blob' }, // stale
+        { path: '.devdigest/agents/security-reviewer.yaml', type: 'blob' }, // overwritten below
+        { path: '.github/workflows/devdigest-review.yml', type: 'blob' },
+      ],
+    });
+    const container = makeContainer({ github }); // default agent name = 'Security Reviewer'
+    const { service } = makeService(container);
+
+    await service.exportInstallation(WS_ID, REPO_ID, AGENT_ID, EXPORT_INPUT);
+
+    expect(github.committed).toHaveLength(1);
+    const commit = github.committed[0]!;
+    expect(commit.deletePaths).toEqual(['.devdigest/agents/performance-reviewer.yaml']);
+    // The current agent's own manifest is (re)written, never deleted.
+    expect(commit.files.some((f) => f.path === '.devdigest/agents/security-reviewer.yaml')).toBe(true);
+  });
+
+  it('prunes nothing on a fresh export — a getRepoTree failure (missing branch) degrades to no deletions', async () => {
+    const github = new MockGitHubClient();
+    github.getRepoTree = async () => {
+      throw new Error('404 branch not found');
+    };
+    const container = makeContainer({ github });
+    const { service } = makeService(container);
+
+    await service.exportInstallation(WS_ID, REPO_ID, AGENT_ID, EXPORT_INPUT);
+
+    expect(github.committed).toHaveLength(1);
+    expect(github.committed[0]!.deletePaths).toEqual([]);
+  });
+});
 
 describe('ExportService.exportInstallation — open_pr call order + persistence timing', () => {
   it('calls commitFiles, then findOpenPr, then openPullRequest, and only calls upsertPublished after they succeed', async () => {

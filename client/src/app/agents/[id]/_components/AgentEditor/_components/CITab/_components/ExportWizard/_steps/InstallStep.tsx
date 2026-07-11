@@ -25,10 +25,9 @@ export function InstallStep({ t, conflict, installResult, repoLabel, fileCount }
         </div>
       )}
       {installResult ? (
-        // Success view. Deliberately shows only the PR link + the secret's NAME
-        // (via `secretNote`) — never the OpenRouter secret VALUE. The value is a
-        // live credential the user already holds; echoing it back into the DOM
-        // would be a needless leak, so the server no longer returns it at all.
+        // Success view — just the opened PR link. The secret reminder lives in
+        // the generated PR body (which the user reviews before merge), so the
+        // wizard doesn't repeat it here. The secret VALUE is never echoed back.
         <div style={s.installResult}>
           {installResult.pr_url && (
             <div style={s.installResultRow}>
@@ -37,7 +36,6 @@ export function InstallStep({ t, conflict, installResult, repoLabel, fileCount }
               </a>
             </div>
           )}
-          <div style={s.hint}>{t("exportWizard.secretNote", { key: "OPENROUTER_API_KEY" })}</div>
         </div>
       ) : (
         <>
@@ -61,8 +59,6 @@ export function InstallStep({ t, conflict, installResult, repoLabel, fileCount }
             </span>
             <span style={s.installZipHint}>{t("exportWizard.copyZipHint")}</span>
           </div>
-
-          <div style={s.hint}>{t("exportWizard.secretNote", { key: "OPENROUTER_API_KEY" })}</div>
 
           <div style={s.installDocs}>
             {t("exportWizard.installHelp")}{" "}

@@ -2,7 +2,10 @@ import type { CSSProperties } from "react";
 
 /** Co-located styles for CITab. */
 export const s = {
-  wrap: { maxWidth: 760 } satisfies CSSProperties,
+  // Fill the parent container (the Agent Editor tab body) rather than capping
+  // at a fixed 760px — the CI deployment list + its rows should span the full
+  // available width.
+  wrap: { width: "100%" } satisfies CSSProperties,
   header: {
     display: "flex",
     alignItems: "flex-start",

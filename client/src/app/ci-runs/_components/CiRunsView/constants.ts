@@ -42,7 +42,10 @@ export const STATUS_VALUES = ["succeeded", "no_findings", "failed", "running", "
  */
 export const STATUS_META: Record<string, { labelKey: string; color: string; bg: string; icon: IconName }> = {
   succeeded: { labelKey: "succeeded", color: "var(--ok)", bg: "var(--ok-bg)", icon: "CheckCircle" },
-  no_findings: { labelKey: "noFindings", color: "var(--ok)", bg: "var(--ok-bg)", icon: "CheckCircle" },
+  // "No findings" is a clean run with nothing to report — a neutral/muted grey
+  // (matches the reference design), distinct from the green "Succeeded" (a run
+  // that DID surface findings). Only `succeeded` is green; `failed` is red.
+  no_findings: { labelKey: "noFindings", color: "var(--text-muted)", bg: "var(--bg-hover)", icon: "Slash" },
   failed: { labelKey: "failed", color: "var(--crit)", bg: "var(--crit-bg)", icon: "XCircle" },
   running: { labelKey: "running", color: "var(--accent)", bg: "var(--accent-bg)", icon: "RefreshCw" },
   skipped_fork: { labelKey: "skippedFork", color: "var(--text-muted)", bg: "var(--bg-hover)", icon: "Slash" },

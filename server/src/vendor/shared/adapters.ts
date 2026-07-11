@@ -140,6 +140,16 @@ export interface CommitFilesPayload {
   base: string;
   message: string;
   files: CommitFile[];
+  /**
+   * Paths to DELETE in the same commit (implemented as a git tree entry with
+   * `sha: null`). Used by the CI export to prune a previous agent's stale
+   * `.devdigest/agents/<old-slug>.yaml` when a different agent takes over a
+   * repo — the runner requires EXACTLY ONE manifest, so a leftover one from an
+   * earlier export must be removed atomically alongside the new file. Absent or
+   * empty = delete nothing. Every path must actually exist on `branch` (callers
+   * derive them from `getRepoTree`), or GitHub's create-tree may reject it.
+   */
+  deletePaths?: string[];
 }
 
 export interface GitHubClient {

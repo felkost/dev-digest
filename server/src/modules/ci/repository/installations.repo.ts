@@ -176,11 +176,30 @@ export class InstallationsRepository {
     return row;
   }
 
-  /** Marks an installation disconnected — stops future tracking; no file-system side effect. */
+  /**
+   * Fully removes an installation — a hard delete, not a soft "mark
+   * disconnected". Confirmed product decision (2026-07-11): disconnecting a
+   * repo must be a clean removal so that re-adding it starts from a blank
+   * status, never resurrecting the reused row's pre-disconnect run history
+   * (the "Failed 7h ago on a just-added repo" bug).
+   *
+   * Any `ci_runs` attached to this installation are NOT deleted: the FK
+   * `ci_runs.ci_installation_id` is `ON DELETE SET NULL` (schema/ci.ts), so
+   * they detach and remain visible on the cross-agent CI Runs page through
+   * their own denormalized `repo`/`agent` snapshot columns (`runs.repo.ts`
+   * `list` already left-joins installations precisely because
+   * `ci_installation_id` can be null after this delete). Re-adding the same
+   * repo is therefore a fresh INSERT in `upsertPublished` (its `findByRepo`
+   * lookup now finds nothing), with a new id and a clean run history.
+   *
+   * The `disconnected_at` column and the soft-disconnect branches that read it
+   * (`listTracked`, `upsertPublished`'s `setWhere`, `resolveInstallationTarget`)
+   * are intentionally left in place: they still correctly tolerate any legacy
+   * soft-disconnected rows written before this change.
+   */
   async disconnect(workspaceId: string, id: string): Promise<CiInstallationRow | undefined> {
     const rows = await this.db
-      .update(t.ciInstallations)
-      .set({ disconnectedAt: new Date() })
+      .delete(t.ciInstallations)
       .where(and(eq(t.ciInstallations.id, id), eq(t.ciInstallations.workspaceId, workspaceId)))
       .returning();
     return rows[0];

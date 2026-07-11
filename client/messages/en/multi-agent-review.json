@@ -52,10 +52,14 @@
     "learn": "Learn",
     "replyToAuthor": "Reply to author",
     "comingSoon": "Coming soon",
+    "findingsSummaryTitle": "Findings",
+    "findingsSummaryEmpty": "No findings from any agent that completed.",
+    "findingsSummaryCount": "{count, plural, one {# finding} other {# findings}} · {agents, plural, one {# agent} other {# agents}}",
     "disagreementTitle": "Where agents disagree",
     "showOnlyConflicts": "Show only conflicts",
     "didNotFlag": "did not flag",
     "noConflictsFiltered": "No disagreements — every agent that completed agreed on every flagged location.",
+    "needsTwoAgents": "Run at least 2 agents on this PR to compare where they agree and disagree.",
     "loadErrorTitle": "Could not load this run",
     "retry": "Retry"
   }

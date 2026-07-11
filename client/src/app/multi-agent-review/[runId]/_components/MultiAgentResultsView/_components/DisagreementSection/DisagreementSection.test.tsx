@@ -43,10 +43,14 @@ const DISAGREEMENT: Conflict = {
 };
 
 describe("DisagreementSection", () => {
-  it("is omitted entirely when fewer than 2 columns are done (AC-32)", () => {
+  it("still renders the section header with an explanatory message below the 2-done threshold", () => {
     renderWithIntl(<DisagreementSection conflicts={[AGREEMENT, DISAGREEMENT]} doneCount={1} />);
-    expect(screen.queryByText("Where agents disagree")).not.toBeInTheDocument();
+    // Header is always present so the section is a stable part of the UI.
+    expect(screen.getByText("Where agents disagree")).toBeInTheDocument();
+    // The conflicts grid + filter toggle are replaced by a "run 2+ agents" hint.
     expect(screen.queryByText("Disputed finding")).not.toBeInTheDocument();
+    expect(screen.getByText(/Run at least 2 agents/)).toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 
   it("renders once at least 2 columns are done", () => {

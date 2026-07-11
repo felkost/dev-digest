@@ -9,7 +9,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NextIntlClientProvider } from "next-intl";
-import type { MultiAgentRun, ReviewRecord } from "@devdigest/shared";
+import type { MultiAgentRun, FindingRecord } from "@devdigest/shared";
 import maResultsMessages from "../../../../../../messages/en/multi-agent-review.json";
 import prReviewMessages from "../../../../../../messages/en/prReview.json";
 
@@ -32,48 +32,30 @@ vi.mock("@/lib/hooks/multi-agent-review", () => ({
   useMultiAgentRun: () => ({ data: runData, isLoading, isError, error: null, refetch }),
 }));
 
-// The Tabs view's full finding detail is sourced from this cache (mapped
-// run_id -> ReviewRecord), not from the compact AgentColumn.findings — so
-// its fixture must independently carry the same finding for run-1.
-const REVIEW_RUN_1: ReviewRecord = {
-  id: "review-1",
-  pr_id: "pr-1",
-  agent_id: "a1",
-  run_id: "run-1",
-  agent_name: "Security",
-  kind: "review",
-  verdict: "approve",
-  summary: "ok",
-  score: 90,
-  model: "gpt-5",
-  grounding: null,
-  created_at: "2026-07-09T00:00:00Z",
-  findings: [
-    {
-      id: "f1",
-      severity: "WARNING",
-      category: "perf",
-      title: "N+1 query",
-      file: "src/db.ts",
-      start_line: 22,
-      end_line: 22,
-      rationale: "This loops a query per row.",
-      suggestion: null,
-      confidence: 0.8,
-      kind: "finding",
-      trifecta_components: null,
-      evidence: null,
-      review_id: "review-1",
-      accepted_at: null,
-      dismissed_at: null,
-    },
-  ],
+// The Tabs view + trace drawer source full finding detail from the composed
+// run's own findings_by_run map (keyed by run_id), NOT usePrReviews — so the
+// run() fixture below carries this full finding for run-1 in findings_by_run.
+const FINDING_RUN_1: FindingRecord = {
+  id: "f1",
+  severity: "WARNING",
+  category: "perf",
+  title: "N+1 query",
+  file: "src/db.ts",
+  start_line: 22,
+  end_line: 22,
+  rationale: "This loops a query per row.",
+  suggestion: null,
+  confidence: 0.8,
+  kind: "finding",
+  trifecta_components: null,
+  evidence: null,
+  review_id: "review-1",
+  accepted_at: null,
+  dismissed_at: null,
 };
 
-const refetchReviews = vi.fn();
 let liveRunning = false;
 vi.mock("@/lib/hooks/reviews", () => ({
-  usePrReviews: () => ({ data: [REVIEW_RUN_1], refetch: refetchReviews }),
   useRunEvents: () => ({ events: [], running: liveRunning }),
   useFindingAction: () => ({ mutate: vi.fn(), isPending: false }),
 }));
@@ -107,7 +89,6 @@ afterEach(() => {
   isError = false;
   liveRunning = false;
   refetch.mockClear();
-  refetchReviews.mockClear();
   push.mockClear();
   traceDrawerProps.length = 0;
 });
@@ -171,6 +152,9 @@ function run(overrides: Partial<MultiAgentRun> = {}): MultiAgentRun {
       },
     ],
     conflicts: [],
+    // Full per-run findings — the page's single finding-detail source (Tabs +
+    // trace drawer). run-1 has the full N+1 finding; run-2 has none.
+    findings_by_run: { "run-1": [FINDING_RUN_1], "run-2": [] },
     ...overrides,
   };
 }
@@ -196,15 +180,16 @@ describe("MultiAgentResultsView", () => {
     const user = userEvent.setup();
     renderWithIntl(<MultiAgentResultsView runId="group-1" />);
 
-    // Columns view: compact finding row visible.
-    expect(screen.getByText("N+1 query")).toBeInTheDocument();
-    expect(screen.getByText("src/db.ts:22")).toBeInTheDocument();
+    // Columns view: compact finding row visible (also mirrored in the
+    // consolidated bottom Findings section, so it appears more than once).
+    expect(screen.getAllByText("N+1 query").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("src/db.ts:22").length).toBeGreaterThan(0);
 
     const fetchCallsBeforeToggle = refetch.mock.calls.length;
     await user.click(screen.getByRole("button", { name: "Tabs" }));
 
     // Tabs view: same finding, now as a full FindingCard (Accept/Dismiss present).
-    expect(screen.getByText("N+1 query")).toBeInTheDocument();
+    expect(screen.getAllByText("N+1 query").length).toBeGreaterThan(0);
     expect(screen.getByText("Accept")).toBeInTheDocument();
     // Toggling views is pure client-side state — no additional refetch fired.
     expect(refetch.mock.calls.length).toBe(fetchCallsBeforeToggle);
@@ -255,12 +240,11 @@ describe("MultiAgentResultsView", () => {
     expect(screen.getByText("2 selected agents · parallel")).toBeInTheDocument();
   });
 
-  it("also refetches usePrReviews (not just the run poll) when the live SSE stream settles, so Tabs view picks up a newly-completed agent's findings", async () => {
+  it("refetches the composed run when the live SSE stream settles, so a newly-completed agent's findings (carried in findings_by_run) appear", async () => {
     runData = run();
     liveRunning = true;
     const { rerender } = renderWithIntl(<MultiAgentResultsView runId="group-1" />);
     expect(refetch).not.toHaveBeenCalled();
-    expect(refetchReviews).not.toHaveBeenCalled();
 
     // Running -> settled transition (mirrors the wasRunning ref pattern under test).
     liveRunning = false;
@@ -273,11 +257,12 @@ describe("MultiAgentResultsView", () => {
       </NextIntlClientProvider>,
     );
 
+    // One refetch of the composed run refreshes columns, conflicts AND
+    // findings_by_run together — no separate reviews refetch needed.
     expect(refetch).toHaveBeenCalledTimes(1);
-    expect(refetchReviews).toHaveBeenCalledTimes(1);
   });
 
-  it("omits the disagreement section when fewer than 2 columns are done (AC-32)", () => {
+  it("always shows the disagreement section header, with a 'run 2+ agents' hint below the 2-done threshold", () => {
     runData = run({
       columns: [
         { ...run().columns[0]!, status: "running", score: null },
@@ -285,6 +270,7 @@ describe("MultiAgentResultsView", () => {
       ],
     });
     renderWithIntl(<MultiAgentResultsView runId="group-1" />);
-    expect(screen.queryByText("Where agents disagree")).not.toBeInTheDocument();
+    expect(screen.getByText("Where agents disagree")).toBeInTheDocument();
+    expect(screen.getByText(/Run at least 2 agents/)).toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Badge, Icon, SEV } from "@devdigest/ui";
 import type { CiRun } from "@devdigest/shared";
 import { formatCost } from "@/lib/format";
+import { githubPrUrl } from "@/lib/github-urls";
 import { absoluteTime, formatDuration } from "../../helpers";
 import { STATUS_META, DEFAULT_STATUS_META } from "../../constants";
 import { s } from "../../styles";
@@ -48,13 +49,16 @@ export function RunRow({ run }: { run: CiRun }) {
       <div style={{ minWidth: 0 }}>
         {run.pr_number == null ? (
           <span style={s.muted}>—</span>
-        ) : run.github_url ? (
+        ) : run.repo ? (
+          // A PR number links to the PR itself (…/pull/{n}), NOT the CI job run
+          // (that's what the Trace column is for). Built from repo + pr_number
+          // we already hold — see githubPrUrl.
           <a
-            href={run.github_url}
+            href={githubPrUrl(run.repo, run.pr_number)}
             target="_blank"
             rel="noreferrer"
-            title={t("runs.viewJob")}
-            aria-label={t("runs.viewJob")}
+            title={t("runs.viewPr")}
+            aria-label={t("runs.viewPr")}
             className="mono"
             style={{ ...s.cellPrimary, color: "var(--accent-text)" }}
           >

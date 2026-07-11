@@ -36,6 +36,16 @@ export function generateWorkflowYaml(params: GenerateWorkflowYamlParams): string
         types: params.triggers,
       },
     },
+    // Least-privilege GITHUB_TOKEN: the runner READs the repo (checkout) and
+    // WRITES to the pull request (post the review / PR comment). Without this,
+    // GitHub's default read-only token makes posting a comment fail with
+    // `403 Resource not accessible by integration` — the whole job then exits 1.
+    // `pull-requests: write` covers both a GitHub review and a PR conversation
+    // comment (a PR is an issue, so its comments fall under this scope).
+    permissions: {
+      contents: 'read',
+      'pull-requests': 'write',
+    },
     jobs: {
       review: {
         'runs-on': 'ubuntu-latest',
@@ -48,7 +58,11 @@ export function generateWorkflowYaml(params: GenerateWorkflowYamlParams): string
         steps: [
           {
             name: 'Checkout',
-            uses: 'actions/checkout@v4',
+            // @v5 runs on Node.js 24. @v4 targets Node.js 20, which GitHub is
+            // deprecating on Actions runners — it emits a "Node.js 20 is
+            // deprecated" annotation on every review run (forced onto Node 24
+            // anyway). Pinning the Node-24 major keeps the run warning-free.
+            uses: 'actions/checkout@v5',
           },
           {
             name: 'Run DevDigest review',
@@ -66,7 +80,11 @@ export function generateWorkflowYaml(params: GenerateWorkflowYamlParams): string
             // check too, not only a passing one. A true hard-crash run that
             // wrote no result file at all must not fail this step itself.
             if: 'always()',
-            uses: 'actions/upload-artifact@v4',
+            // @v6 runs on Node.js 24. Unlike checkout (node24 since @v5),
+            // upload-artifact@v5 still declares node20 and keeps emitting the
+            // "Node.js 20 is deprecated" annotation — so this step specifically
+            // needs @v6, not @v5.
+            uses: 'actions/upload-artifact@v6',
             with: {
               name: params.resultArtifactName,
               path: 'devdigest-result.json',

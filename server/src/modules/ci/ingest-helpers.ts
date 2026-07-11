@@ -45,6 +45,12 @@ export function mapGithubRunToStatus(
     // Fallback: no artifact to trust — GitHub's own reported outcome only.
     return run.conclusion === 'success' ? 'no_findings' : 'failed';
   }
-  if (run.conclusion === 'failure') return 'failed';
+  // An artifact exists = the review actually RAN and produced a grounded
+  // result, so the DevDigest status is derived from the FINDINGS, not from the
+  // GitHub run conclusion. A `failure` conclusion here means the `ci_fail_on`
+  // gate requested changes and the runner exited non-zero BY DESIGN (so the
+  // GitHub *check* blocks the PR) — that is a SUCCESSFUL review that surfaced
+  // blocking findings, not a crash. "Failed" is reserved for a run that wrote
+  // no artifact at all (the null branch above).
   return artifact.findings_count === 0 ? 'no_findings' : 'succeeded';
 }

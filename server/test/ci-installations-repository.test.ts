@@ -3,8 +3,9 @@
  * satisfies the exact Drizzle chain shapes this repository calls
  * (`select().from().where()[.limit()]`,
  * `insert().values().onConflictDoUpdate().returning()`,
- * `update().set().where().returning()`), mirroring `test/pull.repo.test.ts`'s
- * `makeFakeDb` pattern. No Postgres, no Docker.
+ * `delete().where().returning()` — `disconnect` is a hard delete since
+ * 2026-07-11), mirroring `test/pull.repo.test.ts`'s `makeFakeDb` pattern.
+ * No Postgres, no Docker.
  */
 import { describe, it, expect } from 'vitest';
 import { Column, Param, SQL, StringChunk } from 'drizzle-orm';
@@ -96,11 +97,13 @@ function makeFakeDb(opts: {
   selectRows?: FakeRow[];
   insertReturning?: FakeRow[];
   updateReturning?: FakeRow[];
+  deleteReturning?: FakeRow[];
   onSelectWhere?: (whereArg: unknown) => void;
   onInsertValues?: (values: unknown) => void;
   onConflictConfig?: (config: ConflictConfig) => void;
   onUpdateSet?: (values: unknown) => void;
   onUpdateWhere?: (whereArg: unknown) => void;
+  onDeleteWhere?: (whereArg: unknown) => void;
 }): Db {
   const fakeDb = {
     select: (_cols?: unknown) => ({
@@ -146,6 +149,14 @@ function makeFakeDb(opts: {
         };
       },
     }),
+    delete: (_table: unknown) => ({
+      where: (whereArg: unknown) => {
+        opts.onDeleteWhere?.(whereArg);
+        return {
+          returning: () => Promise.resolve(opts.deleteReturning ?? []),
+        };
+      },
+    }),
   };
   return fakeDb as unknown as Db;
 }
@@ -156,8 +167,9 @@ function makeFakeDb(opts: {
  * single-query-per-test case), this one actually tracks a single in-memory
  * row across MULTIPLE sequential `upsertPublished`/`disconnect` calls in the
  * same test, mirroring Postgres's real `INSERT ... ON CONFLICT DO UPDATE`
- * semantics closely enough to assert on the RETURNED row after a genuine
- * disconnect → reconnect round trip (not just the captured SET config).
+ * (and `DELETE ... RETURNING`) semantics closely enough to assert on the
+ * RETURNED row after a genuine disconnect (hard delete) → re-add round trip
+ * (not just the captured SET config).
  */
 function makeStatefulFakeDb(): Db {
   let row: FakeRow | undefined;
@@ -200,6 +212,20 @@ function makeStatefulFakeDb(): Db {
             return Promise.resolve(row ? [{ ...row }] : []);
           },
         }),
+      }),
+    }),
+    // Hard delete (the disconnect path since 2026-07-11): drop the in-memory
+    // row entirely and return its final snapshot, exactly like Postgres
+    // `DELETE ... RETURNING`. A subsequent `upsertPublished` then takes the
+    // first-insert branch again (no conflict) — a genuinely FRESH install,
+    // never a reconnect of the removed row.
+    delete: (_table: unknown) => ({
+      where: (_whereArg: unknown) => ({
+        returning: () => {
+          const removed = row;
+          row = undefined;
+          return Promise.resolve(removed ? [{ ...removed }] : []);
+        },
       }),
     }),
   };
@@ -306,16 +332,12 @@ describe('InstallationsRepository.getById', () => {
 });
 
 describe('InstallationsRepository.disconnect', () => {
-  it('sets disconnectedAt and returns the updated row', async () => {
-    const row = makeRow({ disconnectedAt: new Date('2026-07-10T00:00:00Z') });
-    let capturedSet: unknown;
+  it('hard-deletes the matching row and returns its final snapshot', async () => {
+    const row = makeRow();
     let whereCalled = false;
     const db = makeFakeDb({
-      updateReturning: [row],
-      onUpdateSet: (v) => {
-        capturedSet = v;
-      },
-      onUpdateWhere: () => {
+      deleteReturning: [row],
+      onDeleteWhere: () => {
         whereCalled = true;
       },
     });
@@ -323,13 +345,15 @@ describe('InstallationsRepository.disconnect', () => {
 
     const result = await repo.disconnect(WORKSPACE_ID, INSTALLATION_ID);
 
+    // A full removal, not a soft "mark disconnected" — the row is DELETEd (so
+    // re-adding the repo is a fresh install with a clean run history, never a
+    // reconnect of the stale row). The deleted row is returned via RETURNING.
     expect(result).toEqual(row);
-    expect(capturedSet).toMatchObject({ disconnectedAt: expect.any(Date) });
     expect(whereCalled).toBe(true);
   });
 
   it('returns undefined when no matching row exists', async () => {
-    const db = makeFakeDb({ updateReturning: [] });
+    const db = makeFakeDb({ deleteReturning: [] });
     const repo = new InstallationsRepository(db);
 
     const result = await repo.disconnect(WORKSPACE_ID, 'missing-id');
@@ -499,7 +523,7 @@ describe('InstallationsRepository.upsertPublished', () => {
     ).rejects.toBeInstanceOf(AppError);
   });
 
-  it('a second upsertPublished call for the same (workspace, repo) with a DIFFERENT agentId SUCCEEDS once the existing row is disconnected — a disconnected installation is a fully free slot (Bug 2 takeover)', async () => {
+  it('a second upsertPublished call for the same (workspace, repo) with a DIFFERENT agentId SUCCEEDS once the existing row is removed — a disconnected (deleted) repo is a fully free slot (Bug 2 takeover)', async () => {
     const db = makeStatefulFakeDb();
     const repo = new InstallationsRepository(db);
 
@@ -513,14 +537,17 @@ describe('InstallationsRepository.upsertPublished', () => {
       workflowContents: 'name: v1',
     });
 
+    // disconnect() is now a hard delete: it returns the removed (still-active)
+    // row snapshot and frees the (workspace, repo) slot entirely.
     const disconnected = await repo.disconnect(WORKSPACE_ID, INSTALLATION_ID);
-    expect(disconnected!.disconnectedAt).not.toBeNull();
+    expect(disconnected!.id).toBe(first.id);
 
     const OTHER_AGENT_ID = '88888888-8888-8888-8888-888888888888';
-    // The caller (export-service.ts's resolveInstallationTarget) is
-    // responsible for computing a FRESH slug for a takeover — this test
-    // supplies one directly to prove upsertPublished trusts and applies it.
-    const takeover = await repo.upsertPublished(WORKSPACE_ID, 'irrelevant-fresh-id', {
+    const FRESH_ID = '99999999-9999-9999-9999-999999999999';
+    // With the old row deleted, resolveInstallationTarget's findByRepo finds
+    // nothing, so a different agent's export is a genuinely FRESH install with
+    // a new id/slug — not a reconnect of the removed row.
+    const takeover = await repo.upsertPublished(WORKSPACE_ID, FRESH_ID, {
       agentId: OTHER_AGENT_ID,
       repo: REPO,
       targetType: 'gha',
@@ -530,12 +557,12 @@ describe('InstallationsRepository.upsertPublished', () => {
       workflowContents: 'name: takeover',
     });
 
-    // Same row reused (one-row-per-repo invariant) — never a duplicate.
-    expect(takeover.id).toBe(first.id);
+    // A brand-new row (the removed one is gone) — new id, fresh version.
+    expect(takeover.id).toBe(FRESH_ID);
+    expect(takeover.id).not.toBe(first.id);
     expect(takeover.agentId).toBe(OTHER_AGENT_ID);
     expect(takeover.slug).toBe('style-reviewer');
-    expect(takeover.slug).not.toBe(first.slug);
-    // The re-claimed slot is active again.
+    expect(takeover.workflowVersion).toBe(1);
     expect(takeover.disconnectedAt).toBeNull();
   });
 
@@ -600,7 +627,7 @@ describe('InstallationsRepository.upsertPublished', () => {
     expect(second.workflowVersion).toBe(2);
   });
 
-  it('clears disconnected_at on the returned row when re-publishing a previously disconnected installation (AC-47 reconnect)', async () => {
+  it('re-publishing a repo after it was disconnected is a FRESH install — new row, workflow_version back to 1 — never a reconnect of the removed row (2026-07-11 hard-delete fix)', async () => {
     const db = makeStatefulFakeDb();
     const repo = new InstallationsRepository(db);
 
@@ -618,14 +645,19 @@ describe('InstallationsRepository.upsertPublished', () => {
     expect(first.disconnectedAt).toBeNull();
     expect(first.workflowVersion).toBe(1);
 
+    // Hard delete: the row (and its stale run history) is gone.
     const disconnected = await repo.disconnect(WORKSPACE_ID, INSTALLATION_ID);
-    expect(disconnected!.disconnectedAt).not.toBeNull();
+    expect(disconnected!.id).toBe(first.id);
 
-    const reconnected = await repo.upsertPublished(WORKSPACE_ID, INSTALLATION_ID, published);
+    // Re-adding is a first insert again (the real flow mints a new id via
+    // resolveInstallationTarget; here we reuse the same id to isolate the
+    // version reset). The key guarantee: workflow_version restarts at 1 — this
+    // is NOT the old soft-reconnect that would have bumped it to 2 — so a
+    // freshly re-added repo carries no residue from its previous life.
+    const readded = await repo.upsertPublished(WORKSPACE_ID, INSTALLATION_ID, published);
 
-    expect(reconnected.disconnectedAt).toBeNull();
-    // workflowVersion still increments normally — unaffected by this fix.
-    expect(reconnected.workflowVersion).toBe(2);
+    expect(readded.disconnectedAt).toBeNull();
+    expect(readded.workflowVersion).toBe(1);
   });
 
   it('increments workflow_version via a SQL expression referencing the existing column, never a plain literal', async () => {

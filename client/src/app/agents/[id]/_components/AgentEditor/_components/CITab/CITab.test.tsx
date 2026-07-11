@@ -2,11 +2,6 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { Agent, CiAgentSurface, CiBulkUpdateResult, CiInstallation } from "@devdigest/shared";
-// Canonical status->icon/color map (CI Runs page) — imported directly rather
-// than hardcoded, so this regression test fails the moment InstallationRow
-// stops actually consuming it (e.g. reverts to a local copy that drifts),
-// not just when a literal string happens to go stale.
-import { STATUS_META } from "@/app/ci-runs/_components/CiRunsView/constants";
 import agentsMessages from "../../../../../../../../messages/en/agents.json";
 import ciMessages from "../../../../../../../../messages/en/ci.json";
 
@@ -135,6 +130,8 @@ describe("CITab", () => {
 
     expect(screen.getByText("acme/payments-api")).toBeInTheDocument();
     expect(screen.getByText("GitHub Actions")).toBeInTheDocument();
+    // The per-repo badge is DEPLOYMENT health ("Succeeded"), not the last review
+    // run's outcome — its existence proves the export PR was created.
     expect(screen.getByText("Succeeded")).toBeInTheDocument();
     expect(screen.getByText("Active in 1 repos")).toBeInTheDocument();
   });
@@ -164,28 +161,25 @@ describe("CITab", () => {
     expect(screen.getByText("Active in 1 repos")).toBeInTheDocument();
   });
 
-  it("gives a previously-drifted status (no_findings) the exact same color as CI Runs' canonical status map", () => {
-    // no_findings is one of the 3 statuses whose old, independently-duplicated
-    // STATUS_STYLE map in InstallationRow.tsx had already drifted from the CI
-    // Runs page's STATUS_META (different icon AND different color) — this
-    // guards that specific regression, not just "a badge renders".
+  it("shows a green 'Succeeded' deployment badge even when the last review run failed (run outcomes live on CI Runs, not here)", () => {
+    // Even when the most recent review run FAILED, the per-repo badge must stay
+    // a green "Succeeded": the badge is deployment health (the export PR was
+    // created — `upsertPublished` is the last step of `exportInstallation`),
+    // never the run outcome. This guards the regression where a failed review
+    // run made a correctly-installed repo look broken on the agent's CI tab.
     surface = {
-      installations: [makeInstallation({ latest_run_status: "no_findings" })],
+      installations: [makeInstallation({ latest_run_status: "failed" })],
       active_count: 1,
-      last_7_days: { runs: 0, findings: 0, cost_usd: null },
+      last_7_days: { runs: 1, findings: 0, cost_usd: null },
     };
     renderWithIntl(<CITab agent={AGENT} />);
 
-    const meta = STATUS_META.no_findings!;
-    const badge = screen.getByText("No findings");
-    // The reworked row renders status as a dot badge (matching the reference),
-    // so there is no icon svg to diff anymore — but the COLOR token is still
-    // the canonical drift guard: no_findings is one of the 3 statuses whose old
-    // duplicated map had drifted to a different color, and Badge sets `color` as
-    // its own inline style (see client/insights.md's 2026-07-03/2026-07-06
-    // entries on why `.style.color` is the reliable read), so this fails the
-    // moment InstallationRow stops consuming STATUS_META's color.
-    expect(badge.style.color).toBe(meta.color);
+    // No run-outcome badge ("Failed"/"Findings"/"No findings") is rendered here.
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    // Badge sets `color` as its own inline style (see client/insights.md's
+    // 2026-07-03/2026-07-06 entries on why `.style.color` is the reliable read).
+    const badge = screen.getByText("Succeeded");
+    expect(badge.style.color).toBe("var(--ok)");
   });
 
   it("shows the empty state when there are no installations", () => {

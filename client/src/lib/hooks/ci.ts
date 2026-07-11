@@ -119,6 +119,27 @@ export function useCiCheck() {
     mutationFn: () => api.post<CiCheckResult>("/ci/check"),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ci-runs"] });
+      // A check ingests new runs, which changes each installation's
+      // latest_run_status — so the agent CI tab (useCiSurface) must refresh too,
+      // otherwise it keeps showing a stale "—" after a run has completed.
+      qc.invalidateQueries({ queryKey: ["ci-surface"] });
+    },
+  });
+}
+
+/**
+ * DELETE /ci/runs — clear this workspace's CI run history (trash button on the
+ * CI Runs page). Installations (CI deployment tab) are untouched, so both the
+ * runs list and the agent CI surface (which shows per-installation latest_run)
+ * are invalidated.
+ */
+export function useClearCiRuns() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.del<{ deleted: number }>("/ci/runs"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ci-runs"] });
+      qc.invalidateQueries({ queryKey: ["ci-surface"] });
     },
   });
 }

@@ -200,8 +200,11 @@ function makeFakeDb(installations: CiInstallationRow[]) {
       if (table === t.settings) {
         return {
           set: (values: { value: unknown }) => ({
-            where: () => {
-              const row = settings[0];
+            where: (cond: unknown) => {
+              // setTimestampSetting updates by id (eq(settings.id, existingId));
+              // find that exact row so distinct keys never clobber each other.
+              const id = findColumnValue(cond, 'id');
+              const row = id !== undefined ? settings.find((r) => r.id === id) : settings[0];
               if (row) row.value = values.value;
               return Promise.resolve(undefined);
             },
@@ -246,15 +249,43 @@ function makeFakeDb(installations: CiInstallationRow[]) {
           };
         }
         if (table === t.settings) {
+          // Key-aware: getTimestampSetting filters by (workspace, user_id NULL,
+          // key). Distinct markers (ci_last_checked_at vs ci_runs_cleared_at)
+          // must never read each other's value.
           return {
-            where: () => ({
-              limit: (_n: number) => Promise.resolve(settings.map((r) => ({ id: r.id, value: r.value }))),
+            where: (cond: unknown) => ({
+              limit: (_n: number) => {
+                const key = findColumnValue(cond, 'key');
+                return Promise.resolve(
+                  settings
+                    .filter((r) => key === undefined || r.key === key)
+                    .map((r) => ({ id: r.id, value: r.value })),
+                );
+              },
             }),
           };
         }
         throw new Error('unexpected select-from table in fake db');
       },
     }),
+    delete: (table: unknown) => {
+      if (table === t.ciRuns) {
+        // deleteAllForWorkspace: delete(ciRuns).where(eq(workspace_id)).returning({id}).
+        return {
+          where: (cond: unknown) => ({
+            returning: (): Promise<{ id: string }[]> => {
+              const wsId = findColumnValue(cond, 'workspace_id');
+              const removed = ciRuns.filter((r) => r.workspaceId === wsId);
+              for (let i = ciRuns.length - 1; i >= 0; i--) {
+                if (ciRuns[i]!.workspaceId === wsId) ciRuns.splice(i, 1);
+              }
+              return Promise.resolve(removed.map((r) => ({ id: r.id })));
+            },
+          }),
+        };
+      }
+      throw new Error('unexpected delete table in fake db');
+    },
   };
 
   return { db: fakeDb as unknown as Db, ciRuns, settings };
@@ -804,5 +835,73 @@ describe('IngestService.listRuns', () => {
 
     expect(result.runs).toEqual([]);
     expect(result.last_checked_at).toBeNull();
+  });
+});
+
+describe('IngestService.clearRuns', () => {
+  it('deletes all runs, records a cleared-at marker, and a later check does NOT re-import older runs', async () => {
+    const workflowRuns: MockWorkflowRun[] = [
+      {
+        id: 9101,
+        status: 'completed',
+        conclusion: 'success',
+        html_url: 'https://github.com/acme/payments-api/actions/runs/9101',
+        created_at: '2026-07-10T00:00:00Z',
+      },
+    ];
+    const artifact = makeArtifact({ findings_count: 2 });
+    const buf = await zipOf('devdigest-result.json', JSON.stringify(artifact));
+    const github = new MockGitHubClient({
+      workflowRuns,
+      artifacts: [{ id: 5101, name: CI_RESULT_ARTIFACT_NAME, expired: false }],
+      artifactContents: buf,
+    });
+    const { container, ciRuns, settings } = makeContainer({ github });
+    const service = new IngestService(container);
+
+    // First check ingests the GitHub run.
+    await service.checkForNewResults(WORKSPACE_ID);
+    expect(ciRuns).toHaveLength(1);
+
+    // Clear wipes the rows AND records the cleared-at marker.
+    const cleared = await service.clearRuns(WORKSPACE_ID);
+    expect(cleared.deleted).toBe(1);
+    expect(ciRuns).toHaveLength(0);
+    expect(settings.some((s) => s.key === 'ci_runs_cleared_at')).toBe(true);
+
+    // The old GitHub run (created 2026-07-10, before the clear) must NOT come
+    // back on the next check — a cleared history stays cleared.
+    const after = await service.checkForNewResults(WORKSPACE_ID);
+    expect(ciRuns).toHaveLength(0);
+    expect(after.runs_updated).toHaveLength(0);
+  });
+
+  it('a run created AFTER the clear is still ingested normally', async () => {
+    const { container, ciRuns } = makeContainer();
+    const service = new IngestService(container);
+
+    // Clear first (sets the marker to ~now).
+    await service.clearRuns(WORKSPACE_ID);
+
+    // A brand-new run, created in the future relative to the clear.
+    const github = new MockGitHubClient({
+      workflowRuns: [
+        {
+          id: 9202,
+          status: 'completed',
+          conclusion: 'success',
+          html_url: 'https://github.com/acme/payments-api/actions/runs/9202',
+          created_at: '2099-01-01T00:00:00Z',
+        },
+      ],
+      artifacts: [{ id: 5202, name: CI_RESULT_ARTIFACT_NAME, expired: false }],
+      artifactContents: await zipOf('devdigest-result.json', JSON.stringify(makeArtifact({ findings_count: 1 }))),
+    });
+    // Swap the container's github to the one returning the post-clear run.
+    (container as unknown as { github: () => Promise<GitHubClient> }).github = async () => github;
+
+    const after = await service.checkForNewResults(WORKSPACE_ID);
+    expect(ciRuns).toHaveLength(1);
+    expect(after.runs_updated).toHaveLength(1);
   });
 });

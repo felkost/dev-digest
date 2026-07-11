@@ -119,7 +119,9 @@ d('ci module routes (Export-to-CI, Step 11)', () => {
       payload: {
         name,
         provider: 'openai',
-        model: 'gpt-4o-mini',
+        // Fully-qualified OpenRouter slug: CI export validates the model is an
+        // OpenRouter-runnable `vendor/model` slug (assertExportableModel).
+        model: 'openai/gpt-4o-mini',
         system_prompt: 'Review the diff for security issues.',
       },
     });

@@ -40,7 +40,10 @@
       "checkFailed": "Last check failed — try refreshing again."
     },
     "lastChecked": "Last checked {time}",
-    "viewJob": "View job"
+    "viewJob": "View job",
+    "viewPr": "View pull request",
+    "clear": "Clear run history",
+    "clearConfirm": "Permanently delete all CI run history for this workspace? The stored runs are removed and will NOT be re-imported on the next refresh. Your connected repos and their GitHub Actions runs are not affected."
   },
   "exportWizard": {
     "title": "Export to CI",
@@ -97,6 +100,8 @@
   "ciTab": {
     "heading": "CI deployment",
     "subtitle": "Run this agent automatically on pull requests in a target repo.",
+    "statusActive": "Succeeded",
+    "statusDisconnected": "Disconnected",
     "exportToCi": "Export to CI",
     "addToCi": "Add to CI",
     "addRepository": "Add repository",
