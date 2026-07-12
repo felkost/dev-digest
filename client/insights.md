@@ -112,5 +112,9 @@
 ## Open Questions
 <!-- Unresolved. Convert to an entry in the appropriate section when answered. -->
 
+- **2026-07-12 [Pattern]** — `block_token_counts[].block` keys (`system`/`skills`/`memory`/`specs`/`callers`/`repo_map`/`pr_description`/`user`) map 1:1 to the SAME slot names already labeled in `runs.json`'s `trace.prompt.*` (used by the Prompt assembly section) — reuse those i18n keys for any new UI that lists prompt blocks by name rather than inventing parallel labels; only `pr_description` needs a new key since Prompt assembly doesn't render that slot. Also: the `user` block IS the diff (reviewer-core's `assemblePrompt` embeds `## Diff to review` inside the user message, `prompt.ts:129`) — there is no separate `diff` block key, so a per-block token UI showing "the diff's token cost" should read the `user` entry. `client/src/components/RunTraceDrawer/_components/TraceBody/TraceBody.tsx`, `reviewer-core/src/prompt.ts`
+
+- **2026-07-12 [Pattern]** — Any test file that `vi.mock`s a hooks module by name (e.g. `@/lib/hooks/multi-agent-review`) must have EVERY hook that module exports listed in the mock factory, even ones the component under test didn't use until a later change — adding a new hook export + a new consumer inside an already-tested component (here: `useMultiAgentRunHistory` used by a new `RecentRuns` child of `ConfigureRunView`) breaks the existing test's mock at runtime ("is not a function") because `vi.mock`'s factory REPLACES the whole module, it doesn't merge with the real one. Symptom looked unrelated to the new code (`ConfigureRunView.test.tsx` failing, not a `RecentRuns.test.tsx` that doesn't exist yet) — check every `vi.mock("<module path>")` call site across the codebase whenever a hooks module gains a new export, not just the file you're actively adding a consumer to. `client/src/app/multi-agent-review/_components/ConfigureRunView/ConfigureRunView.test.tsx`
+
 ---
-Last updated: 2026-07-12 · Entries: 92
+Last updated: 2026-07-12 · Entries: 94

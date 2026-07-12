@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { AgentRunRow, FindingRow } from '../../../db/rows.js';
@@ -52,6 +52,41 @@ export async function getGroupScoped(
   return { id: row.id, prId: row.prId, prNumber: row.prNumber ?? null, ranAt: row.ranAt };
 }
 
+/**
+ * The workspace's most recent multi-agent groups (newest first), left-joined
+ * to `pull_requests` for display (`pr_number`/`pr_title`) — a missing PR must
+ * not hide the group row, same rationale as `getGroupScoped`. Used for the
+ * /multi-agent-review page's history list (there is otherwise no way back to
+ * a group's results page once its post-start redirect is gone — see
+ * client/insights.md's entry on this gap).
+ */
+export async function listGroupsForWorkspace(
+  db: Db,
+  workspaceId: string,
+  limit = 20,
+): Promise<{ id: string; prId: string; prNumber: number | null; prTitle: string | null; ranAt: Date }[]> {
+  const rows = await db
+    .select({
+      id: t.multiAgentRuns.id,
+      prId: t.multiAgentRuns.prId,
+      ranAt: t.multiAgentRuns.ranAt,
+      prNumber: t.pullRequests.number,
+      prTitle: t.pullRequests.title,
+    })
+    .from(t.multiAgentRuns)
+    .leftJoin(t.pullRequests, eq(t.multiAgentRuns.prId, t.pullRequests.id))
+    .where(eq(t.multiAgentRuns.workspaceId, workspaceId))
+    .orderBy(desc(t.multiAgentRuns.ranAt))
+    .limit(limit);
+  return rows.map((r) => ({
+    id: r.id,
+    prId: r.prId,
+    prNumber: r.prNumber ?? null,
+    prTitle: r.prTitle ?? null,
+    ranAt: r.ranAt,
+  }));
+}
+
 // ---- fan-out runs -------------------------------------------------------
 
 /** All `agent_runs` rows belonging to a group, in selection order (ran_at ascending). */
@@ -61,6 +96,13 @@ export async function listAgentRunsForGroup(db: Db, groupId: string): Promise<Ag
     .from(t.agentRuns)
     .where(eq(t.agentRuns.multiAgentRunId, groupId))
     .orderBy(asc(t.agentRuns.ranAt));
+}
+
+/** All `agent_runs` rows belonging to ANY of the given groups — one query for
+ *  a whole history page's worth of groups instead of N. */
+export async function listAgentRunsForGroups(db: Db, groupIds: string[]): Promise<AgentRunRow[]> {
+  if (groupIds.length === 0) return [];
+  return db.select().from(t.agentRuns).where(inArray(t.agentRuns.multiAgentRunId, groupIds));
 }
 
 // ---- findings + reviews for the group's runs -----------------------------

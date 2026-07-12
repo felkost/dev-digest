@@ -64,3 +64,78 @@ describe("TraceBody — context documents section (AC-15, AC-16)", () => {
     expect(screen.queryByText(/Open the Prompt assembly section below/i)).not.toBeInTheDocument();
   });
 });
+
+describe("TraceBody — cost breakdown section (per-block tokens, cache, boilerplate, map-reduce)", () => {
+  it("shows the unavailable message when cost_report is absent (a pre-cost-surgery run) — never a fabricated 0", () => {
+    renderWithIntl(<TraceBody trace={BASE_TRACE} findings={FINDINGS} />);
+
+    expect(
+      screen.getByText(
+        "Cost breakdown unavailable for this run (predates cost-surgery instrumentation).",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("renders per-block tokens (biggest first), cache info, boilerplate exclusion, and map-reduce chunks when cost_report is present", () => {
+    const trace: RunTrace = {
+      ...BASE_TRACE,
+      cost_report: {
+        block_token_counts: [
+          { block: "system", tokens: 400 },
+          { block: "user", tokens: 9000 },
+          { block: "specs", tokens: "unavailable" },
+        ],
+        cached_input_tokens: 3500,
+        cache_control_applied: true,
+        excluded_boilerplate_files: ["pnpm-lock.yaml", "dist/bundle.js"],
+        excluded_boilerplate_tokens: 842,
+        map_reduce_threshold_tokens: 12000,
+        map_reduce_chunk_count: 3,
+      },
+    };
+    renderWithIntl(<TraceBody trace={trace} findings={FINDINGS} />);
+
+    // Per-block tokens: labels reuse the Prompt assembly vocabulary, and the
+    // biggest block (the diff, mapped to "user") renders first in the DOM.
+    const blockLabels = screen.getAllByText(/^(System|User \/ diff \(dynamic\)|Project context \(dynamic\))$/);
+    expect(blockLabels[0]).toHaveTextContent("User / diff (dynamic)");
+    expect(screen.getByText("9000 tokens")).toBeInTheDocument();
+    expect(screen.getByText("400 tokens")).toBeInTheDocument();
+    // The 'unavailable' block shows "—", never a fabricated 0.
+    expect(screen.getByText("—")).toBeInTheDocument();
+
+    // Cache.
+    expect(screen.getByText("3500 tokens")).toBeInTheDocument();
+    expect(screen.getByText("Yes")).toBeInTheDocument();
+
+    // Boilerplate exclusion — the same "excluded N files, -X tokens" story
+    // the server already logs (run-executor.ts).
+    expect(screen.getByText(/2 files excluded/)).toBeInTheDocument();
+    expect(screen.getByText(/−842 tokens/)).toBeInTheDocument();
+    expect(screen.getByText("pnpm-lock.yaml")).toBeInTheDocument();
+    expect(screen.getByText("dist/bundle.js")).toBeInTheDocument();
+
+    // Map-reduce.
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("12000 tokens")).toBeInTheDocument();
+  });
+
+  it("shows 'single-pass' when map_reduce_chunk_count is 1, not an empty chunk table", () => {
+    const trace: RunTrace = {
+      ...BASE_TRACE,
+      cost_report: {
+        block_token_counts: [],
+        cached_input_tokens: null,
+        cache_control_applied: false,
+        excluded_boilerplate_files: [],
+        excluded_boilerplate_tokens: 0,
+        map_reduce_threshold_tokens: null,
+        map_reduce_chunk_count: 1,
+      },
+    };
+    renderWithIntl(<TraceBody trace={trace} findings={FINDINGS} />);
+
+    expect(screen.getByText("Single-pass — no map-reduce for this run.")).toBeInTheDocument();
+    expect(screen.getByText("No boilerplate files excluded from this run.")).toBeInTheDocument();
+  });
+});

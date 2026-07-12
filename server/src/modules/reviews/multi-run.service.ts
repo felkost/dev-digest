@@ -7,6 +7,7 @@ import type {
   FindingRecord,
   MultiAgentRun,
   MultiAgentRunStartResponse,
+  MultiAgentRunSummary,
   Severity,
 } from '@devdigest/shared';
 import { NotFoundError } from '../../platform/errors.js';
@@ -233,6 +234,56 @@ export class MultiRunService {
       });
     }
     return estimates;
+  }
+
+  /**
+   * The workspace's most recent multi-agent groups, newest first — a
+   * lightweight history list so a group's results page (which the "Run
+   * Review" flows auto-navigate to ONCE, right after start) is still
+   * reachable if that one-time redirect gets lost (tab closed, navigated
+   * away during a long-running fan-out). Reuses the same aggregate helpers
+   * `getComposedRun` uses (`computeTotalDurationMs`/`computeTotalCostUsd`/
+   * `toColumnStatus`) so a group's numbers here match its own results page
+   * exactly — one query for the groups, one query for every member run
+   * across all of them (not N+1).
+   */
+  async listRecentGroups(workspaceId: string, limit = 20): Promise<MultiAgentRunSummary[]> {
+    const groups = await multiRunRepo.listGroupsForWorkspace(this.container.db, workspaceId, limit);
+    if (groups.length === 0) return [];
+
+    const allRuns = await multiRunRepo.listAgentRunsForGroups(
+      this.container.db,
+      groups.map((g) => g.id),
+    );
+    const runsByGroup = new Map<string, typeof allRuns>();
+    for (const run of allRuns) {
+      if (!run.multiAgentRunId) continue;
+      const arr = runsByGroup.get(run.multiAgentRunId) ?? [];
+      arr.push(run);
+      runsByGroup.set(run.multiAgentRunId, arr);
+    }
+
+    return groups.map((g) => {
+      const runs = runsByGroup.get(g.id) ?? [];
+      const statuses = runs.map((r) => toColumnStatus(r.status));
+      const status: 'done' | 'failed' | 'running' = statuses.includes('running')
+        ? 'running'
+        : statuses.includes('failed')
+          ? 'failed'
+          : 'done';
+      return {
+        id: g.id,
+        pr_id: g.prId,
+        pr_number: g.prNumber,
+        pr_title: g.prTitle,
+        ran_at: g.ranAt.toISOString(),
+        agent_count: runs.length,
+        status,
+        total_duration_ms: computeTotalDurationMs(g.ranAt, runs),
+        total_cost_usd: computeTotalCostUsd(runs),
+        findings_total: runs.reduce((sum, r) => sum + (r.findingsCount ?? 0), 0),
+      };
+    });
   }
 }
 

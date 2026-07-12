@@ -67,6 +67,37 @@
       "args": "args",
       "result": "result",
       "previewTruncated": "(preview truncated)"
+    },
+    "costBreakdown": {
+      "title": "Cost breakdown",
+      "unavailable": "Cost breakdown unavailable for this run (predates cost-surgery instrumentation).",
+      "perBlock": {
+        "title": "Prompt tokens by block",
+        "unavailable": "—",
+        "prDescription": "PR description"
+      },
+      "cache": {
+        "title": "Prompt caching",
+        "cachedTokens": "Cached input tokens",
+        "cachedTokensUnavailable": "—",
+        "cacheControl": "Cache control applied",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "boilerplate": {
+        "title": "Boilerplate filter",
+        "excludedFiles": "{count, plural, one {# file} other {# files}} excluded",
+        "excludedTokens": "−{count} tokens",
+        "none": "No boilerplate files excluded from this run."
+      },
+      "mapReduce": {
+        "title": "Map-reduce",
+        "chunks": "Chunks",
+        "threshold": "Threshold",
+        "thresholdTokens": "{count} tokens",
+        "thresholdUnavailable": "—",
+        "singlePass": "Single-pass — no map-reduce for this run."
+      }
     }
   },
   "drawer": {

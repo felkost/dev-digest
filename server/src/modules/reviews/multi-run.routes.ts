@@ -13,6 +13,7 @@ import { MULTI_AGENT_RUN_RATE_LIMIT } from './constants.js';
  * already-large `reviews/routes.ts`.
  *
  * POST /pulls/:id/multi-agent-run   {agentIds}  → start a fan-out group
+ * GET  /multi-agent-runs                        → recent groups (history list)
  * GET  /multi-agent-runs/:id                    → composed columns + conflicts
  * GET  /pulls/:id/agent-estimates               → per-agent cost/duration estimate
  */
@@ -35,6 +36,12 @@ export default async function multiRunRoutes(appBase: FastifyInstance) {
       return service.startRun(workspaceId, req.params.id, req.body.agentIds, req.log);
     },
   );
+
+  // ---- Recent multi-agent groups (history list) ----------------------------
+  app.get('/multi-agent-runs', async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    return service.listRecentGroups(workspaceId);
+  });
 
   // ---- Composed multi-agent run (columns + cross-agent conflicts) ---------
   app.get('/multi-agent-runs/:id', { schema: { params: IdParams } }, async (req) => {

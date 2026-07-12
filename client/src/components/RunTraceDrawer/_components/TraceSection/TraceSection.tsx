@@ -12,7 +12,7 @@ export function TraceSection({
   children,
   defaultOpen = true,
 }: {
-  icon: "Settings" | "Gauge" | "FileText" | "Wrench" | "Code" | "AlertOctagon";
+  icon: "Settings" | "Gauge" | "FileText" | "Wrench" | "Code" | "AlertOctagon" | "DollarSign";
   title: string;
   right?: React.ReactNode;
   children: React.ReactNode;

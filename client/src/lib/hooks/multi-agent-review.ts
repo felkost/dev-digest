@@ -6,7 +6,12 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { AgentEstimate, MultiAgentRun, MultiAgentRunStartResponse } from "@devdigest/shared";
+import type {
+  AgentEstimate,
+  MultiAgentRun,
+  MultiAgentRunStartResponse,
+  MultiAgentRunSummary,
+} from "@devdigest/shared";
 
 /** Poll cadence while a multi-agent run has at least one still-running column. */
 const MULTI_AGENT_RUN_POLL_INTERVAL_MS = 4000;
@@ -33,7 +38,19 @@ export function useStartMultiAgentRun() {
       qc.invalidateQueries({ queryKey: ["reviews", prId] });
       qc.invalidateQueries({ queryKey: ["pr-runs", prId] });
       qc.invalidateQueries({ queryKey: ["pr-active-runs", prId] });
+      qc.invalidateQueries({ queryKey: ["multi-agent-run-history"] });
     },
+  });
+}
+
+// ---- Recent multi-agent groups (history list) ----
+/** The workspace's most recent multi-agent runs, newest first — the way back
+   to a group's results page once the post-start one-time redirect is behind
+   you (e.g. you switched tabs during a long fan-out and lost the URL). */
+export function useMultiAgentRunHistory() {
+  return useQuery({
+    queryKey: ["multi-agent-run-history"],
+    queryFn: () => api.get<MultiAgentRunSummary[]>("/multi-agent-runs"),
   });
 }
 

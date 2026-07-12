@@ -44,6 +44,7 @@ let startIsPending = false;
 vi.mock("@/lib/hooks/multi-agent-review", () => ({
   useAgentEstimates: (prId: string | null) => ({ data: prId ? ESTIMATES : undefined }),
   useStartMultiAgentRun: () => ({ mutate: startMutate, isPending: startIsPending }),
+  useMultiAgentRunHistory: () => ({ data: [], isLoading: false }),
 }));
 
 const push = vi.fn();

@@ -16,9 +16,41 @@ import { PromptBlock } from "../PromptBlock";
 import { FindingsSection } from "../FindingsSection";
 import { Row, Stat } from "../atoms";
 
+/** Maps a `cost_report.block_token_counts[].block` key to the SAME i18n label
+    already used for that slot in the Prompt assembly section below, so the
+    two sections read as one consistent vocabulary. `pr_description` has no
+    entry in Prompt assembly (that section doesn't render it), so it gets its
+    own key; any future/unrecognized block key falls back to its raw name
+    rather than throwing. */
+const BLOCK_LABEL_KEYS: Record<string, string> = {
+  system: "trace.prompt.system",
+  skills: "trace.prompt.skills",
+  memory: "trace.prompt.memory",
+  specs: "trace.prompt.specs",
+  callers: "trace.prompt.callers",
+  repo_map: "trace.prompt.repoMap",
+  user: "trace.prompt.user",
+  pr_description: "trace.costBreakdown.perBlock.prDescription",
+};
+
 export function TraceBody({ trace, findings }: { trace: RunTrace; findings: FindingRecord[] }) {
   const t = useTranslations("runs");
   const stats = trace.stats;
+  const costReport = trace.cost_report;
+
+  // Biggest consumer first — this is what makes "diff is almost always the
+  // champion" (the block mapped to 'user', which carries the PR diff) visible
+  // at a glance. Entries whose count is 'unavailable' sort last (can't be
+  // ranked) and are excluded from the bar-width scale below.
+  const sortedBlocks = costReport
+    ? [...costReport.block_token_counts].sort((a, b) => {
+        const av = a.tokens === "unavailable" ? -1 : a.tokens;
+        const bv = b.tokens === "unavailable" ? -1 : b.tokens;
+        return bv - av;
+      })
+    : [];
+  const maxBlockTokens = Math.max(0, ...sortedBlocks.map((b) => (b.tokens === "unavailable" ? 0 : b.tokens)));
+
   return (
     <>
       <TraceSection icon="Settings" title={t("trace.configuration")}>
@@ -67,6 +99,104 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
           <Stat label={t("trace.stat.cost")} val={formatCost(stats.cost_usd)} />
           <Stat label={t("trace.stat.findings")} val={stats.findings} />
         </div>
+      </TraceSection>
+
+      <TraceSection icon="DollarSign" title={t("trace.costBreakdown.title")}>
+        {!costReport ? (
+          <span style={s.costUnavailable}>{t("trace.costBreakdown.unavailable")}</span>
+        ) : (
+          <>
+            <div style={s.costGroup}>
+              <div style={s.costGroupTitle}>{t("trace.costBreakdown.perBlock.title")}</div>
+              {sortedBlocks.map((b) => (
+                <div key={b.block} style={s.costBlockRow}>
+                  <span style={s.costBlockLabel} title={b.block}>
+                    {BLOCK_LABEL_KEYS[b.block] ? t(BLOCK_LABEL_KEYS[b.block]!) : b.block}
+                  </span>
+                  <div style={s.costBlockTrack}>
+                    {b.tokens !== "unavailable" && maxBlockTokens > 0 && (
+                      <div style={s.costBlockBar((b.tokens / maxBlockTokens) * 100)} />
+                    )}
+                  </div>
+                  <span className="tnum" style={s.costBlockValue}>
+                    {b.tokens === "unavailable"
+                      ? t("trace.costBreakdown.perBlock.unavailable")
+                      : t("trace.contextDocs.tokens", { count: b.tokens })}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div style={s.costGroup}>
+              <div style={s.costGroupTitle}>{t("trace.costBreakdown.cache.title")}</div>
+              <div style={s.costCacheRow}>
+                <Stat
+                  label={t("trace.costBreakdown.cache.cachedTokens")}
+                  val={
+                    costReport.cached_input_tokens == null
+                      ? t("trace.costBreakdown.cache.cachedTokensUnavailable")
+                      : t("trace.contextDocs.tokens", { count: costReport.cached_input_tokens })
+                  }
+                />
+                <Stat
+                  label={t("trace.costBreakdown.cache.cacheControl")}
+                  val={
+                    costReport.cache_control_applied
+                      ? t("trace.costBreakdown.cache.yes")
+                      : t("trace.costBreakdown.cache.no")
+                  }
+                />
+              </div>
+            </div>
+
+            <div style={s.costGroup}>
+              <div style={s.costGroupTitle}>{t("trace.costBreakdown.boilerplate.title")}</div>
+              {costReport.excluded_boilerplate_files.length === 0 ? (
+                <span style={s.costLine}>{t("trace.costBreakdown.boilerplate.none")}</span>
+              ) : (
+                <>
+                  <span style={s.costLine}>
+                    {t("trace.costBreakdown.boilerplate.excludedFiles", {
+                      count: costReport.excluded_boilerplate_files.length,
+                    })}
+                    {", "}
+                    {t("trace.costBreakdown.boilerplate.excludedTokens", {
+                      count: costReport.excluded_boilerplate_tokens,
+                    })}
+                  </span>
+                  <div style={s.costBoilerplateFiles}>
+                    {costReport.excluded_boilerplate_files.map((f) => (
+                      <span key={f} className="mono" style={s.costBoilerplateFile}>
+                        {f}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={{ ...s.costGroup, ...s.costGroupLast }}>
+              <div style={s.costGroupTitle}>{t("trace.costBreakdown.mapReduce.title")}</div>
+              {costReport.map_reduce_chunk_count <= 1 ? (
+                <span style={s.costLine}>{t("trace.costBreakdown.mapReduce.singlePass")}</span>
+              ) : (
+                <div style={s.costMapReduceRow}>
+                  <Stat label={t("trace.costBreakdown.mapReduce.chunks")} val={costReport.map_reduce_chunk_count} />
+                  <Stat
+                    label={t("trace.costBreakdown.mapReduce.threshold")}
+                    val={
+                      costReport.map_reduce_threshold_tokens == null
+                        ? t("trace.costBreakdown.mapReduce.thresholdUnavailable")
+                        : t("trace.costBreakdown.mapReduce.thresholdTokens", {
+                            count: costReport.map_reduce_threshold_tokens,
+                          })
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </TraceSection>
 
       <FindingsSection findings={findings} />

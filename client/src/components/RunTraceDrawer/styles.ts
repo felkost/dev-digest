@@ -140,6 +140,58 @@ export const s = {
   contextDocSkipReason: { fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 } satisfies CSSProperties,
   contextDocEmpty: { fontSize: 13, color: "var(--text-muted)" } satisfies CSSProperties,
 
+  // ---- CostBreakdown (per-block tokens / cache / boilerplate / map-reduce) ----
+  costUnavailable: { fontSize: 13, color: "var(--text-muted)" } satisfies CSSProperties,
+  costGroup: { marginBottom: 16 } satisfies CSSProperties,
+  costGroupLast: { marginBottom: 0 } satisfies CSSProperties,
+  costGroupTitle: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: "var(--text-muted)",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  } satisfies CSSProperties,
+  costBlockRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 } satisfies CSSProperties,
+  costBlockLabel: {
+    width: 150,
+    flexShrink: 0,
+    fontSize: 12.5,
+    color: "var(--text-secondary)",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  } satisfies CSSProperties,
+  costBlockTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    background: "var(--bg-surface)",
+    overflow: "hidden",
+  } satisfies CSSProperties,
+  costBlockBar: (pct: number): CSSProperties => ({
+    height: "100%",
+    width: `${pct}%`,
+    borderRadius: 4,
+    background: "var(--accent)",
+  }),
+  costBlockValue: {
+    width: 90,
+    flexShrink: 0,
+    fontSize: 12,
+    color: "var(--text-secondary)",
+    textAlign: "right",
+  } satisfies CSSProperties,
+  costCacheRow: { display: "flex", gap: 10 } satisfies CSSProperties,
+  costMapReduceRow: { display: "flex", gap: 10 } satisfies CSSProperties,
+  costLine: { fontSize: 13, color: "var(--text-secondary)" } satisfies CSSProperties,
+  costBoilerplateFiles: { marginTop: 8, display: "flex", flexDirection: "column", gap: 4 } satisfies CSSProperties,
+  costBoilerplateFile: {
+    fontFamily: "var(--font-mono, monospace)",
+    fontSize: 11.5,
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
+
   // ---- Drawer body ----
   footer: { display: "flex", gap: 10 } satisfies CSSProperties,
   tabBody: { paddingTop: 18 } satisfies CSSProperties,

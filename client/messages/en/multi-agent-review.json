@@ -20,7 +20,13 @@
     "combinedEstimateIncomplete": "Combined estimate: ≈{duration} · {cost} (at least one selected agent has no run history)",
     "selectedCount": "{count} selected",
     "confirm": "Start multi-agent run",
-    "starting": "Starting…"
+    "starting": "Starting…",
+    "recentRuns": {
+      "title": "Recent runs",
+      "empty": "No runs yet.",
+      "agentsCount": "{count, plural, one {# agent} other {# agents}}",
+      "findingsCount": "{count, plural, one {# finding} other {# findings}}"
+    }
   },
   "results": {
     "back": "Configure run",

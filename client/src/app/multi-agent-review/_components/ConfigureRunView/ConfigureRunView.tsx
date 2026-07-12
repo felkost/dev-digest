@@ -20,6 +20,7 @@ import { formatCost } from "@/lib/format";
 import { formatDurationMs } from "@/app/multi-agent-review/format";
 import { combineEstimates } from "./helpers";
 import { AgentRow } from "./AgentRow";
+import { RecentRuns } from "./RecentRuns";
 
 export function ConfigureRunView() {
   const t = useTranslations("multi-agent-review.configureRun");
@@ -83,6 +84,8 @@ export function ConfigureRunView() {
           <Icon.Users size={20} style={{ color: "var(--accent)" }} />
           {t("pageTitle")}
         </h1>
+
+        <RecentRuns />
 
         <Card>
           <SectionLabel icon="GitPullRequest">{t("step1Title")}</SectionLabel>

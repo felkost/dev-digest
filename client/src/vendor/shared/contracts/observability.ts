@@ -105,6 +105,28 @@ export const MultiAgentRun = z.object({
 });
 export type MultiAgentRun = z.infer<typeof MultiAgentRun>;
 
+/** One row of the workspace's recent multi-agent run history (GET
+ *  /multi-agent-runs) — a lightweight summary for a list/history view,
+ *  distinct from the full `MultiAgentRun` read-model (no columns/conflicts/
+ *  findings_by_run). `status` is the group's aggregate: 'running' if any
+ *  member run is still running, else 'failed' if any failed/cancelled, else
+ *  'done'. `findings_total` sums each member's own findings_count (0 for a
+ *  run with none — never null, unlike total_cost_usd's any-unknown-is-null
+ *  rule, since findings_count is always known once a run settles). */
+export const MultiAgentRunSummary = z.object({
+  id: z.string(),
+  pr_id: z.string(),
+  pr_number: z.number().int().nullable(),
+  pr_title: z.string().nullable(),
+  ran_at: z.string(),
+  agent_count: z.number().int(),
+  status: z.enum(['done', 'failed', 'running']),
+  total_duration_ms: z.number().int(),
+  total_cost_usd: z.number().nullable(),
+  findings_total: z.number().int(),
+});
+export type MultiAgentRunSummary = z.infer<typeof MultiAgentRunSummary>;
+
 // ---------------------------------------------------------------------------
 // Per-agent Stats (GET /agents/:id/stats)
 // ---------------------------------------------------------------------------

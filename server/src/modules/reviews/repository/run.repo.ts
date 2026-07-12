@@ -1,9 +1,29 @@
-import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
 
 // ---- in-flight / history --------------------------------------------------
+
+/** `multi_agent_run_id` groups for this PR with MORE THAN ONE member — a real
+ *  fan-out (multiple agents picked at once). A group with exactly one member
+ *  (the `MultiAgentPicker` UI allows selecting "any subset...including exactly
+ *  one" — see `client/src/components/multi-agent-picker/MultiAgentPicker.tsx`)
+ *  has nothing to fan out and nothing to displace in the PR-detail accordion,
+ *  so it is NOT a fan-out group and its run/review belongs in the PR-detail
+ *  lists alongside standalone single-agent runs. Only true multi-member groups
+ *  are excluded by `listRunsForPull`/`reviewsForPull` below — narrows commit
+ *  `a529535`'s blanket `multiAgentRunId IS NULL` filter, which pre-dated the
+ *  picker's "exactly one" mode and hid every single-agent picker run too. */
+export async function fanOutGroupIds(db: Db, prId: string): Promise<string[]> {
+  const rows = await db
+    .select({ groupId: t.agentRuns.multiAgentRunId, cnt: count() })
+    .from(t.agentRuns)
+    .where(and(eq(t.agentRuns.prId, prId), isNotNull(t.agentRuns.multiAgentRunId)))
+    .groupBy(t.agentRuns.multiAgentRunId)
+    .having(sql`count(*) > 1`);
+  return rows.map((r) => r.groupId!);
+}
 
 /** In-flight runs for a PR (status='running') — the server-side source of
  *  truth for "which agents are running now". Joined with the agent name. */
@@ -36,18 +56,21 @@ export async function activeRunsForPull(
   }));
 }
 
-/** All SINGLE-AGENT runs for a PR (any status), newest first — the PR run
- *  history shown on the PR-detail "Agent runs" tab. Multi-agent fan-out runs
- *  are EXCLUDED: they belong to a `multi_agent_runs` group and are viewed on
- *  the dedicated /multi-agent-review page (queried via
- *  multi-run.repo `listAgentRunsForGroup`). Including them here would let a
- *  fan-out run displace the newest single-agent run in the default-open
- *  accordion and render its members ungrouped as loose runs. */
+/** All single-agent-equivalent runs for a PR (any status), newest first — the
+ *  PR run history shown on the PR-detail "Agent runs" tab. Only TRUE fan-out
+ *  runs (a `multi_agent_runs` group with more than one member) are excluded —
+ *  see `fanOutGroupIds` above; those are viewed on the dedicated
+ *  /multi-agent-review page (queried via multi-run.repo `listAgentRunsForGroup`)
+ *  since including them here would let a fan-out run displace the newest
+ *  single-agent run in the default-open accordion and render its members
+ *  ungrouped as loose runs. A one-member group (the `MultiAgentPicker`'s
+ *  "exactly one agent" mode) has no such conflict and IS included. */
 export async function listRunsForPull(
   db: Db,
   workspaceId: string,
   prId: string,
 ): Promise<RunSummary[]> {
+  const fanOutIds = await fanOutGroupIds(db, prId);
   const rows = await db
     .select({ run: t.agentRuns, agentName: t.agents.name })
     .from(t.agentRuns)
@@ -56,7 +79,9 @@ export async function listRunsForPull(
       and(
         eq(t.agentRuns.workspaceId, workspaceId),
         eq(t.agentRuns.prId, prId),
-        isNull(t.agentRuns.multiAgentRunId),
+        fanOutIds.length > 0
+          ? or(isNull(t.agentRuns.multiAgentRunId), notInArray(t.agentRuns.multiAgentRunId, fanOutIds))
+          : undefined,
       ),
     )
     .orderBy(desc(t.agentRuns.ranAt));
