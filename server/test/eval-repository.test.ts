@@ -207,6 +207,7 @@ describe('EvalRepository.updateCase', () => {
       inputDiff: 'diff --git a/y b/y',
       expectedOutput: [],
       notes: null,
+      passingThreshold: null,
     });
     expect(row).toEqual(updatedRow);
     expect(setSpy).toHaveBeenCalledWith({
@@ -214,6 +215,7 @@ describe('EvalRepository.updateCase', () => {
       inputDiff: 'diff --git a/y b/y',
       expectedOutput: [],
       notes: null,
+      passingThreshold: null,
     });
     expect(whereSpy).toHaveBeenCalledTimes(1);
   });
@@ -228,6 +230,7 @@ describe('EvalRepository.updateCase', () => {
       inputDiff: 'diff',
       expectedOutput: [],
       notes: null,
+      passingThreshold: null,
     });
     expect(row).toBeNull();
   });
