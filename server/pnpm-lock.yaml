@@ -56,9 +56,6 @@ importers:
       ignore:
         specifier: ^7.0.5
         version: 7.0.5
-      js-tiktoken:
-        specifier: ^1.0.21
-        version: 1.0.21
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
@@ -2421,9 +2418,6 @@ packages:
 
   js-md4@0.3.2:
     resolution: {integrity: sha512-/GDnfQYsltsjRswQhN9fhv3EMw2sCpUdrdxyWDOUK7eyD++r3gRhzgiQgc/x4MAv2i1iuQ4lxO5mvqM3vj4bwA==}
-
-  js-tiktoken@1.0.21:
-    resolution: {integrity: sha512-biOj/6M5qdgx5TKjDnFT1ymSpM5tbd3ylwDtrQvFQSu0Z7bBYko2dF+W/aUkXUPuk6IVpRxk/3Q2sHOzGlS36g==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -5375,10 +5369,6 @@ snapshots:
   joycon@3.1.1: {}
 
   js-md4@0.3.2: {}
-
-  js-tiktoken@1.0.21:
-    dependencies:
-      base64-js: 1.5.1
 
   js-tokens@4.0.0: {}
 

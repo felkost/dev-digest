@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { resolve, relative, isAbsolute } from 'node:path';
+import { resolve, relative, isAbsolute, posix } from 'node:path';
 import { z } from 'zod';
 import type { Container } from '../../platform/container.js';
 import type { InsertConvention } from './repository.js';
@@ -191,8 +191,20 @@ export function buildDedupKey(category: string, rule: string, evidenceFile: stri
   return createHash('sha256').update(normalised).digest('hex').slice(0, 32);
 }
 
-/** Returns true if the candidate file path is safely within repoRoot. */
+/**
+ * Returns true if the candidate file path is safely within repoRoot.
+ *
+ * Uses `posix.resolve` (not the platform-native `resolve`) on purpose: repo
+ * paths in this system are always forward-slash (Linux ship target, git emits
+ * POSIX paths), and this is a pure string-containment check with no file I/O.
+ * The native `resolve` on Windows prepends a drive letter and uses `\`
+ * separators, so `abs.startsWith(repoRoot + '/')` would be false for a
+ * legitimately-inside path — over-rejecting on non-Linux dev machines. POSIX
+ * resolution keeps the guard deterministic regardless of host OS (identical to
+ * the previous behavior on Linux). The nearby `resolve(...)` calls that read
+ * real files stay platform-native — they need the host's real FS path.
+ */
 export function isSafeEvidencePath(repoRoot: string, file: string): boolean {
-  const abs = resolve(repoRoot, file);
+  const abs = posix.resolve(repoRoot, file);
   return abs.startsWith(repoRoot + '/') || abs === repoRoot;
 }
