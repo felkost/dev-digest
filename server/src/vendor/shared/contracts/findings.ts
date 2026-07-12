@@ -64,8 +64,26 @@ export type Finding = z.infer<typeof Finding>;
 
 /** Review — the consolidated structured output of a single agent run. */
 export const Review = z.object({
-  verdict: Verdict,
+  // Some smaller models (e.g. haiku) OMIT verdict from structured output;
+  // `.default('comment')` gracefully backfills a neutral value so parsing
+  // doesn't fail. The GitHub review event is computed deterministically from
+  // findings (see `output/to-review.ts`), so this field is stored/displayed
+  // only — it never drives the review action. (Do NOT change to `.nullable()`:
+  // that drops the default and turns verdict omission into a hard parse error —
+  // regressed haiku 2026-07-06. The Gemini `$ref` incompatibility was fixed in
+  // reviewer-core `structured.ts` via dereferencing, not here.)
+  verdict: Verdict.default('comment'),
   summary: z.string(),
+  // Like `verdict` above, some models OMIT `score` from structured output. The
+  // model's score is NEVER used downstream: grounding recomputes the displayed
+  // score from the grounded findings (`scoreFromFindings` in reviewer-core
+  // reduce.ts, applied in run.ts), discarding the self-reported value.
+  // `.default(0)` backfills an immediately-overwritten placeholder so an
+  // omission is a soft no-op, not a hard parse failure. Keep `.default()` (the
+  // output stays `number`, which `reduceReviews` averages) — do NOT use
+  // `.nullish()` (would yield NaN in that mean) or revert to required (regressed
+  // multi-agent runs 2026-07-10: an Anthropic reviewer omitted score →
+  // "Anthropic structured output failed schema validation: - score: Required").
   score: z
     .number()
     .int()
@@ -73,7 +91,8 @@ export const Review = z.object({
     .max(100)
     .describe(
       'Overall PR quality from 0 to 100, where HIGHER is better. 90–100 = no or only trivial issues (approve); 60–89 = minor suggestions; 30–59 = warnings worth addressing; 0–29 = critical problems. Must be consistent with `findings`: if there are no findings, the score is 90 or above.',
-    ),
+    )
+    .default(0),
   findings: z.array(Finding),
 });
 export type Review = z.infer<typeof Review>;

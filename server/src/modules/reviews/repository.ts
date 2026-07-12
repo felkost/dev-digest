@@ -1,6 +1,6 @@
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
-import type { Finding, Intent, RunSummary, RunTrace } from '@devdigest/shared';
+import type { Finding, Intent, PrBrief, RunSummary, RunTrace } from '@devdigest/shared';
 
 /**
  * A2 — review data-access. The ONLY layer touching the DB for the review
@@ -139,6 +139,16 @@ export class ReviewRepository {
     return pullRepo.getIntent(this.db, prId);
   }
 
+  getIntentScoped(prId: string, workspaceId: string): Promise<Intent | undefined> {
+    return pullRepo.getIntentScoped(this.db, prId, workspaceId);
+  }
+
+  // ---- brief (composed live PR Brief, L04) --------------------------------
+
+  upsertBrief(prId: string, brief: PrBrief): Promise<void> {
+    return pullRepo.upsertBrief(this.db, prId, brief);
+  }
+
   // ---- observability: agent_runs + run_traces ----------------------------
 
   /** Create an agent_runs row in `running` state; returns its id (= the runId). */
@@ -148,8 +158,21 @@ export class ReviewRepository {
     prId: string;
     provider: string | null;
     model: string | null;
+    /** Links this run to a multi-agent fan-out group (Multi-Agent Review). */
+    multiAgentRunId?: string | null;
   }): Promise<string> {
     return runRepo.createAgentRun(this.db, values);
+  }
+
+  /** Last N successful runs of one agent against one repo's PRs — the sample
+   *  `MultiRunService.estimatesForPr` averages over (Multi-Agent Review). */
+  lastSuccessfulRuns(params: {
+    workspaceId: string;
+    agentId: string;
+    repoId: string;
+    limit: number;
+  }): Promise<{ durationMs: number; costUsd: number | null }[]> {
+    return runRepo.lastSuccessfulRuns(this.db, params);
   }
 
   completeAgentRun(
@@ -157,8 +180,6 @@ export class ReviewRepository {
     values: {
       status: 'done' | 'failed' | 'cancelled';
       durationMs: number;
-      tokensIn: number;
-      tokensOut: number;
       findingsCount: number;
       grounding: string;
       /** Review score (0-100); null on failed/cancelled runs. */
@@ -167,8 +188,14 @@ export class ReviewRepository {
       blockers?: number | null;
       /** Failure reason (status='failed') / cancellation note. Null clears it. */
       error?: string | null;
-      /** USD cost from the provider (or estimated). Null = unknown. */
+      /** USD cost from the provider (or estimated). Null = unknown. Omit to
+       *  leave the column unchanged. */
       costUsd?: number | null;
+      /** Input/output token counts. Null = genuinely unknown (LLM never
+       *  returned). Omit to leave the column unchanged — same contract as
+       *  costUsd (AC-33). */
+      tokensIn?: number | null;
+      tokensOut?: number | null;
     },
   ): Promise<void> {
     return runRepo.completeAgentRun(this.db, runId, values);
