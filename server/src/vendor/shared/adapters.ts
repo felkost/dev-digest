@@ -54,7 +54,9 @@ export interface CompletionResult {
  */
 export interface StructuredRequest<T> {
   model: string;
-  schema: z.ZodType<T>;
+  // `unknown` input: safeParse always receives unknown at runtime, and schemas
+  // with .default()/.optional() widen the _input type beyond T — still safe.
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   schemaName: string;
   messages: ChatMessage[];
   temperature?: number;
@@ -164,6 +166,41 @@ export interface GitHubClient {
   getIssue(repo: RepoRef, n: number): Promise<IssueMeta>;
   /** GET /user — for "posting as @user". */
   currentLogin(): Promise<string>;
+  /**
+   * Full recursive file tree for `repo` (Git Data API `git/trees?recursive=1`).
+   * When `ref` is omitted, resolves the repo's default branch first.
+   */
+  getRepoTree(repo: RepoRef, ref?: string): Promise<{ path: string; type: 'blob' | 'tree' }[]>;
+  /**
+   * `repo`'s current default branch name (e.g. "main"). Used as the real base
+   * branch for CI-export commits instead of a hardcoded guess.
+   */
+  getDefaultBranch(repo: RepoRef): Promise<string>;
+  /**
+   * Single file's text content (base64-decoded), or `null` when the file is
+   * absent at `ref` (e.g. no README) — absence is not an error.
+   */
+  getFileContents(repo: RepoRef, path: string, ref?: string): Promise<string | null>;
+  /** List recent runs of a specific workflow file (e.g. `devdigest-review.yml`). */
+  listWorkflowRuns(
+    repo: RepoRef,
+    workflowFile: string,
+    opts?: { perPage?: number },
+  ): Promise<
+    { id: number; status: string; conclusion: string | null; html_url: string; created_at: string }[]
+  >;
+  /** A single workflow run's current status/conclusion. */
+  getWorkflowRun(
+    repo: RepoRef,
+    runId: number,
+  ): Promise<{ id: number; status: string; conclusion: string | null; html_url: string }>;
+  /** Artifacts uploaded by a workflow run (e.g. the CI result JSON). */
+  listRunArtifacts(
+    repo: RepoRef,
+    runId: number,
+  ): Promise<{ id: number; name: string; expired: boolean }[]>;
+  /** Download an artifact's raw zip contents. */
+  downloadArtifact(repo: RepoRef, artifactId: number): Promise<Buffer>;
 }
 
 // ---------- Git (simple-git, heavy) ----------
@@ -225,6 +262,12 @@ export interface GitClient {
   log(repo: RepoRef, path?: string): Promise<GitCommit[]>;
   readFile(repo: RepoRef, path: string): Promise<string>;
   clonePathFor(repo: RepoRef): string;
+}
+
+// ---------- RunnerBundler (agent-runner `ncc` bundle, for CI export) ----------
+export interface RunnerBundler {
+  /** Builds the agent-runner `ncc` bundle fresh and returns its contents. */
+  build(): Promise<{ contents: string }>;
 }
 
 // ---------- CodeIndex (ripgrep + tree-sitter) ----------

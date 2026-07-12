@@ -179,10 +179,18 @@ export const CiExportInput = z.object({
   post_as: z.enum(['github_review', 'pr_comment', 'none']).default('github_review'),
   triggers: z.array(z.string()).default(['opened', 'synchronize', 'reopened']),
   base: z.string().default('main'),
+  /** User-edited workflow YAML (Export Wizard) committed verbatim instead of the generated one. */
+  workflow_override: z.string().nullish(),
 });
 export type CiExportInput = z.infer<typeof CiExportInput>;
 /** Caller-facing input type — `.default()` fields stay optional (web hooks). */
 export type CiExportInputBody = z.input<typeof CiExportInput>;
+
+// Declared here (before `CiInstallation`) because `CiInstallation.latest_run_status`
+// references it as a runtime value, not just a type — Zod schemas are values, so the
+// enum must be defined before anything that embeds it.
+export const CiRunStatus = z.enum(['succeeded', 'failed', 'no_findings', 'running', 'skipped_fork']);
+export type CiRunStatus = z.infer<typeof CiRunStatus>;
 
 /** A persisted CI installation (mirrors `ci_installations`). */
 export const CiInstallation = z.object({
@@ -191,6 +199,17 @@ export const CiInstallation = z.object({
   repo: z.string(),
   target_type: CiTarget,
   installed_at: z.string(),
+  /** Slugified agent name, derived once at first export — frozen thereafter. */
+  slug: z.string(),
+  /** Increments each time the generated workflow is re-published. */
+  workflow_version: z.number().int(),
+  disconnected_at: z.string().nullable(),
+  triggers: z.array(z.string()),
+  post_as: z.enum(['github_review', 'pr_comment', 'none']),
+  /** Server-computed from the latest ingested `ci_runs` row — never a DB column. */
+  latest_run_status: CiRunStatus.nullable(),
+  /** ISO timestamp of that latest run — server-computed, never a DB column. */
+  latest_run_at: z.string().nullable(),
 });
 export type CiInstallation = z.infer<typeof CiInstallation>;
 
@@ -202,22 +221,26 @@ export const CiExport = z.object({
 });
 export type CiExport = z.infer<typeof CiExport>;
 
-export const CiRunStatus = z.enum(['succeeded', 'failed', 'no_findings', 'running']);
-export type CiRunStatus = z.infer<typeof CiRunStatus>;
-
 /** A CI run row (mirrors `ci_runs`) — ingested from GitHub Actions artifacts. */
 export const CiRun = z.object({
   id: z.string(),
   ci_installation_id: z.string().nullable(),
   pr_number: z.number().int().nullable(),
+  /** Denormalized PR title snapshot for the CI Runs list (null for older rows / runs with no PR). */
+  pr_title: z.string().nullish(),
   ran_at: z.string().nullable(),
   status: z.string().nullable(),
   findings_count: z.number().int().nullable(),
+  critical: z.number().int().nullable(),
+  warning: z.number().int().nullable(),
+  suggestion: z.number().int().nullable(),
   cost_usd: z.number().nullable(),
   github_url: z.string().nullable(),
   source: z.string().nullable(),
   agent: z.string().nullish(),
   duration_s: z.number().nullish(),
+  /** Denormalized snapshot — survives the parent installation's cascade-delete. */
+  repo: z.string().nullable(),
 });
 export type CiRun = z.infer<typeof CiRun>;
 
@@ -237,6 +260,52 @@ export const CiResultArtifact = z.object({
   pr_number: z.number().int().nullish(),
 });
 export type CiResultArtifact = z.infer<typeof CiResultArtifact>;
+
+export const CiExportPreviewInput = z.object({
+  triggers: z.array(z.string()).default(['opened', 'synchronize']),
+  post_as: z.enum(['github_review', 'pr_comment', 'none']).default('github_review'),
+});
+export type CiExportPreviewInput = z.infer<typeof CiExportPreviewInput>;
+
+export const CiExportPreview = z.object({ files: z.array(CiFile) });
+export type CiExportPreview = z.infer<typeof CiExportPreview>;
+
+export const CiBulkUpdateOutcome = z.object({
+  installation_id: z.string(),
+  ok: z.boolean(),
+  pr_url: z.string().nullable(),
+  error: z.string().nullable(),
+});
+export type CiBulkUpdateOutcome = z.infer<typeof CiBulkUpdateOutcome>;
+
+export const CiBulkUpdateResult = z.object({ results: z.array(CiBulkUpdateOutcome) });
+export type CiBulkUpdateResult = z.infer<typeof CiBulkUpdateResult>;
+
+export const CiDisconnectResult = z.object({ installation: CiInstallation });
+export type CiDisconnectResult = z.infer<typeof CiDisconnectResult>;
+
+export const CiAgentSurface = z.object({
+  installations: z.array(CiInstallation),
+  active_count: z.number().int(),
+  last_7_days: z.object({
+    runs: z.number().int(),
+    findings: z.number().int(),
+    cost_usd: z.number().nullable(),
+  }),
+});
+export type CiAgentSurface = z.infer<typeof CiAgentSurface>;
+
+export const CiRunsResponse = z.object({
+  runs: z.array(CiRun),
+  last_checked_at: z.string().nullable(),
+});
+export type CiRunsResponse = z.infer<typeof CiRunsResponse>;
+
+export const CiCheckResult = z.object({
+  checked_at: z.string(),
+  runs_updated: z.array(CiRun),
+});
+export type CiCheckResult = z.infer<typeof CiCheckResult>;
 
 // ===========================================================================
 // Conformance (PRD ↔ PR) — API record (the analysis shape is `Conformance`)

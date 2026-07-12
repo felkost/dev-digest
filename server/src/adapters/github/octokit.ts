@@ -76,12 +76,10 @@ export class OctokitGitHubClient implements GitHubClient {
             repo: repo.name,
             pull_number: n,
           });
-          const { data: files } = await this.octokit.rest.pulls.listFiles({
-            owner: repo.owner,
-            repo: repo.name,
-            pull_number: n,
-            per_page: 100,
-          });
+          const files = await this.octokit.paginate(
+            this.octokit.rest.pulls.listFiles,
+            { owner: repo.owner, repo: repo.name, pull_number: n, per_page: 100 },
+          );
           const { data: commits } = await this.octokit.rest.pulls.listCommits({
             owner: repo.owner,
             repo: repo.name,
@@ -368,5 +366,193 @@ export class OctokitGitHubClient implements GitHubClient {
       withTimeout(this.octokit.rest.users.getAuthenticated(), TIMEOUT),
     );
     return res.data.login;
+  }
+
+  async getDefaultBranch(repo: RepoRef): Promise<string> {
+    return withRetry(() =>
+      withTimeout(
+        (async () => {
+          const { data: repoData } = await this.octokit.rest.repos.get({
+            owner: repo.owner,
+            repo: repo.name,
+          });
+          return repoData.default_branch;
+        })(),
+        TIMEOUT,
+      ),
+    );
+  }
+
+  async getRepoTree(
+    repo: RepoRef,
+    ref?: string,
+  ): Promise<{ path: string; type: 'blob' | 'tree' }[]> {
+    return withRetry(() =>
+      withTimeout(
+        (async () => {
+          const owner = repo.owner;
+          const name = repo.name;
+          let treeSha = ref;
+          if (!treeSha) {
+            const { data: repoData } = await this.octokit.rest.repos.get({
+              owner,
+              repo: name,
+            });
+            treeSha = repoData.default_branch;
+          }
+          const res = await this.octokit.rest.git.getTree({
+            owner,
+            repo: name,
+            tree_sha: treeSha,
+            recursive: '1',
+          });
+          return res.data.tree
+            .filter(
+              (entry): entry is typeof entry & { path: string; type: 'blob' | 'tree' } =>
+                entry.path != null && (entry.type === 'blob' || entry.type === 'tree'),
+            )
+            .map((entry) => ({ path: entry.path, type: entry.type }));
+        })(),
+        TIMEOUT,
+      ),
+    );
+  }
+
+  async getFileContents(repo: RepoRef, path: string, ref?: string): Promise<string | null> {
+    try {
+      return await withRetry(() =>
+        withTimeout(
+          (async () => {
+            const res = await this.octokit.rest.repos.getContent({
+              owner: repo.owner,
+              repo: repo.name,
+              path,
+              ref,
+            });
+            const data = res.data;
+            if (Array.isArray(data) || data.type !== 'file' || !data.content) {
+              return null;
+            }
+            return Buffer.from(data.content, 'base64').toString('utf-8');
+          })(),
+          TIMEOUT,
+        ),
+      );
+    } catch (err) {
+      const status =
+        (err as { status?: number })?.status ??
+        (err as { response?: { status?: number } })?.response?.status;
+      if (status === 404) return null;
+      throw err;
+    }
+  }
+
+  async listWorkflowRuns(
+    repo: RepoRef,
+    workflowFile: string,
+    opts?: { perPage?: number },
+  ): Promise<
+    { id: number; status: string; conclusion: string | null; html_url: string; created_at: string }[]
+  > {
+    return withRetry(() =>
+      withTimeout(
+        (async () => {
+          const res = await this.octokit.rest.actions.listWorkflowRuns({
+            owner: repo.owner,
+            repo: repo.name,
+            workflow_id: workflowFile,
+            per_page: opts?.perPage ?? 10,
+          });
+          return res.data.workflow_runs.map((run) => ({
+            id: run.id,
+            // GitHub types `status` as nullable even though a run always has SOME
+            // status in practice — 'unknown' is the safe fallback for the rare
+            // type-level null case (this port's contract keeps `status` non-null).
+            status: run.status ?? 'unknown',
+            conclusion: run.conclusion,
+            html_url: run.html_url,
+            created_at: run.created_at,
+          }));
+        })(),
+        TIMEOUT,
+      ),
+    );
+  }
+
+  async getWorkflowRun(
+    repo: RepoRef,
+    runId: number,
+  ): Promise<{ id: number; status: string; conclusion: string | null; html_url: string }> {
+    return withRetry(() =>
+      withTimeout(
+        (async () => {
+          const res = await this.octokit.rest.actions.getWorkflowRun({
+            owner: repo.owner,
+            repo: repo.name,
+            run_id: runId,
+          });
+          return {
+            id: res.data.id,
+            status: res.data.status ?? 'unknown',
+            conclusion: res.data.conclusion,
+            html_url: res.data.html_url,
+          };
+        })(),
+        TIMEOUT,
+      ),
+    );
+  }
+
+  async listRunArtifacts(
+    repo: RepoRef,
+    runId: number,
+  ): Promise<{ id: number; name: string; expired: boolean }[]> {
+    return withRetry(() =>
+      withTimeout(
+        (async () => {
+          const res = await this.octokit.rest.actions.listWorkflowRunArtifacts({
+            owner: repo.owner,
+            repo: repo.name,
+            run_id: runId,
+          });
+          return res.data.artifacts.map((a) => ({
+            id: a.id,
+            name: a.name,
+            expired: a.expired,
+          }));
+        })(),
+        TIMEOUT,
+      ),
+    );
+  }
+
+  async downloadArtifact(repo: RepoRef, artifactId: number): Promise<Buffer> {
+    return withRetry(() =>
+      withTimeout(
+        (async () => {
+          const res = await this.octokit.rest.actions.downloadArtifact({
+            owner: repo.owner,
+            repo: repo.name,
+            artifact_id: artifactId,
+            archive_format: 'zip',
+          });
+          // Empirically verified against the installed octokit@^4.0.3 types
+          // (server/node_modules/@octokit/openapi-types): this endpoint's OpenAPI
+          // spec documents ONLY a 302 response (`content: never`, a `Location`
+          // header) and a 410 — there is no 200 schema at all. Octokit's request
+          // layer (built on fetch) follows that redirect automatically, exactly
+          // like the browser/curl `-L` behavior GitHub's own docs describe, so at
+          // RUNTIME `res.data` IS the raw binary zip body of the redirected
+          // response — but because there's no 200 schema for TS to derive a type
+          // from, the generated Octokit types fall back to `unknown` for `.data`
+          // (confirmed by forcing it into a `string`-typed slot: tsc reported
+          // `TS2322: Type 'unknown' is not assignable to type 'string'`, not a
+          // `{ url: string }` redirect-descriptor mismatch). Never a redirect URL
+          // callers must `fetch()` themselves.
+          return Buffer.from(res.data as ArrayBuffer);
+        })(),
+        TIMEOUT,
+      ),
+    );
   }
 }
