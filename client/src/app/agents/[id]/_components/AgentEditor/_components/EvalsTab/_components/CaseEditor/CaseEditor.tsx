@@ -1,7 +1,8 @@
 "use client";
 
 /* CaseEditor — source-aware, two-panel modal for authoring / editing an eval
-   case (B7 redesign). Left = Input (Diff / Files / PR-meta tabs) + Name/Notes;
+   case (B7 redesign; WS6: kind-aware — review_finding / intent /
+   risk_brief_narrative). Left = Input (Diff / Files / PR-meta tabs) + Name/Notes;
    right = Expected output rendered as a finding-skeleton over the existing
    `Expectation[]` model (no JSON parser — the structured rows stay the source
    of truth; the JSON block is a read-only view mirroring the review agent's
@@ -15,7 +16,7 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Modal, Button, Textarea, TextInput, SelectInput, Badge, Tabs, Toggle } from "@devdigest/ui";
-import type { Expectation, EvalCaseListItem } from "@devdigest/shared";
+import type { Expectation, EvalCaseListItem, EvalCaseCreateInput, EvalCaseKind } from "@devdigest/shared";
 import { useCreateEvalCase, useUpdateEvalCase } from "@/lib/hooks/eval";
 import { ApiError } from "@/lib/api";
 import { DiffViewer, rawDiffToPrFiles } from "@/components/diff-viewer";
@@ -135,6 +136,66 @@ const st = {
   } as React.CSSProperties,
 } as const;
 
+/** Parse the free-text passing-threshold input to the contract shape: a number
+    in [0,1], or `null` (blank / out-of-range → server uses the kind default). */
+function parseThreshold(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : null;
+}
+
+/** Trim + drop empties — the persisted form of an expected-phrase string list
+    (intent in/out-of-scope, risk-brief key points). */
+function cleanList(items: string[]): string[] {
+  return items.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/** Add/remove/edit a flat list of expected-phrase strings (intent scope lists,
+    risk-brief key points). Index keys are safe here: no reordering, controlled
+    inputs, and the whole array is replaced on every change. */
+function StringListEditor({
+  label,
+  items,
+  onChange,
+  placeholder,
+  emptyLabel,
+  addLabel,
+  removeLabel,
+}: {
+  label: string;
+  items: string[];
+  onChange: (next: string[]) => void;
+  placeholder: string;
+  emptyLabel: string;
+  addLabel: string;
+  removeLabel: string;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span style={st.sectionLabel}>{label}</span>
+      {items.length === 0 && <span style={st.smallLabel}>{emptyLabel}</span>}
+      {items.map((val, i) => (
+        <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <TextInput
+            value={val}
+            onChange={(v) => onChange(items.map((x, j) => (j === i ? v : x)))}
+            placeholder={placeholder}
+          />
+          <Button kind="ghost" size="sm" onClick={() => onChange(items.filter((_, j) => j !== i))}>
+            {removeLabel}
+          </Button>
+        </div>
+      ))}
+      <div>
+        <Button kind="secondary" size="sm" icon="Plus" onClick={() => onChange([...items, ""])}>
+          {addLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function CaseEditor({ agentId, agentName, initialCase, onClose, onRunCase, runDisabled }: CaseEditorProps) {
   const t = useTranslations("agents");
   const createCase = useCreateEvalCase(agentId);
@@ -156,6 +217,17 @@ export function CaseEditor({ agentId, agentName, initialCase, onClose, onRunCase
   const [activeTab, setActiveTab] = React.useState("diff");
   const [runOnSave, setRunOnSave] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  // WS6 — case kind + the two non-review_finding expected-output shapes. Kind is
+  // immutable on edit (the server never overwrites `case_kind`), so the selector
+  // is shown only when creating; editing renders it as a read-only badge.
+  const [caseKind, setCaseKind] = React.useState<EvalCaseKind>(initialCase?.case_kind ?? "review_finding");
+  const [inScope, setInScope] = React.useState<string[]>(initialCase?.intent_expected?.in_scope ?? []);
+  const [outOfScope, setOutOfScope] = React.useState<string[]>(initialCase?.intent_expected?.out_of_scope ?? []);
+  const [keyPoints, setKeyPoints] = React.useState<string[]>(initialCase?.risk_brief_expected?.key_points ?? []);
+  const [threshold, setThreshold] = React.useState<string>(
+    initialCase?.passing_threshold != null ? String(initialCase.passing_threshold) : "",
+  );
 
   const updateExpectation = (key: string, patch: Partial<Expectation>) => {
     setExpectations((prev) => prev.map((e) => (e.key === key ? { ...e, ...patch } : e)));
@@ -180,18 +252,37 @@ export function CaseEditor({ agentId, agentName, initialCase, onClose, onRunCase
         return e;
       });
 
-    const input = {
+    // Per-kind payload (WS6). review_finding sends the Expectation[] rows;
+    // intent/risk_brief_narrative send their own expected shape on the
+    // dedicated field (the server writes whichever matches `case_kind` into the
+    // JSONB column) plus an optional passing threshold. `case_kind` is
+    // preserved on edit (immutable server-side) and chosen via the selector
+    // when creating.
+    const base = {
       owner_id: agentId,
       name,
       input_diff: diff,
-      expected_output: cleanExpectations,
       notes: notes || null,
-      // This editor only supports authoring/editing review_finding-kind
-      // cases (the Expectation[] rows above); preserve the existing case's
-      // kind on edit so an intent/risk_brief_narrative case isn't silently
-      // downgraded, default new cases to the pre-WS6 review_finding kind.
-      case_kind: initialCase?.case_kind ?? "review_finding",
+      case_kind: caseKind,
     };
+    let input: EvalCaseCreateInput;
+    if (caseKind === "intent") {
+      input = {
+        ...base,
+        expected_output: [],
+        intent_expected: { in_scope: cleanList(inScope), out_of_scope: cleanList(outOfScope) },
+        passing_threshold: parseThreshold(threshold),
+      };
+    } else if (caseKind === "risk_brief_narrative") {
+      input = {
+        ...base,
+        expected_output: [],
+        risk_brief_expected: { key_points: cleanList(keyPoints) },
+        passing_threshold: parseThreshold(threshold),
+      };
+    } else {
+      input = { ...base, expected_output: cleanExpectations };
+    }
 
     const mutationOptions = {
       onSuccess: (saved?: EvalCaseListItem) => {
@@ -261,6 +352,18 @@ export function CaseEditor({ agentId, agentName, initialCase, onClose, onRunCase
     { key: "files", label: t("evals.editor.tabFiles"), count: files.length },
     { key: "prMeta", label: t("evals.editor.tabPrMeta") },
   ];
+
+  const kindOptions = [
+    { value: "review_finding", label: t("evals.editor.kindReviewFinding") },
+    { value: "intent", label: t("evals.editor.kindIntent") },
+    { value: "risk_brief_narrative", label: t("evals.editor.kindRiskBrief") },
+  ];
+  const kindLabel = (k: EvalCaseKind) =>
+    k === "intent"
+      ? t("evals.editor.kindIntent")
+      : k === "risk_brief_narrative"
+        ? t("evals.editor.kindRiskBrief")
+        : t("evals.editor.kindReviewFinding");
 
   const unset = t("evals.editor.prMetaNone");
   const severityOptions = [
@@ -347,9 +450,30 @@ export function CaseEditor({ agentId, agentName, initialCase, onClose, onRunCase
       <div style={st.body}>
         {/* ---------------------------- LEFT: Input ------------------------ */}
         <div style={{ ...st.panel, ...st.panelLeft }}>
+          {/* Case kind — a selector when creating; a read-only badge when
+              editing (the kind can't change after creation). */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={st.fieldLabel}>{t("evals.editor.caseKind")}</span>
+            {isEditing ? (
+              <div>
+                <Badge color="var(--text-secondary)" bg="var(--bg-hover)">
+                  {kindLabel(caseKind)}
+                </Badge>
+              </div>
+            ) : (
+              <SelectInput
+                value={caseKind}
+                onChange={(v) => setCaseKind(v as EvalCaseKind)}
+                options={kindOptions}
+                mono={false}
+              />
+            )}
+          </div>
+
           <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={st.fieldLabel}>{t("evals.editor.name")}</span>
             <TextInput value={name} onChange={setName} placeholder={t("evals.editor.namePlaceholder")} />
+            {caseKind === "intent" && <span style={st.smallLabel}>{t("evals.editor.intentInputHint")}</span>}
           </label>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -402,6 +526,10 @@ export function CaseEditor({ agentId, agentName, initialCase, onClose, onRunCase
 
         {/* ------------------------ RIGHT: Expected output ----------------- */}
         <div style={st.panel}>
+          {/* review_finding — the historical finding-skeleton editor. The two
+              WS6 kinds render their own expected-output editors below instead. */}
+          {caseKind === "review_finding" && (
+          <>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={st.sectionLabel}>{t("evals.editor.expectedOutput")}</span>
@@ -507,6 +635,59 @@ export function CaseEditor({ agentId, agentName, initialCase, onClose, onRunCase
               </div>
             ))}
           </div>
+          </>
+          )}
+
+          {/* intent — expected in-scope / out-of-scope classification phrases. */}
+          {caseKind === "intent" && (
+            <>
+              <span style={st.sectionLabel}>{t("evals.editor.expectedIntent")}</span>
+              <StringListEditor
+                label={t("evals.editor.intentInScope")}
+                items={inScope}
+                onChange={setInScope}
+                placeholder={t("evals.editor.itemPlaceholder")}
+                emptyLabel={t("evals.editor.listEmpty")}
+                addLabel={t("evals.editor.addItem")}
+                removeLabel={t("evals.editor.removeItem")}
+              />
+              <StringListEditor
+                label={t("evals.editor.intentOutOfScope")}
+                items={outOfScope}
+                onChange={setOutOfScope}
+                placeholder={t("evals.editor.itemPlaceholder")}
+                emptyLabel={t("evals.editor.listEmpty")}
+                addLabel={t("evals.editor.addItem")}
+                removeLabel={t("evals.editor.removeItem")}
+              />
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={st.smallLabel}>{t("evals.editor.threshold")}</span>
+                <TextInput value={threshold} onChange={setThreshold} placeholder={t("evals.editor.thresholdPlaceholder")} />
+                <span style={st.smallLabel}>{t("evals.editor.thresholdHint")}</span>
+              </label>
+            </>
+          )}
+
+          {/* risk_brief_narrative — expected key points the narrative must cover. */}
+          {caseKind === "risk_brief_narrative" && (
+            <>
+              <span style={st.sectionLabel}>{t("evals.editor.expectedRiskBrief")}</span>
+              <StringListEditor
+                label={t("evals.editor.riskKeyPoints")}
+                items={keyPoints}
+                onChange={setKeyPoints}
+                placeholder={t("evals.editor.itemPlaceholder")}
+                emptyLabel={t("evals.editor.listEmpty")}
+                addLabel={t("evals.editor.addItem")}
+                removeLabel={t("evals.editor.removeItem")}
+              />
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={st.smallLabel}>{t("evals.editor.threshold")}</span>
+                <TextInput value={threshold} onChange={setThreshold} placeholder={t("evals.editor.thresholdPlaceholder")} />
+                <span style={st.smallLabel}>{t("evals.editor.thresholdHint")}</span>
+              </label>
+            </>
+          )}
 
           {showLastRun && (
             <div

@@ -139,7 +139,16 @@ export function caseListItem(
   latestRun: EvalRunRow | null,
   flaked: boolean,
 ): EvalCaseListItem {
-  const expected_output = expectationsFromJson(row.expectedOutput);
+  // WS6 — the JSONB `expected_output` column is REUSED per kind. Only the
+  // review_finding shape is an `Expectation[]`; the other two kinds store an
+  // object, so parse `expected_output` as `Expectation[]` ONLY for
+  // review_finding (else `[]`) and surface the intent/risk_brief shape on the
+  // dedicated fields, so the Case Editor can round-trip them on edit.
+  const caseKind = row.caseKind ?? 'review_finding';
+  const expected_output = caseKind === 'review_finding' ? expectationsFromJson(row.expectedOutput) : [];
+  const intent_expected = caseKind === 'intent' ? expectedIntentFromJson(row.expectedOutput) : null;
+  const risk_brief_expected =
+    caseKind === 'risk_brief_narrative' ? expectedRiskBriefFromJson(row.expectedOutput) : null;
 
   let last_run_status: EvalCaseListItem['last_run_status'];
   let last_run_summary: string | null = null;
@@ -179,8 +188,12 @@ export function caseListItem(
     // `caseKind` defaults 'review_finding' at the DB level (never actually
     // null), but `?? 'review_finding'` is defensive against pre-migration
     // fixtures/rows a test or a stale read might still produce.
-    case_kind: row.caseKind ?? 'review_finding',
+    case_kind: caseKind,
     passing_threshold: row.passingThreshold,
+    // Per-kind expected output (null for the non-matching kinds) — see the
+    // parse block at the top of this function.
+    intent_expected,
+    risk_brief_expected,
   };
 }
 

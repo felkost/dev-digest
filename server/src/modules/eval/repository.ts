@@ -94,15 +94,22 @@ export class EvalRepository {
 
   /**
    * Full-replacement update of an eval case's editable fields (name, diff,
-   * expectations, notes), workspace-scoped. Does NOT touch `ownerKind`/
-   * `ownerId`/`inputMeta` — provenance is preserved by the caller (service
-   * layer never passes those fields here). Returns the updated row, or null
-   * if the case doesn't exist / isn't in this workspace.
+   * expectations, notes, passing threshold), workspace-scoped. Does NOT touch
+   * `ownerKind`/`ownerId`/`inputMeta`/`caseKind` — provenance and case kind are
+   * preserved by the caller (service layer never passes those fields here).
+   * Returns the updated row, or null if the case doesn't exist / isn't in this
+   * workspace.
    */
   async updateCase(
     workspaceId: string,
     caseId: string,
-    data: { name: string; inputDiff: string; expectedOutput: unknown; notes: string | null },
+    data: {
+      name: string;
+      inputDiff: string;
+      expectedOutput: unknown;
+      notes: string | null;
+      passingThreshold: number | null;
+    },
   ): Promise<EvalCaseRow | null> {
     const rows = await this.db
       .update(t.evalCases)
@@ -111,6 +118,9 @@ export class EvalRepository {
         inputDiff: data.inputDiff,
         expectedOutput: data.expectedOutput,
         notes: data.notes,
+        // WS6 — editable for intent/risk_brief_narrative cases (their pass bar);
+        // review_finding cases always send null (exact-match, threshold unused).
+        passingThreshold: data.passingThreshold,
       })
       .where(and(eq(t.evalCases.id, caseId), eq(t.evalCases.workspaceId, workspaceId)))
       .returning();

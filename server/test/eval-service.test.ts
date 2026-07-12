@@ -500,6 +500,60 @@ describe('EvalService.createCaseManual — WS6 case_kind/passing_threshold', () 
     expect(result.passing_threshold).toBe(0.8);
   });
 
+  it('stores intent_expected into the reused expected_output column and round-trips it on the DTO', async () => {
+    const container = buildContainer({});
+    const insertSpy = vi.spyOn(EvalRepository.prototype, 'insertCase').mockImplementation(async (data: any) => ({
+      ...makeCaseRow(),
+      ...data,
+    }));
+
+    const service = new EvalService(container);
+    const result = await service.createCaseManual(WS_ID, AGENT_ID, {
+      owner_id: AGENT_ID,
+      name: 'Intent case',
+      input_diff: VALID_DIFF,
+      expected_output: [],
+      notes: null,
+      case_kind: 'intent',
+      intent_expected: { in_scope: ['rate limiting'], out_of_scope: ['refactor'] },
+    } as any);
+
+    // Persisted into the JSONB column that review_finding uses for Expectation[].
+    expect((insertSpy.mock.calls[0]![0] as any).expectedOutput).toEqual({
+      in_scope: ['rate limiting'],
+      out_of_scope: ['refactor'],
+    });
+    // Surfaced back on the DTO's dedicated field; expected_output stays [] (the
+    // Expectation[] shape can't carry it), and the other kind's field is null.
+    expect(result.intent_expected).toEqual({ in_scope: ['rate limiting'], out_of_scope: ['refactor'] });
+    expect(result.expected_output).toEqual([]);
+    expect(result.risk_brief_expected).toBeNull();
+  });
+
+  it('stores risk_brief_expected key_points into the reused expected_output column', async () => {
+    const container = buildContainer({});
+    const insertSpy = vi.spyOn(EvalRepository.prototype, 'insertCase').mockImplementation(async (data: any) => ({
+      ...makeCaseRow(),
+      ...data,
+    }));
+
+    const service = new EvalService(container);
+    const result = await service.createCaseManual(WS_ID, AGENT_ID, {
+      owner_id: AGENT_ID,
+      name: 'Risk brief case',
+      input_diff: VALID_DIFF,
+      expected_output: [],
+      notes: null,
+      case_kind: 'risk_brief_narrative',
+      risk_brief_expected: { key_points: ['touches auth flow'] },
+    } as any);
+
+    expect((insertSpy.mock.calls[0]![0] as any).expectedOutput).toEqual({ key_points: ['touches auth flow'] });
+    expect(result.risk_brief_expected).toEqual({ key_points: ['touches auth flow'] });
+    expect(result.expected_output).toEqual([]);
+    expect(result.intent_expected).toBeNull();
+  });
+
   it('defaults passing_threshold to null when omitted (kind default resolved later, not persisted)', async () => {
     const container = buildContainer({});
     const insertSpy = vi.spyOn(EvalRepository.prototype, 'insertCase').mockImplementation(async (data: any) => ({
@@ -573,6 +627,9 @@ describe('EvalService.updateCase', () => {
       inputDiff: VALID_DIFF,
       expectedOutput: [],
       notes: 'updated notes',
+      // WS6 — the update now also passes the per-case threshold through (null
+      // here: a review_finding case never carries one).
+      passingThreshold: null,
     });
     expect(result.name).toBe('Updated name');
     // Provenance (source/source_finding_id) survives the edit — the update

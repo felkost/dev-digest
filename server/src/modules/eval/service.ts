@@ -5,6 +5,7 @@ import type {
   EvalBatchCompareResult,
   EvalBatchDetail,
   EvalCaseCreateInput,
+  EvalCaseKind,
   EvalCaseListItem,
   EvalRecentBatchRow,
   EvalRunAllResult,
@@ -35,6 +36,21 @@ const SPARKLINE_POINTS_CAP = 8;
  */
 function manualCaseOwnerKind(): 'agent' | 'skill' {
   return 'agent';
+}
+
+/**
+ * WS6 — select the per-kind value to persist into the JSONB `expected_output`
+ * column. review_finding → the `Expectation[]`; intent → `{ in_scope,
+ * out_of_scope }`; risk_brief_narrative → `{ key_points }`. `kind` defaults to
+ * the request body's own `case_kind` (create path); pass an explicit override
+ * to pin it to the PERSISTED kind on edit, where the kind is immutable. Falls
+ * back to an empty per-kind shape so a kind with no authored rows never stores
+ * `undefined`.
+ */
+function expectedOutputForKind(input: EvalCaseCreateInput, kind: EvalCaseKind = input.case_kind): unknown {
+  if (kind === 'intent') return input.intent_expected ?? { in_scope: [], out_of_scope: [] };
+  if (kind === 'risk_brief_narrative') return input.risk_brief_expected ?? { key_points: [] };
+  return input.expected_output;
 }
 
 /**
@@ -224,7 +240,13 @@ export class EvalService {
       name: input.name,
       inputDiff: input.input_diff,
       inputMeta: { source: 'manual' },
-      expectedOutput: input.expected_output,
+      // The JSONB `expected_output` column is REUSED per `case_kind` (WS6): the
+      // review_finding path stores `Expectation[]`; intent/risk_brief_narrative
+      // store their own shape carried on the dedicated create-input fields
+      // (`Expectation[]`-typed `expected_output` can't hold them). Falls back to
+      // an empty per-kind shape so a kind switch with no rows never persists
+      // `undefined`.
+      expectedOutput: expectedOutputForKind(input),
       notes: input.notes ?? null,
       caseKind: input.case_kind,
       passingThreshold: input.passing_threshold ?? null,
@@ -256,11 +278,17 @@ export class EvalService {
       throw new ValidationError('Diff fragment must reference at least one file');
     }
 
+    // Kind is immutable on edit (the create-time `case_kind` is never
+    // overwritten here), so narrow the per-kind `expected_output` selection on
+    // the PERSISTED kind, not the request body's — an edit to an intent case
+    // must store `intent_expected`, not the empty review_finding `[]`.
+    const persistedKind = existing.caseKind ?? 'review_finding';
     const row = await this.repo.updateCase(workspaceId, caseId, {
       name: input.name,
       inputDiff: input.input_diff,
-      expectedOutput: input.expected_output,
+      expectedOutput: expectedOutputForKind(input, persistedKind),
       notes: input.notes ?? null,
+      passingThreshold: input.passing_threshold ?? null,
     });
     if (!row) throw new NotFoundError('Eval case not found');
 

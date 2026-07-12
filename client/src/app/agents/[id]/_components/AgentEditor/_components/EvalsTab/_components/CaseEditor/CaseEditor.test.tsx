@@ -303,3 +303,103 @@ describe("CaseEditor — source-aware redesign (B7)", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("CaseEditor — WS6 intent / risk_brief_narrative authoring", () => {
+  it("creates an intent case: kind selector + in/out-of-scope lists → case_kind + intent_expected payload", async () => {
+    const onClose = vi.fn();
+    createCaseMutate.mockImplementation((_input, opts) => opts?.onSuccess?.({ id: "new-intent" }));
+    const user = userEvent.setup();
+    renderWithIntl(<CaseEditor agentId="ag1" onClose={onClose} />);
+
+    // The kind selector is the first combobox (top of the left panel); it
+    // defaults to review_finding. Switch it to Intent.
+    const kindCombo = screen.getAllByRole("combobox")[0]!;
+    expect(kindCombo).toHaveTextContent("Review finding");
+    await user.click(kindCombo);
+    await user.click(screen.getByRole("button", { name: "Intent" }));
+
+    // Now the intent editors are shown (no expectation-type combobox anymore).
+    await user.type(screen.getByPlaceholderText("Case name"), "Rate-limit PR");
+    await user.type(screen.getByPlaceholderText("Paste a unified diff fragment…"), "@@ -1 +1 @@\n-a\n+b");
+
+    // Add one In-scope and one Out-of-scope phrase (two "+ Add" buttons, in order).
+    const addButtons = screen.getAllByRole("button", { name: "+ Add" });
+    await user.click(addButtons[0]!); // In scope
+    await user.click(addButtons[1]!); // Out of scope
+    const phraseInputs = screen.getAllByPlaceholderText("One expected phrase…");
+    await user.type(phraseInputs[0]!, "rate limiting");
+    await user.type(phraseInputs[1]!, "unrelated refactor");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(updateCaseMutate).not.toHaveBeenCalled();
+    expect(createCaseMutate).toHaveBeenCalledOnce();
+    const [arg] = createCaseMutate.mock.calls[0] as [
+      { case_kind: string; expected_output: unknown[]; intent_expected: { in_scope: string[]; out_of_scope: string[] } },
+      unknown,
+    ];
+    expect(arg.case_kind).toBe("intent");
+    expect(arg.expected_output).toEqual([]);
+    expect(arg.intent_expected).toEqual({ in_scope: ["rate limiting"], out_of_scope: ["unrelated refactor"] });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("edits an intent case: kind is a read-only badge, expectations pre-fill, Save calls update with intent_expected", async () => {
+    const onClose = vi.fn();
+    updateCaseMutate.mockImplementation((_input, opts) => opts?.onSuccess?.());
+    const INTENT_CASE: EvalCaseListItem = {
+      ...EXISTING_CASE,
+      id: "case-intent",
+      case_kind: "intent",
+      expected_output: [],
+      intent_expected: { in_scope: ["adds rate limiting"], out_of_scope: ["unrelated refactor"] },
+      passing_threshold: 0.7,
+    };
+    const user = userEvent.setup();
+    renderWithIntl(<CaseEditor agentId="ag1" initialCase={INTENT_CASE} onClose={onClose} />);
+
+    // Kind is immutable on edit: shown as a badge, NOT a combobox.
+    expect(screen.getByText("Intent")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    // Expectations + threshold pre-filled from the case.
+    expect(screen.getByDisplayValue("adds rate limiting")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("0.7")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(createCaseMutate).not.toHaveBeenCalled();
+    const [arg] = updateCaseMutate.mock.calls[0] as [
+      { caseId: string; input: { case_kind: string; intent_expected: { in_scope: string[] }; passing_threshold: number | null } },
+      unknown,
+    ];
+    expect(arg.caseId).toBe("case-intent");
+    expect(arg.input.case_kind).toBe("intent");
+    expect(arg.input.intent_expected.in_scope).toEqual(["adds rate limiting"]);
+    expect(arg.input.passing_threshold).toBe(0.7);
+  });
+
+  it("creates a risk_brief_narrative case: key-points list → risk_brief_expected payload", async () => {
+    const onClose = vi.fn();
+    createCaseMutate.mockImplementation((_input, opts) => opts?.onSuccess?.({ id: "new-risk" }));
+    const user = userEvent.setup();
+    renderWithIntl(<CaseEditor agentId="ag1" onClose={onClose} />);
+
+    const kindCombo = screen.getAllByRole("combobox")[0]!;
+    await user.click(kindCombo);
+    await user.click(screen.getByRole("button", { name: "Risk brief" }));
+
+    await user.type(screen.getByPlaceholderText("Paste a unified diff fragment…"), "@@ -1 +1 @@\n-a\n+b");
+    await user.click(screen.getByRole("button", { name: "+ Add" }));
+    await user.type(screen.getByPlaceholderText("One expected phrase…"), "touches auth flow");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const [arg] = createCaseMutate.mock.calls[0] as [
+      { case_kind: string; expected_output: unknown[]; risk_brief_expected: { key_points: string[] } },
+      unknown,
+    ];
+    expect(arg.case_kind).toBe("risk_brief_narrative");
+    expect(arg.expected_output).toEqual([]);
+    expect(arg.risk_brief_expected).toEqual({ key_points: ["touches auth flow"] });
+  });
+});

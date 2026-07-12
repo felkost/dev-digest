@@ -68,6 +68,13 @@ export const EvalCaseListItem = z.object({
   // WS6 — per-case threshold override (`eval_cases.passing_threshold`,
   // migration 0026). `null` = use the kind's built-in default threshold.
   passing_threshold: z.number().min(0).max(1).nullable(),
+  // WS6 — per-kind expected output, populated ONLY for the matching
+  // `case_kind` (null otherwise). `expected_output` above stays the
+  // review_finding `Expectation[]` shape and is `[]` for the other two kinds,
+  // so these carry what that column can't type — letting the Case Editor
+  // round-trip intent / risk_brief_narrative expectations on edit.
+  intent_expected: z.object({ in_scope: z.array(z.string()), out_of_scope: z.array(z.string()) }).nullish(),
+  risk_brief_expected: z.object({ key_points: z.array(z.string()) }).nullish(),
 });
 export type EvalCaseListItem = z.infer<typeof EvalCaseListItem>;
 
@@ -95,6 +102,12 @@ export const EvalCaseCreateInput = z.object({
   // WS6 — per-case threshold override; omitted/null = use the kind's
   // built-in default threshold.
   passing_threshold: z.number().min(0).max(1).nullish(),
+  // WS6 — per-kind expected output for the two non-review_finding kinds. The
+  // server selects which one to persist into the JSONB `expected_output`
+  // column by `case_kind`; for a review_finding case both are omitted and
+  // `expected_output` (above) carries the `Expectation[]`.
+  intent_expected: z.object({ in_scope: z.array(z.string()), out_of_scope: z.array(z.string()) }).nullish(),
+  risk_brief_expected: z.object({ key_points: z.array(z.string()) }).nullish(),
 });
 export type EvalCaseCreateInput = z.infer<typeof EvalCaseCreateInput>;
 
