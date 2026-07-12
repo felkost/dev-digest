@@ -5,6 +5,8 @@
     "suggestedFix": "Suggested fix",
     "accept": "Accept",
     "dismiss": "Dismiss",
+    "addToEvals": "Turn into eval case",
+    "addedToEvals": "Turned into eval case ✓",
     "learn": "Learn",
     "replyToAuthor": "Reply to author",
     "replyPlaceholder": "Reply to the author about this finding…",
@@ -24,7 +26,12 @@
     "comment": "Comment",
     "findingsCount": "{count} findings",
     "blockers": " · {count} blockers",
-    "prScore": "PR SCORE"
+    "prScore": "PR SCORE",
+    "regenerate": "Regenerate",
+    "regenerating": "Regenerating…",
+    "generationError": "Couldn’t regenerate: {error}",
+    "clearBrief": "Clear brief",
+    "clearing": "Clearing…"
   },
   "panel": {
     "hideLowConfidence": "Hide low confidence",
@@ -37,7 +44,21 @@
     "running": "Running…",
     "runReview": "Run Review",
     "mergedWarning": "Already merged — review is informational",
-    "mergedTooltip": "This PR is already merged; running a review won’t affect the merged code."
+    "mergedTooltip": "This PR is already merged; running a review won’t affect the merged code.",
+    "startFailed": "Couldn’t start the review. Please try again.",
+    "picker": {
+      "title": "Select agents",
+      "selectAll": "Select all",
+      "clear": "Clear",
+      "loading": "…",
+      "noHistory": "no history",
+      "estimateEach": "≈{duration} · {cost}",
+      "combinedEstimate": "Combined estimate: ≈{duration} · {cost}",
+      "combinedEstimateIncomplete": "Combined estimate: ≈{duration} · {cost} (at least one selected agent has no run history)",
+      "emptyTitle": "No enabled agents",
+      "emptyBody": "Create or enable an agent to start a review.",
+      "emptyCta": "Go to Agents"
+    }
   },
   "runStatus": {
     "elapsed": "Running · {count} agent(s)",
