@@ -97,6 +97,12 @@
         "thresholdTokens": "{count} tokens",
         "thresholdUnavailable": "—",
         "singlePass": "Single-pass — no map-reduce for this run."
+      },
+      "intent": {
+        "title": "Intent classification",
+        "cost": "Cost",
+        "tokens": "Tokens",
+        "reused": "Reused a cached intent classification — no LLM call for this run."
       }
     }
   },

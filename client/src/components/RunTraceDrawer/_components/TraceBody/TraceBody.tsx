@@ -175,7 +175,7 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
               )}
             </div>
 
-            <div style={{ ...s.costGroup, ...s.costGroupLast }}>
+            <div style={s.costGroup}>
               <div style={s.costGroupTitle}>{t("trace.costBreakdown.mapReduce.title")}</div>
               {costReport.map_reduce_chunk_count <= 1 ? (
                 <span style={s.costLine}>{t("trace.costBreakdown.mapReduce.singlePass")}</span>
@@ -191,6 +191,23 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
                             count: costReport.map_reduce_threshold_tokens,
                           })
                     }
+                  />
+                </div>
+              )}
+            </div>
+
+            <div style={{ ...s.costGroup, ...s.costGroupLast }}>
+              <div style={s.costGroupTitle}>{t("trace.costBreakdown.intent.title")}</div>
+              {costReport.intent_cost_usd == null &&
+              costReport.intent_tokens_in == null &&
+              costReport.intent_tokens_out == null ? (
+                <span style={s.costLine}>{t("trace.costBreakdown.intent.reused")}</span>
+              ) : (
+                <div style={s.costMapReduceRow}>
+                  <Stat label={t("trace.costBreakdown.intent.cost")} val={formatCost(costReport.intent_cost_usd)} />
+                  <Stat
+                    label={t("trace.costBreakdown.intent.tokens")}
+                    val={formatTokens(costReport.intent_tokens_in ?? 0, costReport.intent_tokens_out ?? 0)}
                   />
                 </div>
               )}

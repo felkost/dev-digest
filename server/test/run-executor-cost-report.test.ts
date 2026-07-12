@@ -166,12 +166,14 @@ function makeDb(settingsRows: { key: string; value: unknown }[] = []) {
   };
 }
 
-/** Minimal ReviewRepository stub — only the methods executeRuns/runOneAgent call. */
-function makeReviewRepo(): ReviewRepository {
+/** Minimal ReviewRepository stub — only the methods executeRuns/runOneAgent call.
+ *  `cachedIntent`, when passed, makes `getIntent` return an already-classified
+ *  intent (cache hit) — the pre-pass skips the LLM call entirely. */
+function makeReviewRepo(opts: { cachedIntent?: import('@devdigest/shared').Intent } = {}): ReviewRepository {
   const savedTraces: RunTrace[] = [];
   const completed: { status: string }[] = [];
   const repo = {
-    getIntent: vi.fn().mockResolvedValue(undefined),
+    getIntent: vi.fn().mockResolvedValue(opts.cachedIntent),
     upsertIntent: vi.fn().mockResolvedValue(undefined),
     getPrFiles: vi.fn().mockResolvedValue([]),
     insertReview: vi.fn().mockResolvedValue({
@@ -216,10 +218,15 @@ function makeContainer(opts: {
   diff?: string;
   settingsRows?: { key: string; value: unknown }[];
   llmCalls?: string[];
+  /** Per-schemaName fixtures — e.g. `{ PRIntent: {...} }` to make the intent
+   *  pre-pass succeed instead of falling through to the Review-shaped
+   *  default (which fails PRIntent's schema and leaves intent undefined). */
+  structuredBySchema?: Record<string, unknown>;
 }): Container {
   const gitClient = new MockGitClient({ diff: opts.diff });
   const llm = new MockLLMProvider('anthropic', {
     structured: { verdict: 'comment', summary: 'Looks fine.', score: 95, findings: [] },
+    ...(opts.structuredBySchema ? { structuredBySchema: opts.structuredBySchema } : {}),
   });
 
   const container = {
@@ -384,5 +391,51 @@ describe('ReviewRunExecutor — resolveIntentModel provider routing (High-severi
     // failure, if any, stays non-fatal).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((reviewRepo as any).__completed[0]!.status).toBe('done');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (e) The intent-classification pre-pass's own cost/tokens surface in
+// cost_report.intent_* — previously computed then discarded (only logged),
+// never persisted anywhere a user could see it on the Trace tab.
+// ---------------------------------------------------------------------------
+
+describe('ReviewRunExecutor — cost_report.intent_* (intent-phase cost surfacing)', () => {
+  it('persists the intent pre-pass tokens/cost when this batch freshly classified intent', async () => {
+    const container = makeContainer({
+      structuredBySchema: {
+        PRIntent: { intent: 'Adds rate limiting', in_scope: ['rate limiting'], out_of_scope: ['auth'] },
+      },
+    });
+    const reviewRepo = makeReviewRepo(); // getIntent resolves undefined — forces classification
+    const executor = new ReviewRunExecutor(container, reviewRepo, makeAgentsRepo());
+
+    await executor.executeRuns(WS_ID, PULL_ROW, REPO_ROW, [{ agent: AGENT_ROW as never, runId: RUN_ID }]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const trace = ((reviewRepo as any).__savedTraces as RunTrace[])[0]!;
+
+    // MockLLMProvider's completeStructured always returns tokensIn:100,
+    // tokensOut:50, costUsd:0.001 — deterministic, so exact values are safe.
+    expect(trace.cost_report?.intent_cost_usd).toBe(0.001);
+    expect(trace.cost_report?.intent_tokens_in).toBe(100);
+    expect(trace.cost_report?.intent_tokens_out).toBe(50);
+  });
+
+  it('leaves intent_cost_usd/intent_tokens_* null when this batch reused a cached pr_intent (no LLM call)', async () => {
+    const container = makeContainer({}); // no PRIntent fixture needed — classification never runs
+    const reviewRepo = makeReviewRepo({
+      cachedIntent: { intent: 'Adds rate limiting', in_scope: ['rate limiting'], out_of_scope: [] },
+    });
+    const executor = new ReviewRunExecutor(container, reviewRepo, makeAgentsRepo());
+
+    await executor.executeRuns(WS_ID, PULL_ROW, REPO_ROW, [{ agent: AGENT_ROW as never, runId: RUN_ID }]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const trace = ((reviewRepo as any).__savedTraces as RunTrace[])[0]!;
+
+    expect(trace.cost_report?.intent_cost_usd).toBeNull();
+    expect(trace.cost_report?.intent_tokens_in).toBeNull();
+    expect(trace.cost_report?.intent_tokens_out).toBeNull();
   });
 });

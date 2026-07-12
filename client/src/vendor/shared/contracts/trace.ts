@@ -83,6 +83,13 @@ export const RunTraceCostReport = z.object({
   excluded_boilerplate_tokens: z.number().int(),
   map_reduce_threshold_tokens: z.number().int().nullable(),
   map_reduce_chunk_count: z.number().int(),
+  // Cost of the shared intent-classification pre-pass (once per batch, not
+  // per-agent). Null when this run reused a cached pr_intent (no LLM call)
+  // or classification failed. Nullish (not just nullable) — old persisted
+  // JSONB traces predate this field entirely.
+  intent_cost_usd: z.number().nullish(),
+  intent_tokens_in: z.number().int().nullish(),
+  intent_tokens_out: z.number().int().nullish(),
 });
 export type RunTraceCostReport = z.infer<typeof RunTraceCostReport>;
 

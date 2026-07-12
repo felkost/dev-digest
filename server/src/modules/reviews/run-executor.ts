@@ -67,6 +67,15 @@ export type RunOutcome = {
 };
 
 /**
+ * Cost of the shared intent-classification pre-pass, captured once per batch
+ * in `prepareRunContext` and threaded into every job's trace `cost_report`.
+ * Undefined when this batch reused a cached `pr_intent` (no LLM call) or
+ * classification failed — both non-fatal, tracked separately from per-agent
+ * review cost so it is never double-counted in `agent_runs.cost_usd`.
+ */
+type IntentCost = { tokensIn: number; tokensOut: number; costUsd: number | null };
+
+/**
  * Build a compact files summary for the intent classifier.
  * Includes ONLY file paths, +/- counts, and @@ hunk position headers.
  * Deliberately excludes code body lines (+/-) to keep the prompt small.
@@ -118,10 +127,10 @@ export class ReviewRunExecutor {
   ): Promise<void> {
     const ctx = await this.prepareRunContext(workspaceId, pull, repo, jobs, logger);
     if (!ctx) return; // pre-work failure already failed every job (see prepareRunContext)
-    const { diff, intent, runLog } = ctx;
+    const { diff, intent, runLog, intentCost } = ctx;
 
     for (const job of jobs) {
-      await this.runJob(workspaceId, job, pull, repo, diff, intent, runLog, logger);
+      await this.runJob(workspaceId, job, pull, repo, diff, intent, intentCost, runLog, logger);
     }
   }
 
@@ -142,13 +151,13 @@ export class ReviewRunExecutor {
   ): Promise<void> {
     const ctx = await this.prepareRunContext(workspaceId, pull, repo, jobs, logger, MULTI_AGENT_CONCURRENCY_CAP);
     if (!ctx) return; // pre-work failure already failed every job (see prepareRunContext)
-    const { diff, intent, runLog } = ctx;
+    const { diff, intent, runLog, intentCost } = ctx;
 
     // Bounded-concurrency fan-out. Each job's own try/catch (inside `runJob` →
     // `runOneAgent`) never rethrows past the worker, and `runBus.complete` fires
     // unconditionally per job — a plain `Promise.all` over the workers is safe.
     await this.runWithConcurrencyCap(jobs, MULTI_AGENT_CONCURRENCY_CAP, (job) =>
-      this.runJob(workspaceId, job, pull, repo, diff, intent, runLog, logger),
+      this.runJob(workspaceId, job, pull, repo, diff, intent, intentCost, runLog, logger),
     );
   }
 
@@ -177,7 +186,15 @@ export class ReviewRunExecutor {
     jobs: { agent: AgentRow; runId: string }[],
     logger: Logger | undefined,
     concurrencyCap?: number,
-  ): Promise<{ diff: UnifiedDiff; intent: Intent | undefined; runLog: RunLogger } | undefined> {
+  ): Promise<
+    | {
+        diff: UnifiedDiff;
+        intent: Intent | undefined;
+        runLog: RunLogger;
+        intentCost: IntentCost | undefined;
+      }
+    | undefined
+  > {
     // ONE logger fanned out over every queued run: shared pre-work (diff +
     // intent) is streamed into each target agent's Live Log and persisted into
     // each run's trace. Per-agent work below narrows it to a single run.
@@ -232,6 +249,7 @@ export class ReviewRunExecutor {
     // Classify the PR intent once. Cached in pr_intent — subsequent runs reuse
     // the stored result. Pass the intent to each agent's review prompt.
     let intent: Intent | undefined;
+    let intentCost: IntentCost | undefined;
     try {
       intent = await this.repo.getIntent(pull.id);
       if (!intent) {
@@ -257,6 +275,7 @@ export class ReviewRunExecutor {
         });
         const { tokensIn, tokensOut, costUsd, ...intentData } = result;
         intent = intentData;
+        intentCost = { tokensIn, tokensOut, costUsd };
         await this.repo.upsertIntent(pull.id, intent);
         logger?.info(
           {
@@ -281,7 +300,7 @@ export class ReviewRunExecutor {
       // Intent is optional — never fail the whole review batch because of it
     }
 
-    return { diff, intent, runLog };
+    return { diff, intent, runLog, intentCost };
   }
 
   /**
@@ -298,6 +317,7 @@ export class ReviewRunExecutor {
     repo: typeof schema.repos.$inferSelect,
     diff: UnifiedDiff,
     intent: Intent | undefined,
+    intentCost: IntentCost | undefined,
     runLog: RunLogger,
     logger?: Logger,
   ): Promise<void> {
@@ -308,7 +328,7 @@ export class ReviewRunExecutor {
       `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
     );
     try {
-      const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog, intent);
+      const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog, intent, intentCost);
       logger?.info(
         {
           runId,
@@ -363,6 +383,7 @@ export class ReviewRunExecutor {
     runId: string,
     parentLog: RunLogger,
     intent?: Intent,
+    intentCost?: IntentCost,
   ): Promise<RunOutcome> {
     const start = Date.now();
     // Narrow the fanned-out pre-work logger to THIS run; the shared diff/intent
@@ -587,6 +608,12 @@ export class ReviewRunExecutor {
           excluded_boilerplate_tokens: excludedTokensEstimate,
           map_reduce_threshold_tokens: mapReduceThresholdTokens,
           map_reduce_chunk_count: mapReduceChunkCount,
+          // Null when this batch reused a cached pr_intent (no LLM call this
+          // run) or classification failed — never coerced into this run's
+          // own review cost (agent_runs.cost_usd stays review-only).
+          intent_cost_usd: intentCost?.costUsd ?? null,
+          intent_tokens_in: intentCost?.tokensIn ?? null,
+          intent_tokens_out: intentCost?.tokensOut ?? null,
         },
         prompt_assembly: outcome.assembly,
         tool_calls: outcome.chunks.map((c) => ({
