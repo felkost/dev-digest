@@ -134,8 +134,14 @@ recommendations. → **Checkpoint**, then produce the **Closing analysis** below
    a ready-to-paste **English** commit message. **Never run `git commit` yourself** — the user
    commits.
 3. Ask the user via `AskUserQuestion`: continue now in this session, or hand off to a new one.
-   - **Continue** → proceed straight into the next stage.
-   - **New session** → write the handoff doc (below), then **stop** — do not start the next stage.
+   - **Continue** → before proceeding, check: did this stage surface a non-obvious, *verified*
+     finding (an architecture-reviewer violation with a root cause, a plan-verifier gap that
+     wasn't a simple oversight, a latent bug hit during Implement)? If yes, invoke
+     `engineering-insights` inline now — a "new session" checkpoint gets this for free from the
+     Stop hook, but a continued session doesn't stop, so nothing else will remind you. Then
+     proceed straight into the next stage.
+   - **New session** → write the handoff doc (below), then **stop** — do not start the next stage
+     (the Stop hook will prompt `engineering-insights` for whatever this stage surfaced).
 
 ## Handoff doc (mandatory whenever the user picks "new session")
 
