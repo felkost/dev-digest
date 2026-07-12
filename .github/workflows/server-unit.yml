@@ -59,6 +59,14 @@ jobs:
 
       - run: pnpm typecheck
 
+      # Also type-check the test files. `pnpm typecheck` (tsconfig.json) only
+      # includes src/**, so test-only type errors used to accumulate invisibly
+      # (build/CI never saw them). tsconfig.test.json = src + test, noEmit.
+      # Invoked as a direct tsc run (not a package.json script) for the same
+      # reason the `unit` job below runs vitest directly — package.json has
+      # historically been a local skip-worktree variant.
+      - run: pnpm exec tsc --noEmit -p tsconfig.test.json
+
   unit:
     name: tests
     runs-on: ubuntu-latest

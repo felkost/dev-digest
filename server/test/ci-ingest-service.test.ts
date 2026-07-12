@@ -161,7 +161,6 @@ function makeFakeDb(installations: CiInstallationRow[]) {
                 }
                 const row = {
                   id: `ci-run-${nextCiRunSeq++}`,
-                  ciInstallationId: values.ciInstallationId,
                   prNumber: null,
                   ranAt: null,
                   status: null,
@@ -169,8 +168,6 @@ function makeFakeDb(installations: CiInstallationRow[]) {
                   costUsd: null,
                   githubUrl: null,
                   source: null,
-                  workspaceId: values.workspaceId,
-                  githubRunId: values.githubRunId,
                   repo: null,
                   agent: null,
                   durationS: null,

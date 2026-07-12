@@ -149,6 +149,7 @@ function makeRepoIntel(opts: {
     getCallerSignatures: vi.fn(),
     getUnresolvedReferences: vi.fn(),
     getConventionSamples: vi.fn(),
+    getAllFileFacts: vi.fn().mockResolvedValue([]),
     getTopFilesByRank: vi.fn(),
     getCriticalPaths: vi.fn(),
   } as RepoIntel;

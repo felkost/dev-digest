@@ -80,7 +80,7 @@ const RUN_ROW = {
  * WHERE clause was invoked without needing a real SQL parser (mirrors
  * `eval-repository.test.ts`'s `selectChain`/`makeSelectOnlyDb` convention).
  */
-function selectChain(rows: unknown[], calls: { where: unknown[] }) {
+function selectChain(rows: unknown[], calls: { where: unknown[][] }) {
   const chain: Record<string, unknown> = {
     from: () => chain,
     where: (...args: unknown[]) => {
@@ -95,8 +95,8 @@ function selectChain(rows: unknown[], calls: { where: unknown[] }) {
   return chain;
 }
 
-function makeSelectOnlyDb(rows: unknown[]): { db: Db; calls: { where: unknown[] } } {
-  const calls = { where: [] as unknown[] };
+function makeSelectOnlyDb(rows: unknown[]): { db: Db; calls: { where: unknown[][] } } {
+  const calls = { where: [] as unknown[][] };
   const db = {
     select: (_cols?: Record<string, unknown>) => selectChain(rows, calls),
   } as unknown as Db;

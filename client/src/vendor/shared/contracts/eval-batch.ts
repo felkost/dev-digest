@@ -16,6 +16,18 @@ import { z } from 'zod';
 // Eval Case — expectations + list item + create/from-finding inputs
 // ===========================================================================
 
+/**
+ * Which eval methodology a case uses. `expected_output` (see
+ * `EvalCaseListItem`/`EvalCaseCreateInput` below) is REUSED across all three
+ * kinds with a per-kind shape rather than adding new columns/fields:
+ *   - `'review_finding'` (unchanged, pre-WS6 default) → `Expectation[]`
+ *   - `'intent'` → `{ in_scope: string[]; out_of_scope: string[] }`
+ *   - `'risk_brief_narrative'` → `{ key_points: string[] }`
+ * Callers must narrow on `case_kind` before interpreting `expected_output`.
+ */
+export const EvalCaseKind = z.enum(['review_finding', 'intent', 'risk_brief_narrative']);
+export type EvalCaseKind = z.infer<typeof EvalCaseKind>;
+
 /** A single expectation an eval case's expected output must satisfy. */
 export const Expectation = z.object({
   type: z.enum(['must_find', 'must_not_flag']),
@@ -51,16 +63,38 @@ export const EvalCaseListItem = z.object({
   last_run_duration_ms: z.number().int().nullish(),
   last_run_cost_usd: z.number().nullish(),
   notes: z.string().nullish(),
+  // WS6 — eval methodology (`eval_cases.case_kind`, migration 0026).
+  case_kind: EvalCaseKind,
+  // WS6 — per-case threshold override (`eval_cases.passing_threshold`,
+  // migration 0026). `null` = use the kind's built-in default threshold.
+  passing_threshold: z.number().min(0).max(1).nullable(),
 });
 export type EvalCaseListItem = z.infer<typeof EvalCaseListItem>;
 
-/** Request body for creating a hand-authored eval case. */
+/**
+ * Request body for creating a hand-authored eval case.
+ *
+ * `expected_output` is REUSED across all `case_kind` values with a
+ * per-kind shape (rather than adding new columns/fields per kind):
+ *   - `'review_finding'` (unchanged, pre-WS6 default) → `Expectation[]`
+ *   - `'intent'` → `{ in_scope: string[]; out_of_scope: string[] }`
+ *   - `'risk_brief_narrative'` → `{ key_points: string[] }`
+ * The Zod shape below stays `Expectation[]`-typed for the pre-WS6 default
+ * path; a `case_kind`-narrowed parse/validation for the other two shapes
+ * is added by the WS6 orchestrator step that consumes them.
+ */
 export const EvalCaseCreateInput = z.object({
   owner_id: z.string(),
   name: z.string().min(1),
   input_diff: z.string(),
   expected_output: z.array(Expectation),
   notes: z.string().nullish(),
+  // WS6 — defaults to the pre-existing behavior for callers that don't
+  // send it yet (e.g. the existing finding-promotion flow).
+  case_kind: EvalCaseKind.default('review_finding'),
+  // WS6 — per-case threshold override; omitted/null = use the kind's
+  // built-in default threshold.
+  passing_threshold: z.number().min(0).max(1).nullish(),
 });
 export type EvalCaseCreateInput = z.infer<typeof EvalCaseCreateInput>;
 

@@ -26,7 +26,9 @@ const VersionParams = z.object({
  * A2 — agents module (owner A2).
  *   GET    /agents                  → list (workspace-scoped)
  *   GET    /agents/stats            → per-agent usage stats (runs · accept% · avg cost · skills)
+ *   GET    /agents/performance      → fleet performance read (L08 Spec B — Agent Performance page)
  *   GET    /agents/:id              → one agent
+ *   GET    /agents/:id/stats        → per-agent stats detail (base AgentStats + L08 Spec B additive fields)
  *   POST   /agents                  → create
  *   PUT    /agents/:id              → update / toggle enabled (versions config)
  *   GET    /agents/:id/versions     → config history (newest first)
@@ -91,11 +93,23 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
     return service.stats(workspaceId);
   });
 
+  app.get('/agents/performance', async (req) => {
+    const { workspaceId } = await getContext(app.container, req);
+    return service.performance(workspaceId);
+  });
+
   app.get('/agents/:id', { schema: { params: IdParams } }, async (req) => {
     const { workspaceId } = await getContext(app.container, req);
     const agent = await service.get(workspaceId, req.params.id);
     if (!agent) throw new NotFoundError('Agent not found');
     return agent;
+  });
+
+  app.get('/agents/:id/stats', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(app.container, req);
+    const detail = await service.statsDetail(workspaceId, req.params.id);
+    if (!detail) throw new NotFoundError('Agent not found');
+    return detail;
   });
 
   app.post('/agents', { schema: { body: CreateAgentBody } }, async (req, reply) => {

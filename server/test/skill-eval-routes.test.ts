@@ -105,6 +105,8 @@ function makeCaseRow(overrides: Record<string, unknown> = {}) {
     inputMeta: { source: 'manual' },
     expectedOutput: { practices: ['does the thing'], grounding: ['thing'], threshold: 0.6 },
     notes: null,
+    caseKind: 'review_finding' as const,
+    passingThreshold: null,
     ...overrides,
   };
 }
@@ -437,6 +439,8 @@ describe('POST /findings/:id/evals/skill-case', () => {
       inputMeta: data.input_meta,
       expectedOutput: data.expected_output,
       notes: data.notes ?? null,
+      caseKind: 'review_finding' as const,
+      passingThreshold: null,
     }));
 
     const app = await buildSkillEvalApp({ reviewRepo: { findingContext, getPrFiles } });

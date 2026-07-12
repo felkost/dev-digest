@@ -98,7 +98,8 @@ function makeFakeDb(opts: MakeContainerOpts) {
         return selectChain(() => (row ? [row] : []));
       }
       // OnboardingRepository.getRepoBasics
-      return selectChain(() => (('repoRow' in opts ? opts.repoRow : null) ? [opts.repoRow] : []));
+      const repoRow = 'repoRow' in opts ? opts.repoRow : null;
+      return selectChain(() => (repoRow ? [repoRow] : []));
     },
     transaction: async (cb: (tx: unknown) => Promise<unknown>) => {
       const ownsRow = 'ownsRow' in opts ? opts.ownsRow : { id: REPO_ID };

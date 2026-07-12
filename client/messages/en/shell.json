@@ -23,6 +23,7 @@
     "agents": "Agents",
     "conventions": "Conventions",
     "evals": "Eval Dashboard",
+    "agent-performance": "Agent Performance",
     "ci-runs": "CI Runs"
   },
   "featurePlaceholder": {

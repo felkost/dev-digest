@@ -2,7 +2,7 @@ import { and, asc, desc, eq, count, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { SkillRow, SkillVersionRow, EvalCaseRow } from '../../db/rows.js';
-import type { SkillType, SkillSource, SkillStats } from '@devdigest/shared';
+import type { SkillType, SkillSource } from '@devdigest/shared';
 
 export type { SkillRow, SkillVersionRow };
 
@@ -22,6 +22,30 @@ export interface UpdateSkill {
   type?: SkillType;
   body?: string;
   enabled?: boolean;
+}
+
+/**
+ * Raw usage-stats aggregation returned by `SkillsRepository.stats()`. Distinct
+ * from the shared `SkillStats` DTO: `findings_by_category` in the DTO is a
+ * dollar estimate, which requires arithmetic (the even-split cost computation)
+ * that belongs in the service layer for testability. This raw shape carries
+ * the mechanical counts + per-run costs the service needs to compute it.
+ */
+export interface SkillStatsRaw {
+  used_by: number;
+  pull_frequency_pct: number;
+  accept_rate_pct: number;
+  findings_30d: number;
+  agents: { id: string; name: string }[];
+  /** Findings-by-category counts (pre dollar-conversion), most-frequent first. */
+  category_counts: { category: string; count: number }[];
+  /**
+   * `cost_usd` of each DISTINCT run that produced >=1 of the trailing-30d
+   * findings above (one entry per contributing run, deduped by run id — a
+   * run's cost must not be counted once per finding it produced). `null`
+   * entries are runs with unknown/never-recorded cost.
+   */
+  contributing_run_costs: (number | null)[];
 }
 
 /**
@@ -158,7 +182,7 @@ export class SkillsRepository {
   }
 
   /** Lightweight usage stats for the Stats tab. */
-  async stats(workspaceId: string, skillId: string): Promise<SkillStats> {
+  async stats(workspaceId: string, skillId: string): Promise<SkillStatsRaw> {
     const skill = await this.getById(workspaceId, skillId);
     if (!skill) {
       return {
@@ -167,7 +191,8 @@ export class SkillsRepository {
         accept_rate_pct: 0,
         findings_30d: 0,
         agents: [],
-        findings_by_category: [],
+        category_counts: [],
+        contributing_run_costs: [],
       };
     }
 
@@ -192,25 +217,27 @@ export class SkillsRepository {
         accept_rate_pct: 0,
         findings_30d: 0,
         agents: [],
-        findings_by_category: [],
+        category_counts: [],
+        contributing_run_costs: [],
       };
     }
 
     const agentIds = agents.map((a) => a.id);
 
-    // Total runs by these agents
+    // Total runs by these agents (source='local' — CI-executed runs excluded, AC-26)
     const [totalRunsRow] = await this.db
       .select({ cnt: count() })
       .from(t.agentRuns)
       .where(
         and(
           eq(t.agentRuns.workspaceId, workspaceId),
+          eq(t.agentRuns.source, 'local'),
           sql`${t.agentRuns.agentId} = ANY(ARRAY[${sql.join(agentIds.map((id) => sql`${id}::uuid`), sql`, `)}])`,
         ),
       );
     const totalRuns = totalRunsRow?.cnt ?? 0;
 
-    // Reviews created in the last 30 days by these agents
+    // Reviews created in the last 30 days by these agents (source='local', AC-26)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const [recentRunsRow] = await this.db
       .select({ cnt: count() })
@@ -218,20 +245,31 @@ export class SkillsRepository {
       .where(
         and(
           eq(t.agentRuns.workspaceId, workspaceId),
+          eq(t.agentRuns.source, 'local'),
           sql`${t.agentRuns.agentId} = ANY(ARRAY[${sql.join(agentIds.map((id) => sql`${id}::uuid`), sql`, `)}])`,
           sql`${t.agentRuns.ranAt} >= ${thirtyDaysAgo.toISOString()}`,
         ),
       );
 
-    // Findings from these agents' reviews (last 30 days)
+    // Findings from these agents' reviews (last 30 days) — also pull the
+    // contributing run's id/cost and the finding's accept/dismiss state so
+    // the service layer can compute the dollar split + real accept-rate over
+    // this exact set, without a second query.
     const recentFindings = await this.db
-      .select({ category: t.findings.category })
+      .select({
+        category: t.findings.category,
+        runId: t.agentRuns.id,
+        costUsd: t.agentRuns.costUsd,
+        acceptedAt: t.findings.acceptedAt,
+        dismissedAt: t.findings.dismissedAt,
+      })
       .from(t.findings)
       .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
       .innerJoin(t.agentRuns, eq(t.reviews.runId, t.agentRuns.id))
       .where(
         and(
           eq(t.reviews.workspaceId, workspaceId),
+          eq(t.agentRuns.source, 'local'),
           sql`${t.agentRuns.agentId} = ANY(ARRAY[${sql.join(agentIds.map((id) => sql`${id}::uuid`), sql`, `)}])`,
           sql`${t.agentRuns.ranAt} >= ${thirtyDaysAgo.toISOString()}`,
         ),
@@ -239,15 +277,33 @@ export class SkillsRepository {
 
     const findings_30d = recentFindings.length;
 
-    // Category breakdown
+    // Category breakdown (raw counts — the service converts these to the
+    // even-split dollar estimate)
     const catMap = new Map<string, number>();
     for (const f of recentFindings) {
       const cat = f.category ?? 'other';
       catMap.set(cat, (catMap.get(cat) ?? 0) + 1);
     }
-    const findings_by_category = [...catMap.entries()]
+    const category_counts = [...catMap.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([category, cnt]) => ({ category, count: cnt }));
+
+    // Distinct contributing-run costs — dedupe by run id so a run's cost
+    // isn't summed once per finding it produced.
+    const runCostByRunId = new Map<string, number | null>();
+    for (const f of recentFindings) {
+      if (!runCostByRunId.has(f.runId)) {
+        runCostByRunId.set(f.runId, f.costUsd ?? null);
+      }
+    }
+    const contributing_run_costs = [...runCostByRunId.values()];
+
+    // Real accept-rate over the same recentFindings set (mirrors
+    // AgentsRepository.acceptanceByAgent's accepted/(accepted+dismissed) idiom).
+    const accepted = recentFindings.filter((f) => f.acceptedAt != null).length;
+    const dismissed = recentFindings.filter((f) => f.dismissedAt != null).length;
+    const accept_rate_pct =
+      accepted + dismissed > 0 ? Math.round((accepted / (accepted + dismissed)) * 100) : 0;
 
     // Pull frequency: % of runs that happened (simple heuristic)
     const pullFrequency = totalRuns > 0 ? Math.round(((recentRunsRow?.cnt ?? 0) / totalRuns) * 100) : 0;
@@ -255,10 +311,11 @@ export class SkillsRepository {
     return {
       used_by: agents.length,
       pull_frequency_pct: pullFrequency,
-      accept_rate_pct: 0, // acceptance tracking is L03+
+      accept_rate_pct,
       findings_30d,
       agents,
-      findings_by_category,
+      category_counts,
+      contributing_run_costs,
     };
   }
 

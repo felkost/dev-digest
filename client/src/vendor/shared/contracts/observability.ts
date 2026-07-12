@@ -139,6 +139,56 @@ export const AgentStats = z.object({
 export type AgentStats = z.infer<typeof AgentStats>;
 
 // ---------------------------------------------------------------------------
+// Per-agent Stats — additive detail wrapper (GET /agents/:id/stats, L08 Spec B)
+// ---------------------------------------------------------------------------
+
+/** One run in an agent's run history. Studio runs only (source='local'). */
+export const AgentRunHistoryRow = z.object({
+  run_id: z.string(),
+  ran_at: z.string(),
+  status: z.string().nullable(),
+  cost_usd: z.number().nullable(),
+  findings_count: z.number().int().nullable(),
+  pr_number: z.number().int().nullable(),
+});
+export type AgentRunHistoryRow = z.infer<typeof AgentRunHistoryRow>;
+
+/** One week's findings-by-severity counts for the weekly stacked-bar chart.
+ *  Zero-filled by the service — a week with no findings of a given severity
+ *  is 0, not omitted (8 ordered points, oldest→newest). */
+export const WeeklySeverityPoint = z.object({
+  week_start: z.string(),
+  CRITICAL: z.number().int(),
+  WARNING: z.number().int(),
+  SUGGESTION: z.number().int(),
+});
+export type WeeklySeverityPoint = z.infer<typeof WeeklySeverityPoint>;
+
+/** A ranked usage row — shared shape for `most_used_skills` and
+ *  `memory_pulled_summary`. `usage_estimate` is an approximation (flat
+ *  magnitude from the agent's run volume), never a measured usage count. */
+export const AgentRankedUsageRow = z.object({
+  id: z.string(),
+  name: z.string(),
+  usage_estimate: z.number(),
+});
+export type AgentRankedUsageRow = z.infer<typeof AgentRankedUsageRow>;
+
+/**
+ * Response of GET /agents/:id/stats. Additive wrapper around the existing
+ * `AgentStats` base metrics (unchanged) — mirrors the `EvalBatchDetail =
+ * EvalBatch.extend({...})` pattern in `eval-batch.ts`.
+ */
+export const AgentStatsDetail = AgentStats.extend({
+  cost_delta_usd_30d: z.number().nullable(),
+  weekly_findings_by_severity: z.array(WeeklySeverityPoint),
+  most_used_skills: z.array(AgentRankedUsageRow),
+  memory_pulled_summary: z.array(AgentRankedUsageRow),
+  run_history: z.array(AgentRunHistoryRow),
+});
+export type AgentStatsDetail = z.infer<typeof AgentStatsDetail>;
+
+// ---------------------------------------------------------------------------
 // Cross-session memory curator
 // ---------------------------------------------------------------------------
 

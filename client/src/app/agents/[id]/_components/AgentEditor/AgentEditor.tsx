@@ -11,6 +11,7 @@ import { ConfigTab } from "./_components/ConfigTab";
 import { SkillsTab } from "./_components/SkillsTab/SkillsTab";
 import { ContextTab } from "./_components/ContextTab";
 import { EvalsTab } from "./_components/EvalsTab/EvalsTab";
+import { StatsTab } from "./_components/StatsTab";
 import { CITab } from "./_components/CITab";
 import { TABS } from "./constants";
 import { s } from "./styles";
@@ -30,6 +31,8 @@ export function AgentEditor({ agent, tab, onTab }: { agent: Agent; tab: string; 
           <ContextTab agent={agent} />
         ) : tab === "evals" ? (
           <EvalsTab agent={agent} />
+        ) : tab === "stats" ? (
+          <StatsTab agent={agent} />
         ) : tab === "ci" ? (
           <CITab agent={agent} />
         ) : (

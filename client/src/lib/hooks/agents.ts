@@ -3,7 +3,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, AgentCardStats, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
+import type { Agent, AgentCardStats, AgentStatsDetail, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
 
 export function useAgents() {
   return useQuery({
@@ -18,6 +18,21 @@ export function useAgentStats() {
     queryKey: ["agent-stats"],
     queryFn: ({ signal }) => api.get<AgentCardStats[]>("/agents/stats", { signal }),
     staleTime: 30_000,
+  });
+}
+
+/**
+ * Full per-agent stats detail (base `AgentStats` KPIs + 30d cost delta +
+ * weekly severity breakdown + ranked skill/memory usage + studio run
+ * history) for the Agent Editor's Stats tab (L08 Spec B). Distinct from
+ * `useAgentStats` above, which fetches the LIST-card aggregate
+ * (`GET /agents/stats`, all agents at once) — this hits the per-agent detail
+ * endpoint (`GET /agents/:id/stats`).
+ */
+export function useAgentStatsDetail(agentId: string) {
+  return useQuery({
+    queryKey: ["agent-stats-detail", agentId],
+    queryFn: ({ signal }) => api.get<AgentStatsDetail>(`/agents/${agentId}/stats`, { signal }),
   });
 }
 

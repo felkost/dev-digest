@@ -195,7 +195,7 @@ function makeAgentsRepo() {
 
 /** Container whose `llm()` resolver THROWS for 'anthropic' — the induced,
  *  isolated per-job failure — but resolves normally for 'openai'. */
-function makeContainer(): { container: Container; completeSpy: ReturnType<typeof vi.fn> } {
+function makeContainer() {
   const gitClient = new MockGitClient({});
   const openaiLlm = new MockLLMProvider('openai', {
     structured: { verdict: 'comment', summary: 'Looks fine.', score: 95, findings: [] },

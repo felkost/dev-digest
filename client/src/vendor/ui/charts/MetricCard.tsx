@@ -10,6 +10,7 @@ export function MetricCard({
   color,
   trend,
   suffix,
+  invertColor,
 }: {
   label: string;
   value: React.ReactNode;
@@ -17,10 +18,16 @@ export function MetricCard({
   color?: string;
   trend?: number[];
   suffix?: string;
+  /** Flips the delta color mapping (up → var(--crit), down → var(--ok)) for
+   *  metrics where an increase is bad (e.g. cost). Numeric value and arrow
+   *  direction are unaffected. Default false keeps the existing "up is good"
+   *  mapping (e.g. recall). */
+  invertColor?: boolean;
 }) {
   const up = (delta ?? 0) > 0;
   const flat = delta === 0;
-  const dc = flat ? "var(--text-muted)" : up ? "var(--ok)" : "var(--crit)";
+  const isBad = invertColor ? up : !up;
+  const dc = flat ? "var(--text-muted)" : isBad ? "var(--crit)" : "var(--ok)";
   const DeltaIcon = flat ? Icon.Slash : up ? Icon.ArrowUp : Icon.ArrowDown;
   return (
     <div

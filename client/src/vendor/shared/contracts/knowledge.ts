@@ -155,7 +155,9 @@ export const SkillStats = z.object({
   accept_rate_pct: z.number(),
   findings_30d: z.number().int(),
   agents: z.array(z.object({ id: z.string(), name: z.string() })),
-  findings_by_category: z.array(z.object({ category: z.string(), count: z.number().int() })),
+  findings_by_category: z.array(
+    z.object({ category: z.string(), estimated_cost_usd: z.number().nullable() }),
+  ),
 });
 export type SkillStats = z.infer<typeof SkillStats>;
 

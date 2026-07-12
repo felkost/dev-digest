@@ -40,6 +40,8 @@ const EXISTING_CASE: EvalCaseListItem = {
   last_run_status: "never_run",
   last_run_summary: null,
   notes: "existing notes",
+  case_kind: "review_finding",
+  passing_threshold: null,
 };
 
 afterEach(() => {

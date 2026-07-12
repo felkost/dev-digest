@@ -9,7 +9,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { Column, Param, SQL, StringChunk } from 'drizzle-orm';
-import { InstallationsRepository } from '../src/modules/ci/repository/installations.repo.js';
+import {
+  InstallationsRepository,
+  type UpsertPublishedValues,
+} from '../src/modules/ci/repository/installations.repo.js';
 import { AppError } from '../src/platform/errors.js';
 import type { Db } from '../src/db/client.js';
 
@@ -631,7 +634,7 @@ describe('InstallationsRepository.upsertPublished', () => {
     const db = makeStatefulFakeDb();
     const repo = new InstallationsRepository(db);
 
-    const published = {
+    const published: UpsertPublishedValues = {
       agentId: AGENT_ID,
       repo: REPO,
       targetType: 'gha',

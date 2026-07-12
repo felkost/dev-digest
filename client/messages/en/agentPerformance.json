@@ -6,7 +6,9 @@
     "totalRuns": "Total runs",
     "avgAcceptRate": "Avg accept-rate",
     "totalCost": "Total cost",
-    "mostActive": "Most active"
+    "costDelta": "vs. previous 30 days",
+    "mostActive": "Most active",
+    "mostActiveRuns": "{count} runs"
   },
   "costByAgent": "Cost by agent",
   "costByModel": "Cost by model",

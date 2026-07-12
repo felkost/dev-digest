@@ -57,11 +57,11 @@ export interface MockLLMOptions {
 }
 
 export class MockLLMProvider implements LLMProvider {
-  readonly id: 'openai' | 'anthropic';
+  readonly id: LLMProvider['id'];
   public calls: { method: string; req: unknown }[] = [];
 
   constructor(
-    id: 'openai' | 'anthropic' = 'openai',
+    id: LLMProvider['id'] = 'openai',
     private opts: MockLLMOptions = {},
   ) {
     this.id = id;
@@ -69,11 +69,7 @@ export class MockLLMProvider implements LLMProvider {
 
   async listModels(): Promise<ModelInfo[]> {
     this.calls.push({ method: 'listModels', req: null });
-    return (
-      this.opts.models ?? [
-        { id: 'gpt-4.1', provider: this.id === 'anthropic' ? 'anthropic' : 'openai' },
-      ]
-    );
+    return this.opts.models ?? [{ id: 'gpt-4.1', provider: this.id }];
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
@@ -441,7 +437,7 @@ export class MockCodeIndex implements CodeIndex {
   async grep(_repo: RepoRef, pattern: string): Promise<CodeMatch[]> {
     return [{ path: 'src/config.ts', line: 12, text: `match for ${pattern}` }];
   }
-  async symbols(): Promise<CodeSymbol[]> {
+  async symbols(_repo: RepoRef): Promise<CodeSymbol[]> {
     return [{ path: 'src/middleware/ratelimit.ts', name: 'rateLimit', kind: 'function', line: 25 }];
   }
   async references(_repo: RepoRef, symbol: string): Promise<CodeReference[]> {

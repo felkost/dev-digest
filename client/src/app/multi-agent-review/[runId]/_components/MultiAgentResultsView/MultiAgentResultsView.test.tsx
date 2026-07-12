@@ -73,7 +73,7 @@ vi.mock("@/lib/hooks/core", () => ({
 }));
 
 const traceDrawerProps: Record<string, unknown>[] = [];
-vi.mock("@/app/repos/[repoId]/pulls/[number]/_components/RunTraceDrawer", () => ({
+vi.mock("@/components/RunTraceDrawer", () => ({
   default: (props: Record<string, unknown>) => {
     traceDrawerProps.push(props);
     return <div data-testid="trace-drawer">trace for {String(props.runId)}</div>;

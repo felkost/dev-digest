@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { RunTrace, FindingRecord } from "@devdigest/shared";
-import messages from "../../../../../../../../../../messages/en/runs.json"; // apps/web/messages/en/runs.json
+import messages from "../../../../../messages/en/runs.json"; // apps/web/messages/en/runs.json
 
 import { TraceBody } from "./TraceBody";
 

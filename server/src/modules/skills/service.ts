@@ -125,9 +125,43 @@ export class SkillsService {
     return toSkillDto(row);
   }
 
+  /**
+   * Usage stats for the Skill Stats tab. `findings_by_category` is an
+   * even-split dollar estimate — the repository returns raw counts + the
+   * cost of each distinct contributing run; this method converts them into
+   * per-category dollar amounts (spec §8/§9): each category's share of the
+   * trailing-30d finding count times the total known cost across every
+   * contributing run. If NO contributing run has a known cost, every
+   * category is `null` (unavailable, AC-28) rather than a misleading
+   * $0.00 — checked once for the whole set, since all categories draw from
+   * the same shared cost pool. Zero findings in the window (AC-23) naturally
+   * yields `findings_by_category: []`, unchanged from the count-based
+   * behavior, since `category_counts` is empty in that case.
+   */
   async stats(workspaceId: string, skillId: string): Promise<SkillStats> {
     await this.get(workspaceId, skillId);
-    return this.repo.stats(workspaceId, skillId);
+    const raw = await this.repo.stats(workspaceId, skillId);
+
+    const totalFindingsCount = raw.category_counts.reduce((sum, c) => sum + c.count, 0);
+    const knownCosts = raw.contributing_run_costs.filter((c): c is number => c != null);
+    const totalKnownCost = knownCosts.length > 0 ? knownCosts.reduce((sum, c) => sum + c, 0) : null;
+
+    const findings_by_category = raw.category_counts.map((c) => ({
+      category: c.category,
+      estimated_cost_usd:
+        totalKnownCost === null || totalFindingsCount === 0
+          ? null
+          : totalKnownCost * (c.count / totalFindingsCount),
+    }));
+
+    return {
+      used_by: raw.used_by,
+      pull_frequency_pct: raw.pull_frequency_pct,
+      accept_rate_pct: raw.accept_rate_pct,
+      findings_30d: raw.findings_30d,
+      agents: raw.agents,
+      findings_by_category,
+    };
   }
 
   // ---- Import preview (no DB write — pure parse) ---------------------------

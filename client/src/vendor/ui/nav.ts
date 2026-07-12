@@ -47,6 +47,7 @@ export const NAV: NavGroup[] = [
       // the member pick the repo AND PR from scratch, unlike WORKSPACE's
       // other items which all assume an already-active repo.
       { key: "multi-agent", label: "Multi-Agent Review", icon: "Users", href: "/multi-agent-review", gKey: "m" },
+      { key: "agent-performance", label: "Agent Performance", icon: "Gauge", href: "/agent-performance", gKey: "f" },
       { key: "ci-runs", label: "CI Runs", icon: "GitBranch", href: "/ci-runs", gKey: "r" },
     ],
   },
@@ -82,6 +83,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { keys: "g s", label: "Go to Skills", group: "Navigation" },
   { keys: "g a", label: "Go to Agents", group: "Navigation" },
   { keys: "g e", label: "Go to Eval Dashboard", group: "Navigation" },
+  { keys: "g f", label: "Go to Agent Performance", group: "Navigation" },
   { keys: "g r", label: "Go to CI Runs", group: "Navigation" },
   { keys: "j / k", label: "Next / previous finding", group: "Findings" },
   { keys: "a", label: "Accept finding", group: "Findings" },

@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Skeleton, Icon } from "@devdigest/ui";
 import type { Skill } from "@devdigest/shared";
 import { useSkillStats } from "../../../../lib/hooks/skills";
@@ -35,9 +36,13 @@ function StatCard({ label, value, unit }: { label: string; value: string | numbe
 
 const DONUT_COLORS = ["#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#10b981", "#6366f1"];
 
-function DonutChart({ data }: { data: Array<{ category: string; count: number }> }) {
-  const total = data.reduce((s, d) => s + d.count, 0);
-  if (total === 0) {
+function DonutChart({ data }: { data: Array<{ category: string; estimated_cost_usd: number | null }> }) {
+  // NULL handling (AC-28): a null estimated_cost_usd must not be treated as 0
+  // for the pie's angle math (that would silently vanish the slice) — but the
+  // category still gets a legend row with an "unavailable" ("—") value. Nulls
+  // DO contribute 0 to `total`, so they never skew other slices' proportions.
+  const total = data.reduce((s, d) => s + (d.estimated_cost_usd ?? 0), 0);
+  if (data.length === 0) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 120, color: "var(--text-muted)", fontSize: 12 }}>
         No findings yet
@@ -51,7 +56,19 @@ function DonutChart({ data }: { data: Array<{ category: string; count: number }>
   let angle = -90;
 
   const slices = data.slice(0, 6).map((d, i) => {
-    const sweep = (d.count / total) * 360;
+    const color = DONUT_COLORS[i % DONUT_COLORS.length];
+    if (d.estimated_cost_usd == null) {
+      return { path: null as string | null, color, ...d };
+    }
+    // Guard against total===0 (every non-null estimated_cost_usd is a KNOWN
+    // $0.00, distinct from the null/unavailable case above): dividing by a
+    // non-positive total would produce NaN and break the arc path. Treat it
+    // as a zero-sweep slice — same "no arc, legend row only" rendering as a
+    // null slice.
+    const sweep = total > 0 ? (d.estimated_cost_usd / total) * 360 : 0;
+    if (sweep === 0) {
+      return { path: null as string | null, color, ...d };
+    }
     const start = angle;
     angle += sweep;
     const startRad = (start * Math.PI) / 180;
@@ -61,13 +78,13 @@ function DonutChart({ data }: { data: Array<{ category: string; count: number }>
     const x2 = cx + R * Math.cos(endRad);
     const y2 = cy + R * Math.sin(endRad);
     const large = sweep > 180 ? 1 : 0;
-    return { d: `M${cx},${cy} L${x1},${y1} A${R},${R} 0 ${large} 1 ${x2},${y2} Z`, color: DONUT_COLORS[i % DONUT_COLORS.length], ...d };
+    return { path: `M${cx},${cy} L${x1},${y1} A${R},${R} 0 ${large} 1 ${x2},${y2} Z`, color, ...d };
   });
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
       <svg width={120} height={120}>
-        {slices.map((s, i) => <path key={i} d={s.d} fill={s.color} />)}
+        {slices.map((s, i) => (s.path ? <path key={i} d={s.path} fill={s.color} /> : null))}
         <circle cx={cx} cy={cy} r={28} fill="var(--bg-primary)" />
       </svg>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -75,7 +92,9 @@ function DonutChart({ data }: { data: Array<{ category: string; count: number }>
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: s.color, flexShrink: 0 }} />
             <span style={{ color: "var(--text-secondary)" }}>{s.category}</span>
-            <span style={{ fontWeight: 600, marginLeft: "auto" }}>{s.count}</span>
+            <span style={{ fontWeight: 600, marginLeft: "auto" }}>
+              {s.estimated_cost_usd == null ? "—" : `$${s.estimated_cost_usd.toFixed(2)}`}
+            </span>
           </div>
         ))}
       </div>
@@ -130,6 +149,7 @@ function AgentRow({ agent, divider }: { agent: { id: string; name: string }; div
 }
 
 export function StatsTab({ skill }: StatsTabProps) {
+  const t = useTranslations("skills");
   const { data: stats, isLoading } = useSkillStats(skill.id);
 
   if (isLoading) {
@@ -217,11 +237,32 @@ export function StatsTab({ skill }: StatsTabProps) {
               marginBottom: 12,
               display: "flex",
               alignItems: "center",
+              justifyContent: "space-between",
               gap: 6,
             }}
           >
-            <Icon.Tag size={13} />
-            Findings by category
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Icon.Tag size={13} />
+              Findings by category
+            </span>
+            <span
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 10,
+                fontWeight: 600,
+                textTransform: "none",
+                letterSpacing: "normal",
+                color: "var(--accent)",
+                background: "var(--accent-bg)",
+                padding: "2px 6px",
+                borderRadius: 4,
+              }}
+            >
+              <Icon.Info size={11} />
+              {t("stats.estimated")}
+            </span>
           </div>
           <DonutChart data={stats.findings_by_category} />
         </div>

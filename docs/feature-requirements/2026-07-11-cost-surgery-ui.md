@@ -1,7 +1,7 @@
 # Spec: Cost Surgery — UI/Dashboards
 
 **Spec ID:** SPEC-2026-07-11-cost-surgery-ui
-**Status:** approved
+**Status:** implemented <!-- approved 2026-07-11; implemented + verified 2026-07-12 via docs/plans/2026-07-12-cost-surgery-ui-plan.md (29/29 ACs signed off; AC-25 per-block-token display formally descoped) -->
 **Date:** 2026-07-11
 **Affects:** full-stack (client-primary; one small, read-only server addition)
 **Supersedes:** —

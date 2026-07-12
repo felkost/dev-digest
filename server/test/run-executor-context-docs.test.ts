@@ -191,7 +191,7 @@ function makeContainer(opts: {
   agentDocs?: { path: string; order: number }[];
   skillDocs?: { path: string; order: number }[];
   gitFiles?: Record<string, string>;
-}): { container: Container; readFile: ReturnType<typeof vi.fn> } {
+}) {
   const gitClient = new MockGitClient({ files: opts.gitFiles });
   const readFile = vi.spyOn(gitClient, 'readFile');
 

@@ -115,6 +115,9 @@
       "total": "Total: {tokens} tokens"
     }
   },
+  "stats": {
+    "estimated": "Estimated"
+  },
   "evals": {
     "title": "Evals",
     "casesTitle": "Eval cases",

@@ -83,6 +83,8 @@ function makeCase(overrides: Partial<EvalCaseListItem> = {}): EvalCaseListItem {
     last_run_status: "never_run",
     last_run_summary: null,
     notes: null,
+    case_kind: "review_finding",
+    passing_threshold: null,
     ...overrides,
   };
 }

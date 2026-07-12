@@ -27,9 +27,9 @@ const RUN_ID_2 = '66666666-6666-6666-6666-666666666666';
 // ---- shared fake-db chain helpers (mirrors test/eval-repository.test.ts) --
 
 interface ChainCalls {
-  where: unknown[];
-  leftJoin: unknown[];
-  orderBy: unknown[];
+  where: unknown[][];
+  leftJoin: unknown[][];
+  orderBy: unknown[][];
 }
 
 function selectChain(rows: unknown[], calls: ChainCalls) {

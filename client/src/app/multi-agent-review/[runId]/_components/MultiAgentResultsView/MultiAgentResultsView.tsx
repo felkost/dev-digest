@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button, ErrorState, Icon, Skeleton } from "@devdigest/ui";
 import { AppShell } from "@/components/app-shell";
-import RunTraceDrawer from "@/app/repos/[repoId]/pulls/[number]/_components/RunTraceDrawer";
+import RunTraceDrawer from "@/components/RunTraceDrawer";
 import type { FindingRecord } from "@devdigest/shared";
 import { useMultiAgentRun } from "@/lib/hooks/multi-agent-review";
 import { usePullDetail } from "@/lib/hooks/core";

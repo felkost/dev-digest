@@ -274,5 +274,62 @@
       "batchB": "Batch B",
       "delta": "Delta"
     }
+  },
+  "stats": {
+    "empty": {
+      "title": "No runs yet",
+      "body": "Run this agent on a PR to start collecting stats."
+    },
+    "error": {
+      "title": "Could not load stats",
+      "body": "Something went wrong loading this agent's stats."
+    },
+    "kpi": {
+      "runs": "Runs",
+      "findingsTotal": "Findings",
+      "accepted": "Accepted",
+      "dismissed": "Dismissed",
+      "pending": "Pending",
+      "acceptRate": "Accept rate",
+      "dismissRate": "Dismiss rate",
+      "avgFindingsPerRun": "Avg findings/run",
+      "avgCost": "Avg cost",
+      "avgLatency": "Avg latency"
+    },
+    "costDelta": {
+      "label": "Total cost (30d)"
+    },
+    "findingsBySeverity": {
+      "title": "Findings by severity (all time)"
+    },
+    "weeklySeverity": {
+      "title": "Weekly findings by severity"
+    },
+    "approximate": "Approximate",
+    "mostUsedSkills": {
+      "title": "Most-used skills",
+      "empty": "No skill usage recorded yet."
+    },
+    "memoryPulled": {
+      "title": "Most-pulled memory",
+      "empty": "No memory pulls recorded yet."
+    },
+    "runHistory": {
+      "title": "Run history",
+      "empty": "No runs yet.",
+      "columns": {
+        "ranAt": "Ran at",
+        "status": "Status",
+        "pr": "PR",
+        "findings": "Findings",
+        "cost": "Cost"
+      },
+      "status": {
+        "done": "Done",
+        "failed": "Failed",
+        "running": "Running",
+        "cancelled": "Cancelled"
+      }
+    }
   }
 }

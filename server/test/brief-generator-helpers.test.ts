@@ -130,7 +130,7 @@ describe('assembleLlmInput', () => {
     const facts = makeFacts({ diffStats: manyFiles });
 
     let callCount = 0;
-    const countTokens = () => {
+    const countTokens = (_s: string) => {
       callCount++;
       // Over budget for calls 1-3 (full, no-context, no-context-no-history),
       // fits on call 4 (halved diff stats).

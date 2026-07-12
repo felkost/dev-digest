@@ -428,6 +428,7 @@ describe('EvalService.createCaseManual', () => {
       input_diff: VALID_DIFF,
       expected_output: [],
       notes: null,
+      case_kind: 'review_finding',
     });
 
     expect(insertSpy).toHaveBeenCalledOnce();
@@ -446,6 +447,7 @@ describe('EvalService.createCaseManual', () => {
         input_diff: 'not a diff at all',
         expected_output: [],
         notes: null,
+        case_kind: 'review_finding',
       }),
     ).rejects.toThrow(ValidationError);
 
@@ -563,6 +565,7 @@ describe('EvalService.updateCase', () => {
       input_diff: VALID_DIFF,
       expected_output: [],
       notes: 'updated notes',
+      case_kind: 'review_finding',
     });
 
     expect(updateSpy).toHaveBeenCalledWith(WS_ID, 'case-1', {
@@ -592,6 +595,7 @@ describe('EvalService.updateCase', () => {
         input_diff: 'not a diff at all',
         expected_output: [],
         notes: null,
+        case_kind: 'review_finding',
       }),
     ).rejects.toThrow(ValidationError);
 
@@ -609,6 +613,7 @@ describe('EvalService.updateCase', () => {
         input_diff: VALID_DIFF,
         expected_output: [],
         notes: null,
+        case_kind: 'review_finding',
       }),
     ).rejects.toThrow(NotFoundError);
   });
@@ -624,6 +629,7 @@ describe('EvalService.updateCase', () => {
         input_diff: VALID_DIFF,
         expected_output: [],
         notes: null,
+        case_kind: 'review_finding',
       }),
     ).rejects.toThrow(NotFoundError);
   });
@@ -1435,6 +1441,7 @@ describe('EvalService.getOverview', () => {
         agentName: 'Test Agent',
         model: 'gpt-4.1',
         latestBatch: makeBatchRow({ id: 'batch-latest', status: 'clean', recall: 0.9 }) as any,
+        latestVersion: 1,
         caseCount: 4,
       },
     ]);
@@ -1466,7 +1473,7 @@ describe('EvalService.getOverview', () => {
 
   it('sets latest_batch: null for an agent with cases but no sealed full batch yet', async () => {
     vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
-      { agentId: AGENT_ID, agentName: 'Test Agent', model: 'gpt-4.1', latestBatch: null, caseCount: 2 },
+      { agentId: AGENT_ID, agentName: 'Test Agent', model: 'gpt-4.1', latestBatch: null, latestVersion: null, caseCount: 2 },
     ]);
     vi.spyOn(EvalRepository.prototype, 'recentTrendPointsForAgent').mockResolvedValue([]);
 
@@ -1484,7 +1491,7 @@ describe('EvalService.getOverview', () => {
     // eval-repository.test.ts); here we confirm the service does not add or
     // substitute any agent beyond what the repo returned for this workspace.
     const listSpy = vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
-      { agentId: AGENT_ID, agentName: 'Test Agent', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+      { agentId: AGENT_ID, agentName: 'Test Agent', model: 'gpt-4.1', latestBatch: null, latestVersion: null, caseCount: 1 },
     ]);
     vi.spyOn(EvalRepository.prototype, 'recentTrendPointsForAgent').mockResolvedValue([]);
 
@@ -1554,8 +1561,8 @@ describe('EvalService.getRecentAcrossAgents', () => {
 describe('EvalService.startRunAll', () => {
   it('starts a batch for every eval-configured agent and returns {agent_id, batch_id} pairs', async () => {
     vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
-      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
-      { agentId: OTHER_AGENT_ID, agentName: 'Agent B', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, latestVersion: null, caseCount: 1 },
+      { agentId: OTHER_AGENT_ID, agentName: 'Agent B', model: 'gpt-4.1', latestBatch: null, latestVersion: null, caseCount: 1 },
     ]);
     vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([makeCaseRow({ id: 'case-1' }) as any]);
     vi.spyOn(EvalRepository.prototype, 'insertBatch').mockImplementation(async (data: any) => makeBatchRow(data) as any);
@@ -1579,8 +1586,8 @@ describe('EvalService.startRunAll', () => {
 
   it('skips an agent whose case set is empty (ValidationError) without failing the whole fan-out', async () => {
     vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
-      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
-      { agentId: OTHER_AGENT_ID, agentName: 'Agent B (now empty)', model: 'gpt-4.1', latestBatch: null, caseCount: 0 },
+      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, latestVersion: null, caseCount: 1 },
+      { agentId: OTHER_AGENT_ID, agentName: 'Agent B (now empty)', model: 'gpt-4.1', latestBatch: null, latestVersion: null, caseCount: 0 },
     ]);
     // Agent A has a case; Agent B's case set resolved empty (e.g. deleted
     // concurrently) — listCases returns [] for B, causing startBatch to throw.
@@ -1605,8 +1612,8 @@ describe('EvalService.startRunAll', () => {
 
   it('skips an agent whose startBatch throws a NON-ValidationError (e.g. NotFoundError) without failing the whole fan-out', async () => {
     vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
-      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
-      { agentId: OTHER_AGENT_ID, agentName: 'Agent B (deleted)', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, latestVersion: null, caseCount: 1 },
+      { agentId: OTHER_AGENT_ID, agentName: 'Agent B (deleted)', model: 'gpt-4.1', latestBatch: null, latestVersion: null, caseCount: 1 },
     ]);
     vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([makeCaseRow({ id: 'case-1' })] as any);
     vi.spyOn(EvalRepository.prototype, 'insertBatch').mockImplementation(async (data: any) => makeBatchRow(data) as any);
@@ -1647,7 +1654,7 @@ describe('EvalService.startRunAll', () => {
 
   it('only starts batches for agents the repository resolved for THIS workspace', async () => {
     const listSpy = vi.spyOn(EvalRepository.prototype, 'listEvalConfiguredAgentSummaries').mockResolvedValue([
-      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, caseCount: 1 },
+      { agentId: AGENT_ID, agentName: 'Agent A', model: 'gpt-4.1', latestBatch: null, latestVersion: null, caseCount: 1 },
     ]);
     vi.spyOn(EvalRepository.prototype, 'listCases').mockResolvedValue([makeCaseRow({ id: 'case-1' }) as any]);
     vi.spyOn(EvalRepository.prototype, 'insertBatch').mockImplementation(async (data: any) => makeBatchRow(data) as any);

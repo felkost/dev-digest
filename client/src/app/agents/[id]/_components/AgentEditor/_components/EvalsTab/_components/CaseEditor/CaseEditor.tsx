@@ -186,6 +186,11 @@ export function CaseEditor({ agentId, agentName, initialCase, onClose, onRunCase
       input_diff: diff,
       expected_output: cleanExpectations,
       notes: notes || null,
+      // This editor only supports authoring/editing review_finding-kind
+      // cases (the Expectation[] rows above); preserve the existing case's
+      // kind on edit so an intent/risk_brief_narrative case isn't silently
+      // downgraded, default new cases to the pre-WS6 review_finding kind.
+      case_kind: initialCase?.case_kind ?? "review_finding",
     };
 
     const mutationOptions = {

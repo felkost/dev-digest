@@ -541,9 +541,9 @@ function extractEqPairs(node: unknown): Record<string, unknown> {
 }
 
 interface ChainCalls {
-  where: unknown[];
-  innerJoin: unknown[];
-  orderBy: unknown[];
+  where: unknown[][];
+  innerJoin: unknown[][];
+  orderBy: unknown[][];
   limit: number[];
 }
 
