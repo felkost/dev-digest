@@ -214,6 +214,8 @@ export class EvalRunOrchestrator {
             matchedCount: null,
             expectedCount: null,
             errorMessage: formatErrorMessage(err),
+            provider: null,
+            model: null,
           } satisfies EvalRunInsert)
           .catch(() => undefined);
 
@@ -377,6 +379,10 @@ export class EvalRunOrchestrator {
         // instead of re-scoring against the case's CURRENT expected_output.
         matchedCount: scoreResult.mustFindMatched,
         expectedCount: scoreResult.mustFindTotal,
+        // review_finding always runs on the host agent's OWN config (no
+        // Settings-routed override, unlike intent/risk_brief below).
+        provider: agent.provider,
+        model: agent.model,
       } satisfies EvalRunInsert);
 
       return {
@@ -409,6 +415,8 @@ export class EvalRunOrchestrator {
           matchedCount: null,
           expectedCount: null,
           errorMessage: formatErrorMessage(err),
+          provider: null,
+          model: null,
         } satisfies EvalRunInsert)
         .catch(() => undefined);
 
@@ -499,6 +507,11 @@ export class EvalRunOrchestrator {
         costUsd,
         matchedCount: scoreResult.matched,
         expectedCount: scoreResult.total,
+        // The ACTUALLY-routed provider/model (Settings override, else the
+        // cheap-tier fallback) — may differ from the host agent's own config;
+        // this is what closes the "which model really ran?" visibility gap.
+        provider,
+        model,
       } satisfies EvalRunInsert);
 
       return {
@@ -528,6 +541,8 @@ export class EvalRunOrchestrator {
           matchedCount: null,
           expectedCount: null,
           errorMessage: formatErrorMessage(err),
+          provider: null,
+          model: null,
         } satisfies EvalRunInsert)
         .catch(() => undefined);
 
@@ -607,6 +622,9 @@ export class EvalRunOrchestrator {
         costUsd: result.costUsd,
         matchedCount: scoreResult.matched,
         expectedCount: scoreResult.total,
+        // Same visibility rationale as `runOneIntentCase` above.
+        provider,
+        model,
       } satisfies EvalRunInsert);
 
       return {
@@ -636,6 +654,8 @@ export class EvalRunOrchestrator {
           matchedCount: null,
           expectedCount: null,
           errorMessage: formatErrorMessage(err),
+          provider: null,
+          model: null,
         } satisfies EvalRunInsert)
         .catch(() => undefined);
 

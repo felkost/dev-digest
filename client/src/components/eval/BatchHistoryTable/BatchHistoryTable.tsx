@@ -277,6 +277,7 @@ export function BatchHistoryTable({
                               <tr>
                                 <th style={s.th}>{t("evals.history.drilldown.case")}</th>
                                 <th style={s.th}>{t("evals.history.drilldown.outcome")}</th>
+                                <th style={s.th}>{t("evals.history.model")}</th>
                                 <th style={s.th}>{t("evals.history.drilldown.expected")}</th>
                                 <th style={s.th}>{t("evals.history.drilldown.matched")}</th>
                                 <th style={s.th}>{t("evals.history.drilldown.findings")}</th>
@@ -295,6 +296,9 @@ export function BatchHistoryTable({
                                     )}
                                   </td>
                                   <td style={s.td}>{t(`evals.status.${c.status}`)}</td>
+                                  <td style={s.td} title={c.provider ? `${c.provider} / ${c.model}` : undefined}>
+                                    {c.model ?? "—"}
+                                  </td>
                                   <td style={s.td}>{c.expected_count}</td>
                                   <td style={s.td}>{c.matched_count}</td>
                                   <td style={s.td}>{c.findings_count}</td>

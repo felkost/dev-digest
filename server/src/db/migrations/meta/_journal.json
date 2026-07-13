@@ -190,6 +190,13 @@
       "when": 1783793708259,
       "tag": "0026_eval_case_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1783944313994,
+      "tag": "0027_fast_mantis",
+      "breakpoints": true
     }
   ]
 }

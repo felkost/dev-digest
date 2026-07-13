@@ -339,6 +339,10 @@ export function CaseEditor({ agentId, agentName, initialCase, onClose, onRunCase
   if (showLastRun && lr) {
     const statusWord = t(`evals.status.${lr.last_run_status}`).toLowerCase();
     const parts: string[] = [];
+    // The provider/model that ACTUALLY served this run — shown first so it's
+    // visible even when the agent's own config model differs (intent/
+    // risk_brief cases route through a Settings Feature Model override).
+    if (lr.last_run_model) parts.push(lr.last_run_model);
     if (lr.last_run_summary) parts.push(lr.last_run_summary);
     if (lr.last_run_duration_ms != null) parts.push(`${(lr.last_run_duration_ms / 1000).toFixed(1)}s`);
     if (lr.last_run_cost_usd != null) parts.push(`$${lr.last_run_cost_usd.toFixed(2)}`);

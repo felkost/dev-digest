@@ -62,6 +62,13 @@ export const EvalCaseListItem = z.object({
   // written before these were surfaced). Feeds the Case Editor "Last run" strip.
   last_run_duration_ms: z.number().int().nullish(),
   last_run_cost_usd: z.number().nullish(),
+  // The provider/model that ACTUALLY served the case's most recent run — for
+  // `intent`/`risk_brief_narrative` kinds this is resolved via a Settings
+  // Feature Model override and can differ from the host agent's own
+  // provider/model. Nullish: absent for `never_run` cases and for runs
+  // written before this field existed.
+  last_run_provider: z.string().nullish(),
+  last_run_model: z.string().nullish(),
   notes: z.string().nullish(),
   // WS6 — eval methodology (`eval_cases.case_kind`, migration 0026).
   case_kind: EvalCaseKind,
@@ -160,6 +167,12 @@ export const EvalBatchCaseOutcome = z.object({
   // Degraded batch's cause is visible in the UI drill-down instead of only
   // server stderr logs. Null for deterministic passed/failed runs.
   error_message: z.string().nullish(),
+  // The provider/model that ACTUALLY served this run's LLM call (see
+  // `EvalCaseListItem.last_run_provider`/`last_run_model` for why this can
+  // differ from the batch's `agent_snapshot`). Nullish: absent on a runtime-
+  // failed run (no call completed) or on rows written before this field existed.
+  provider: z.string().nullish(),
+  model: z.string().nullish(),
 });
 export type EvalBatchCaseOutcome = z.infer<typeof EvalBatchCaseOutcome>;
 

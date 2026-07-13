@@ -183,6 +183,11 @@ export function caseListItem(
     // "Last run" strip. Null when the case was never run.
     last_run_duration_ms: latestRun?.durationMs ?? null,
     last_run_cost_usd: latestRun?.costUsd ?? null,
+    // The provider/model that ACTUALLY served the most recent run (may differ
+    // from the agent's own config for intent/risk_brief cases — see the
+    // contract doc comment). Null when never run or on pre-migration rows.
+    last_run_provider: latestRun?.provider ?? null,
+    last_run_model: latestRun?.model ?? null,
     notes: row.notes,
     // WS6 — eval methodology + per-case threshold override (migration 0026).
     // `caseKind` defaults 'review_finding' at the DB level (never actually
@@ -265,6 +270,11 @@ export function batchCaseOutcome(
     // as-is here, never recomputed (mirrors matched_count/expected_count's
     // frozen-at-write-time convention above).
     error_message: run.errorMessage,
+    // The provider/model that ACTUALLY served this run's LLM call — see the
+    // contract doc comment for why this can differ from the batch's
+    // `agent_snapshot` (intent/risk_brief cases route through Settings).
+    provider: run.provider ?? null,
+    model: run.model ?? null,
   };
 }
 

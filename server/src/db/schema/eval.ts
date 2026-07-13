@@ -130,6 +130,14 @@ export const evalRuns = pgTable(
     // a Degraded batch's cause visible in the UI drill-down instead of only
     // server stderr logs. Null for deterministic passed/failed runs.
     errorMessage: text('error_message'),
+    // The provider/model that ACTUALLY served this run's LLM call — for
+    // `intent`/`risk_brief_narrative` cases this is resolved via
+    // `resolveRoutedFeatureModel` (Settings → Feature Models override) and can
+    // differ from the host agent's own `agent.provider`/`agent.model` shown in
+    // `eval_batches.agent_snapshot`. Null on a runtime-failed run (no call
+    // completed) or on rows written before this column existed.
+    provider: text('provider'),
+    model: text('model'),
   },
   (t) => ({
     batchIdx: index('eval_runs_batch_id_idx').on(t.batchId),
