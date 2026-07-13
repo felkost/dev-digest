@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Severity } from './findings.js';
+import { FindingRecord } from './review-api.js';
 
 /**
  * A5 — Observability / Multi-agent contracts (L07).
@@ -44,6 +45,13 @@ export const AgentColumn = z.object({
   summary: z.string().nullable(),
   duration_ms: z.number().int().nullable(),
   cost_usd: z.number().nullable(),
+  // Additive extension approved 2026-07-10 to satisfy AC-17 (error) / AC-33
+  // (tokens); the only consumers are this feature's own service + client
+  // views — see server/insights.md and client/insights.md 2026-07-09 entries
+  // documenting the gap this closes.
+  error: z.string().nullable(),
+  tokens_in: z.number().int().nullable(),
+  tokens_out: z.number().int().nullable(),
   findings: z.array(AgentColumnFinding),
 });
 export type AgentColumn = z.infer<typeof AgentColumn>;
@@ -80,10 +88,44 @@ export const MultiAgentRun = z.object({
   agent_count: z.number().int(),
   total_duration_ms: z.number().int(),
   total_cost_usd: z.number().nullable(),
+  // Additive extension approved 2026-07-10 to satisfy AC-33 (token usage);
+  // same null-if-any-unknown semantics as total_cost_usd. The only consumers
+  // are this feature's own service + client views.
+  total_tokens_in: z.number().int().nullable(),
+  total_tokens_out: z.number().int().nullable(),
   columns: z.array(AgentColumn),
   conflicts: z.array(Conflict),
+  // Full per-run findings (keyed by run_id) for the results page's Tabs view
+  // and the reused RunTraceDrawer — the SINGLE source of finding detail for
+  // this page. Deliberately NOT sourced from the PR-detail `GET /pulls/:id/reviews`
+  // (which excludes multi-agent fan-out runs), so the drawer/Tabs never show
+  // an empty findings list while the columns show findings. `AgentColumn.findings`
+  // stays the compact projection; this carries the full FindingRecord shape.
+  findings_by_run: z.record(z.string(), z.array(FindingRecord)),
 });
 export type MultiAgentRun = z.infer<typeof MultiAgentRun>;
+
+/** One row of the workspace's recent multi-agent run history (GET
+ *  /multi-agent-runs) — a lightweight summary for a list/history view,
+ *  distinct from the full `MultiAgentRun` read-model (no columns/conflicts/
+ *  findings_by_run). `status` is the group's aggregate: 'running' if any
+ *  member run is still running, else 'failed' if any failed/cancelled, else
+ *  'done'. `findings_total` sums each member's own findings_count (0 for a
+ *  run with none — never null, unlike total_cost_usd's any-unknown-is-null
+ *  rule, since findings_count is always known once a run settles). */
+export const MultiAgentRunSummary = z.object({
+  id: z.string(),
+  pr_id: z.string(),
+  pr_number: z.number().int().nullable(),
+  pr_title: z.string().nullable(),
+  ran_at: z.string(),
+  agent_count: z.number().int(),
+  status: z.enum(['done', 'failed', 'running']),
+  total_duration_ms: z.number().int(),
+  total_cost_usd: z.number().nullable(),
+  findings_total: z.number().int(),
+});
+export type MultiAgentRunSummary = z.infer<typeof MultiAgentRunSummary>;
 
 // ---------------------------------------------------------------------------
 // Per-agent Stats (GET /agents/:id/stats)
@@ -117,6 +159,56 @@ export const AgentStats = z.object({
   trend: z.array(StatPoint),
 });
 export type AgentStats = z.infer<typeof AgentStats>;
+
+// ---------------------------------------------------------------------------
+// Per-agent Stats — additive detail wrapper (GET /agents/:id/stats, L08 Spec B)
+// ---------------------------------------------------------------------------
+
+/** One run in an agent's run history. Studio runs only (source='local'). */
+export const AgentRunHistoryRow = z.object({
+  run_id: z.string(),
+  ran_at: z.string(),
+  status: z.string().nullable(),
+  cost_usd: z.number().nullable(),
+  findings_count: z.number().int().nullable(),
+  pr_number: z.number().int().nullable(),
+});
+export type AgentRunHistoryRow = z.infer<typeof AgentRunHistoryRow>;
+
+/** One week's findings-by-severity counts for the weekly stacked-bar chart.
+ *  Zero-filled by the service — a week with no findings of a given severity
+ *  is 0, not omitted (8 ordered points, oldest→newest). */
+export const WeeklySeverityPoint = z.object({
+  week_start: z.string(),
+  CRITICAL: z.number().int(),
+  WARNING: z.number().int(),
+  SUGGESTION: z.number().int(),
+});
+export type WeeklySeverityPoint = z.infer<typeof WeeklySeverityPoint>;
+
+/** A ranked usage row — shared shape for `most_used_skills` and
+ *  `memory_pulled_summary`. `usage_estimate` is an approximation (flat
+ *  magnitude from the agent's run volume), never a measured usage count. */
+export const AgentRankedUsageRow = z.object({
+  id: z.string(),
+  name: z.string(),
+  usage_estimate: z.number(),
+});
+export type AgentRankedUsageRow = z.infer<typeof AgentRankedUsageRow>;
+
+/**
+ * Response of GET /agents/:id/stats. Additive wrapper around the existing
+ * `AgentStats` base metrics (unchanged) — mirrors the `EvalBatchDetail =
+ * EvalBatch.extend({...})` pattern in `eval-batch.ts`.
+ */
+export const AgentStatsDetail = AgentStats.extend({
+  cost_delta_usd_30d: z.number().nullable(),
+  weekly_findings_by_severity: z.array(WeeklySeverityPoint),
+  most_used_skills: z.array(AgentRankedUsageRow),
+  memory_pulled_summary: z.array(AgentRankedUsageRow),
+  run_history: z.array(AgentRunHistoryRow),
+});
+export type AgentStatsDetail = z.infer<typeof AgentStatsDetail>;
 
 // ---------------------------------------------------------------------------
 // Cross-session memory curator

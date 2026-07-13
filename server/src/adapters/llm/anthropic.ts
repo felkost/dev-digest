@@ -13,8 +13,29 @@ import { toJsonSchema, parseWithRepair } from '../../platform/structured.js';
 import { estimateCost } from './pricing.js';
 import { ExternalServiceError } from '../../platform/errors.js';
 
-const DEFAULT_TIMEOUT = 60_000;
+const DEFAULT_TIMEOUT = 300_000; // 5 min — large diffs on Claude can take 2–3 min
 const DEFAULT_MAX_TOKENS = 4096;
+// Review JSON (findings × fields) can easily exceed 4096 tokens on large diffs.
+// 8192 is the safe ceiling for all current Anthropic models (haiku/sonnet/opus).
+const STRUCTURED_MAX_TOKENS = 8192;
+
+/**
+ * Detect Anthropic's "temperature is deprecated for this model" 400 error.
+ * Newer models (e.g. claude-sonnet-5, claude-fable-5) reject the `temperature`
+ * param entirely; older models (e.g. claude-haiku-4-5) still accept it. We
+ * detect this from the error shape rather than hardcoding a model list so the
+ * adapter self-heals for any future model that deprecates the param.
+ */
+function isTemperatureDeprecatedError(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  if (status !== 400) return false;
+  const body = (err as { error?: unknown })?.error;
+  const message = (err as { message?: unknown })?.message;
+  const haystack = `${typeof message === 'string' ? message : ''} ${
+    body ? JSON.stringify(body) : ''
+  }`;
+  return /temperature/i.test(haystack);
+}
 
 /** Anthropic has no embeddings API; embeddings come from the OpenAI Embedder. */
 function splitSystem(messages: ChatMessage[]): {
@@ -46,6 +67,25 @@ export class AnthropicProvider implements LLMProvider {
     this.client = new Anthropic({ apiKey });
   }
 
+  /**
+   * Wraps `client.messages.create` with a one-shot self-heal retry: if the
+   * API rejects `temperature` as deprecated for the requested model (newer
+   * models like claude-sonnet-5/claude-fable-5 no longer accept it, while
+   * claude-haiku-4-5 still does), strip the param and retry once. Any other
+   * error — or a second failure — is rethrown unchanged.
+   */
+  private async createMessage(
+    params: Anthropic.MessageCreateParamsNonStreaming,
+  ): Promise<Anthropic.Message> {
+    try {
+      return await this.client.messages.create(params);
+    } catch (err) {
+      if (!isTemperatureDeprecatedError(err)) throw err;
+      const { temperature: _temperature, ...retryParams } = params;
+      return await this.client.messages.create(retryParams);
+    }
+  }
+
   async listModels(): Promise<ModelInfo[]> {
     return withRetry(async () => {
       // SDK 0.33 exposes models.list()
@@ -64,7 +104,7 @@ export class AnthropicProvider implements LLMProvider {
 
   private async doComplete(req: CompletionRequest): Promise<CompletionResult> {
     const { system, rest } = splitSystem(req.messages);
-    const res = await this.client.messages.create({
+    const res = await this.createMessage({
       model: req.model,
       system: system || undefined,
       messages: rest,
@@ -94,16 +134,28 @@ export class AnthropicProvider implements LLMProvider {
     const messages: Anthropic.MessageParam[] = [...rest];
     let tokensIn = 0;
     let tokensOut = 0;
+    // Sum of `usage.cache_read_input_tokens` across attempts. Starts `undefined`
+    // ("never reported") and only becomes a number once the SDK actually reports
+    // one (including a genuine 0) — never coerced from a missing/null field.
+    let cachedTokens: number | undefined;
     let lastRaw = '';
+    let lastError = '';
 
     for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
       const res = await withRetry(() =>
         withTimeout(
-          this.client.messages.create({
+          this.createMessage({
             model: req.model,
-            system: system || undefined,
+            // Mark the system prefix as a cacheable breakpoint (Anthropic prompt
+            // caching): the array-of-blocks form lets us attach `cache_control`,
+            // which a plain string `system` param cannot express. This flows
+            // through createMessage's temperature-strip retry unchanged, since
+            // that retry only destructures `temperature` out of the same params.
+            system: system
+              ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+              : undefined,
             messages,
-            max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
+            max_tokens: req.maxTokens ?? STRUCTURED_MAX_TOKENS,
             temperature: req.temperature ?? 0,
             tools: [
               {
@@ -119,6 +171,10 @@ export class AnthropicProvider implements LLMProvider {
       );
       tokensIn += res.usage.input_tokens;
       tokensOut += res.usage.output_tokens;
+      const cacheReadTokens = res.usage.cache_read_input_tokens;
+      if (typeof cacheReadTokens === 'number') {
+        cachedTokens = (cachedTokens ?? 0) + cacheReadTokens;
+      }
 
       const toolUse = res.content.find(
         (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
@@ -135,18 +191,32 @@ export class AnthropicProvider implements LLMProvider {
           costUsd: estimateCost(req.model, tokensIn, tokensOut),
           raw: lastRaw,
           attempts: attempt,
+          cachedTokens,
+          // The system-prefix cache_control breakpoint above is always applied
+          // (when a system prompt is present); whether it produced a cache hit
+          // is reported separately via `cachedTokens`.
+          cacheControlApplied: true,
         };
       }
+      lastError = parsed.error;
       messages.push({ role: 'assistant', content: res.content });
-      messages.push({
-        role: 'user',
-        content: parsed.repromptMessage,
-      });
+      if (toolUse) {
+        // Anthropic requires a tool_result immediately after every tool_use block;
+        // a bare text message here produces a 400. Deliver the reprompt as the
+        // tool_result content so the turn sequence stays valid.
+        messages.push({
+          role: 'user',
+          content: [{ type: 'tool_result' as const, tool_use_id: toolUse.id, content: parsed.repromptMessage }],
+        });
+      } else {
+        messages.push({ role: 'user', content: parsed.repromptMessage });
+      }
     }
 
-    throw new ExternalServiceError('Anthropic structured output failed schema validation', {
-      raw: lastRaw,
-    });
+    throw new ExternalServiceError(
+      `Anthropic structured output failed schema validation: ${lastError}`,
+      { raw: lastRaw },
+    );
   }
 
   async embed(): Promise<number[][]> {

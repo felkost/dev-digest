@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { LLMProvider, StructuredResult } from '@devdigest/shared';
 import { MockLLMProvider, MockGitClient } from '../../server/src/adapters/mocks.js';
-import { reviewPullRequest } from '../src/index.js';
+import { reviewPullRequest, sliceDiff, type TokenCounter } from '../src/index.js';
 
 /**
  * Engine-level test for reviewPullRequest (the core lifted out of the server's
@@ -134,5 +134,201 @@ describe('reviewPullRequest (engine)', () => {
     await reviewPullRequest({ systemPrompt: 's', model: 'm', diff, llm: recorder, sessionId: 'sess-abc' });
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((s) => s === 'sess-abc')).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------
+  // Token-budget map-reduce + cache accumulation (WS2, WS5). `countTokens`
+  // is injected only in the new cases below — every test ABOVE this line is
+  // unmodified and exercises the countTokens-omitted (legacy) path.
+  // ---------------------------------------------------------------------
+
+  /** Synthesize a diff hunk that adds `lines` new lines to `path` (no context beyond one anchor line). */
+  function manyLineFile(path: string, lines: number): string {
+    const adds = Array.from({ length: lines }, (_, i) => `+line${i}`).join('\n');
+    return `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,1 +1,${lines + 1} @@\n x\n${adds}`;
+  }
+
+  const APPROVE_FIXTURE = { verdict: 'approve', summary: 'ok', score: 100, findings: [] };
+
+  it('countTokens omitted: multi-file diffs still use line-count auto mode-selection + one-file-per-chunk map-reduce (regression guard)', async () => {
+    // Two 250-line files ⇒ totalLines=500 > DEFAULT_MAP_THRESHOLD_LINES(400), multi-file ⇒ map-reduce
+    // via the untouched line-counting branch of selectMode (no countTokens injected).
+    const raw = [manyLineFile('src/a.ts', 250), manyLineFile('src/b.ts', 250)].join('\n');
+    const diff = await new MockGitClient({ diff: raw }).diff();
+    const llm = new MockLLMProvider('openai', { structured: APPROVE_FIXTURE });
+
+    const outcome = await reviewPullRequest({
+      systemPrompt: 'security reviewer',
+      model: 'gpt-4.1',
+      diff,
+      llm,
+    });
+
+    expect(outcome.mode).toBe('map-reduce');
+    // Legacy one-file-per-chunk shape, untouched.
+    expect(outcome.chunks).toEqual([{ label: 'src/a.ts' }, { label: 'src/b.ts' }]);
+    expect(outcome.mapReduceChunkCount).toBe(2);
+    // New fields resolve to their "countTokens not injected" defaults.
+    expect(outcome.mapReduceThresholdTokens).toBeNull();
+    expect(outcome.cachedInputTokens).toBeNull();
+    expect(outcome.cacheControlApplied).toBe(false);
+  });
+
+  it('bin-packs many small files into fewer chunks than files when countTokens is injected', async () => {
+    const paths = ['f0.ts', 'f1.ts', 'f2.ts', 'f3.ts', 'f4.ts', 'f5.ts'];
+    const smallBlock = (p: string) =>
+      `diff --git a/${p} b/${p}\n--- a/${p}\n+++ b/${p}\n@@ -1,1 +1,2 @@\n x\n+y`;
+    const raw = paths.map(smallBlock).join('\n');
+    const diff = await new MockGitClient({ diff: raw }).diff();
+
+    const countTokens: TokenCounter = (t) => t.length;
+    // All 6 filenames share the same length ⇒ identical per-file token counts;
+    // pack ~2 files per chunk.
+    const singleFileTokens = countTokens(sliceDiff(diff, paths[0]!));
+    const mapThresholdTokens = Math.floor(singleFileTokens * 2.5);
+
+    const llm = new MockLLMProvider('openai', { structured: APPROVE_FIXTURE });
+
+    const outcome = await reviewPullRequest({
+      systemPrompt: 'security reviewer',
+      model: 'gpt-4.1',
+      diff,
+      llm,
+      strategy: 'map-reduce',
+      countTokens,
+      mapThresholdTokens,
+    });
+
+    expect(outcome.mode).toBe('map-reduce');
+    expect(outcome.mapReduceThresholdTokens).toBe(mapThresholdTokens);
+    expect(outcome.mapReduceChunkCount).toBeLessThan(paths.length);
+    expect(outcome.chunks.length).toBe(outcome.mapReduceChunkCount);
+    // Each chunk's label is its member paths joined.
+    expect(outcome.chunks.every((c) => c.label.length > 0)).toBe(true);
+  });
+
+  it('flushes a single over-threshold file as its own chunk without splitting or merging, even inside a bin-packed run', async () => {
+    const smallBlock = (p: string) =>
+      `diff --git a/${p} b/${p}\n--- a/${p}\n+++ b/${p}\n@@ -1,1 +1,2 @@\n x\n+y`;
+    const bigBlock =
+      `diff --git a/big.ts b/big.ts\n--- a/big.ts\n+++ b/big.ts\n@@ -1,1 +1,5 @@\n x\n` +
+      `+${'a'.repeat(200)}\n+${'b'.repeat(200)}\n+${'c'.repeat(200)}\n+${'d'.repeat(200)}`;
+    const raw = [smallBlock('small0.ts'), bigBlock, smallBlock('small1.ts')].join('\n');
+    const diff = await new MockGitClient({ diff: raw }).diff();
+
+    const countTokens: TokenCounter = (t) => t.length;
+    const smallTokens = countTokens(sliceDiff(diff, 'small0.ts'));
+    // Threshold comfortably above one small file, far below the big file.
+    const mapThresholdTokens = smallTokens + 20;
+
+    const llm = new MockLLMProvider('openai', { structured: APPROVE_FIXTURE });
+
+    const outcome = await reviewPullRequest({
+      systemPrompt: 'security reviewer',
+      model: 'gpt-4.1',
+      diff,
+      llm,
+      strategy: 'map-reduce',
+      countTokens,
+      mapThresholdTokens,
+    });
+
+    expect(outcome.chunks.map((c) => c.label)).toEqual(['small0.ts', 'big.ts', 'small1.ts']);
+    expect(outcome.mapReduceChunkCount).toBe(3);
+  });
+
+  const TWO_FILE_DIFF =
+    'diff --git a/src/config.ts b/src/config.ts\n' +
+    '--- a/src/config.ts\n' +
+    '+++ b/src/config.ts\n' +
+    '@@ -10,3 +10,4 @@\n' +
+    '   port: 3000,\n' +
+    '+  stripeKey: "sk_live_xxx",\n' +
+    '   redisUrl: x,\n' +
+    'diff --git a/src/other.ts b/src/other.ts\n' +
+    '--- a/src/other.ts\n' +
+    '+++ b/src/other.ts\n' +
+    '@@ -1,1 +1,2 @@\n' +
+    ' x\n' +
+    '+y';
+
+  it('cachedInputTokens: null when any chunk omits cachedTokens (null-propagation, same style as costUsd)', async () => {
+    const diff = await new MockGitClient({ diff: TWO_FILE_DIFF }).diff();
+    let call = 0;
+    const recorder: LLMProvider = {
+      id: 'openrouter',
+      async completeStructured<T>(req): Promise<StructuredResult<T>> {
+        call += 1;
+        return {
+          data: fixture as unknown as T,
+          model: req.model,
+          tokensIn: 10,
+          tokensOut: 5,
+          costUsd: 0.001,
+          raw: '',
+          attempts: 1,
+          cachedTokens: call === 1 ? 120 : undefined,
+        };
+      },
+      async listModels() {
+        return [];
+      },
+      async complete() {
+        throw new Error('not used');
+      },
+      async embed() {
+        return [];
+      },
+    };
+
+    const outcome = await reviewPullRequest({
+      systemPrompt: 's',
+      model: 'm',
+      diff,
+      llm: recorder,
+      strategy: 'map-reduce',
+    });
+
+    expect(outcome.mapReduceChunkCount).toBe(2);
+    expect(outcome.cachedInputTokens).toBeNull();
+  });
+
+  it('cachedInputTokens: sums when every chunk reports a number', async () => {
+    const diff = await new MockGitClient({ diff: TWO_FILE_DIFF }).diff();
+    const recorder: LLMProvider = {
+      id: 'openrouter',
+      async completeStructured<T>(req): Promise<StructuredResult<T>> {
+        return {
+          data: fixture as unknown as T,
+          model: req.model,
+          tokensIn: 10,
+          tokensOut: 5,
+          costUsd: 0.001,
+          raw: '',
+          attempts: 1,
+          cachedTokens: 80,
+        };
+      },
+      async listModels() {
+        return [];
+      },
+      async complete() {
+        throw new Error('not used');
+      },
+      async embed() {
+        return [];
+      },
+    };
+
+    const outcome = await reviewPullRequest({
+      systemPrompt: 's',
+      model: 'm',
+      diff,
+      llm: recorder,
+      strategy: 'map-reduce',
+    });
+
+    expect(outcome.mapReduceChunkCount).toBe(2);
+    expect(outcome.cachedInputTokens).toBe(160);
   });
 });

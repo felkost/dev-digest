@@ -28,6 +28,14 @@
     "suggestedFix": "Suggested fix:",
     "collapse": "collapse",
     "expand": "expand",
+    "contextDocs": {
+      "title": "Project context documents",
+      "empty": "No project context documents were attached to this run.",
+      "tokens": "{count} tokens",
+      "injected": "injected",
+      "skipped": "skipped",
+      "openFullTextHint": "Open the Prompt assembly section below and expand \"Project context (dynamic)\" to read the full injected text."
+    },
     "config": {
       "model": "Model",
       "provider": "Provider",
@@ -59,6 +67,43 @@
       "args": "args",
       "result": "result",
       "previewTruncated": "(preview truncated)"
+    },
+    "costBreakdown": {
+      "title": "Cost breakdown",
+      "unavailable": "Cost breakdown unavailable for this run (predates cost-surgery instrumentation).",
+      "perBlock": {
+        "title": "Prompt tokens by block",
+        "unavailable": "—",
+        "prDescription": "PR description"
+      },
+      "cache": {
+        "title": "Prompt caching",
+        "cachedTokens": "Cached input tokens",
+        "cachedTokensUnavailable": "—",
+        "cacheControl": "Cache control applied",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "boilerplate": {
+        "title": "Boilerplate filter",
+        "excludedFiles": "{count, plural, one {# file} other {# files}} excluded",
+        "excludedTokens": "−{count} tokens",
+        "none": "No boilerplate files excluded from this run."
+      },
+      "mapReduce": {
+        "title": "Map-reduce",
+        "chunks": "Chunks",
+        "threshold": "Threshold",
+        "thresholdTokens": "{count} tokens",
+        "thresholdUnavailable": "—",
+        "singlePass": "Single-pass — no map-reduce for this run."
+      },
+      "intent": {
+        "title": "Intent classification",
+        "cost": "Cost",
+        "tokens": "Tokens",
+        "reused": "Reused a cached intent classification — no LLM call for this run."
+      }
     }
   },
   "drawer": {

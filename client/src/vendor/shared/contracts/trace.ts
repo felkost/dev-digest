@@ -41,9 +41,10 @@ export const PromptAssembly = z.object({
   skills: z.string().nullish(),
   memory: z.string().nullish(),
   specs: z.string().nullish(),
-  /** Callers-of-changed-symbols digest (repo-intel); null when absent. */
+  /** Callers-of-changed-symbols digest (T1.3); null when absent. */
   callers: z.string().nullish(),
-  /** Repo skeleton / map (repo-intel); null when absent. */
+  /** Repo skeleton / map (T3); null when absent. Enables per-slot token
+      attribution in the run trace. */
   repo_map: z.string().nullish(),
   /** PR author's description/body (truncated); null when absent. */
   pr_description: z.string().nullish(),
@@ -56,6 +57,41 @@ export const MemoryPulled = z.object({
   text: z.string(),
 });
 export type MemoryPulled = z.infer<typeof MemoryPulled>;
+
+/** One attached Project Context document considered for this run (injected or skipped). */
+export const RunTraceContextDoc = z.object({
+  path: z.string(),
+  token_size: z.number().int(),
+  status: z.enum(['injected', 'skipped']),
+  skip_reason: z.string().nullable(),
+});
+export type RunTraceContextDoc = z.infer<typeof RunTraceContextDoc>;
+
+/** Per-block token count for one slot of the assembled prompt (cost-surgery instrumentation). */
+export const BlockTokenCount = z.object({
+  block: z.string(),
+  tokens: z.union([z.number().int(), z.literal('unavailable')]),
+});
+export type BlockTokenCount = z.infer<typeof BlockTokenCount>;
+
+/** Cost-surgery instrumentation report for one run (token/cache/exclusion accounting). */
+export const RunTraceCostReport = z.object({
+  block_token_counts: z.array(BlockTokenCount),
+  cached_input_tokens: z.number().int().nullable(),
+  cache_control_applied: z.boolean(),
+  excluded_boilerplate_files: z.array(z.string()),
+  excluded_boilerplate_tokens: z.number().int(),
+  map_reduce_threshold_tokens: z.number().int().nullable(),
+  map_reduce_chunk_count: z.number().int(),
+  // Cost of the shared intent-classification pre-pass (once per batch, not
+  // per-agent). Null when this run reused a cached pr_intent (no LLM call)
+  // or classification failed. Nullish (not just nullable) — old persisted
+  // JSONB traces predate this field entirely.
+  intent_cost_usd: z.number().nullish(),
+  intent_tokens_in: z.number().int().nullish(),
+  intent_tokens_out: z.number().int().nullish(),
+});
+export type RunTraceCostReport = z.infer<typeof RunTraceCostReport>;
 
 export const RunStats = z.object({
   duration_ms: z.number().int(),
@@ -84,7 +120,12 @@ export const RunTrace = z.object({
   raw_output: z.string(),
   memory_pulled: z.array(MemoryPulled),
   specs_read: z.array(z.string()),
+  // Old persisted JSONB traces predate this field entirely — default to []
+  // rather than .nullish() so every consumer gets an array, never undefined.
+  context_documents: z.array(RunTraceContextDoc).default([]),
   log: z.array(RunLogLine),
+  // nullish (not nullable) — old persisted JSONB traces predate this field entirely
+  cost_report: RunTraceCostReport.nullish(),
 });
 export type RunTrace = z.infer<typeof RunTrace>;
 

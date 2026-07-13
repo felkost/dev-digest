@@ -2,12 +2,38 @@
  * Pure helpers for the review service (side-effect free; operate purely on
  * their arguments — no DB / network / `this`).
  */
-import type { Finding } from '@devdigest/shared';
+import type { Finding, FeatureModelChoice } from '@devdigest/shared';
 import type { FindingRow, PullRow, ReviewRow } from './repository.js';
+import type { Container } from '../../platform/container.js';
+import type { Provider } from '../../platform/model-router.js';
+import { resolveRoutedFeatureModel } from '../../platform/feature-models.js';
 
 // reduceReviews + sliceDiff live in @devdigest/reviewer-core (pure engine logic
 // shared with the CI runner); re-exported here for backward-compatible imports.
 export { reduceReviews, sliceDiff } from '@devdigest/reviewer-core';
+
+/**
+ * Resolve the model (AND provider) used for PR intent classification: the
+ * workspace's `review_intent` feature-model override wins verbatim; otherwise
+ * `provider` is routed to the cheap tier via `routeModel('intent', …)` —
+ * behavior-preserving for the no-override case.
+ *
+ * Returns the FULL `{provider, model}` choice — never just the model string.
+ * An override can legitimately point at a DIFFERENT provider than the one
+ * passed in; the caller MUST build its LLM client from the returned
+ * `provider`, not from whatever provider it passed in here (mirrors
+ * `brief-generator.ts`'s `resolveRoutedFeatureModel` → `container.llm(provider)`
+ * pattern). Passing the resolved model to the WRONG provider's client is a
+ * cross-provider bug (e.g. sending an OpenRouter model string to the
+ * Anthropic client).
+ */
+export async function resolveIntentModel(
+  container: Container,
+  workspaceId: string,
+  provider: Provider,
+): Promise<FeatureModelChoice> {
+  return resolveRoutedFeatureModel(container, workspaceId, 'review_intent', 'intent', provider);
+}
 
 export interface ReviewDtoFinding extends Finding {
   review_id: string;

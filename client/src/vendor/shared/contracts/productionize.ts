@@ -158,25 +158,40 @@ export const AgentPerfRow = z.object({
     WARNING: z.number().int(),
     SUGGESTION: z.number().int(),
   }),
-  /** recent findings-per-run trend (oldest→newest) for the sparkline. */
-  trend: z.array(z.number()),
+  /** recent per-run cost points (oldest→newest) for the row's sparkline. */
+  cost_trend: z.array(z.number()),
 });
 export type AgentPerfRow = z.infer<typeof AgentPerfRow>;
 
-/** A donut segment {label,value,color}. */
+/** A donut segment {label,value,color}. Null value = every run contributing
+ *  to this segment has unknown cost (AC-28) — distinct from the segment
+ *  being absent from the list entirely. */
 export const PerfCostSegment = z.object({
   label: z.string(),
-  value: z.number(),
+  value: z.number().nullable(),
 });
 export type PerfCostSegment = z.infer<typeof PerfCostSegment>;
 
 /** Response of GET /agents/performance. */
 export const AgentPerf = z.object({
   summary: z.object({
-    runs: z.number().int(),
-    total_cost_usd: z.number().nullable(),
-    avg_accept_rate: z.number().nullable(),
-    most_active_agent: z.string().nullable(),
+    total_runs_all_time: z.number().int(),
+    /** `total_cost_usd_30d` is null whenever no run in the trailing-30-day
+     *  window has a known cost — including a zero-run current window; it is
+     *  NOT coalesced to $0. The prior-30-day window (used for
+     *  `cost_delta_usd_30d`'s baseline) IS coalesced to a legitimate $0 when
+     *  it has zero runs (AC-27). A segment/total is null (not $0.00) when
+     *  every contributing run has unknown cost (AC-28). */
+    total_cost_usd_30d: z.number().nullable(),
+    cost_delta_usd_30d: z.number().nullable(),
+    avg_accept_rate_pct_30d: z.number().nullable(),
+    most_active_agent: z
+      .object({
+        agent_id: z.string(),
+        agent_name: z.string(),
+        runs_30d: z.number().int(),
+      })
+      .nullable(),
   }),
   agents: z.array(AgentPerfRow),
   /** cost split by agent and by model (for the two cost-breakdown donuts). */

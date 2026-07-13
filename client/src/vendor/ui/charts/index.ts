@@ -5,3 +5,4 @@ export { LineChart, type ChartSeries } from "./LineChart";
 export { Donut, type DonutSegment } from "./Donut";
 export { BarRow } from "./BarRow";
 export { MetricCard } from "./MetricCard";
+export { WeeklyStackedBar, type WeeklyStackedBarPoint } from "./WeeklyStackedBar";

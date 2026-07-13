@@ -1,0 +1,200 @@
+import type { CSSProperties } from "react";
+
+/** Co-located styles for RunTraceDrawer (extracted from inline styles). */
+export const s = {
+  // ---- TraceSection ----
+  section: {
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    overflow: "hidden",
+    marginBottom: 14,
+    background: "var(--bg-elevated)",
+  } satisfies CSSProperties,
+  sectionHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "12px 16px",
+    cursor: "pointer",
+  } satisfies CSSProperties,
+  sectionIcon: { color: "var(--text-muted)" } satisfies CSSProperties,
+  sectionTitle: { fontSize: 14, fontWeight: 600, flex: 1 } satisfies CSSProperties,
+  chevron: (open: boolean): CSSProperties => ({
+    color: "var(--text-muted)",
+    transform: open ? "rotate(180deg)" : "none",
+    transition: "transform .15s",
+  }),
+  sectionBody: { borderTop: "1px solid var(--border)", padding: 16 } satisfies CSSProperties,
+
+  // ---- ToolCallRow ----
+  toolRow: {
+    borderRadius: 6,
+    border: "1px solid var(--border)",
+    marginBottom: 8,
+    overflow: "hidden",
+  } satisfies CSSProperties,
+  toolHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 12px",
+    cursor: "pointer",
+    background: "var(--bg-surface)",
+  } satisfies CSSProperties,
+  toolIcon: { color: "var(--warn)" } satisfies CSSProperties,
+  toolName: { fontSize: 13 } satisfies CSSProperties,
+  toolArgs: { color: "var(--text-muted)" } satisfies CSSProperties,
+  toolMeta: { marginLeft: "auto", fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  toolMs: { fontSize: 12, color: "var(--text-secondary)", width: 50, textAlign: "right" } satisfies CSSProperties,
+  toolDetail: {
+    padding: "10px 14px",
+    fontSize: 12,
+    color: "var(--text-secondary)",
+    background: "var(--code-bg)",
+    borderTop: "1px solid var(--border)",
+    lineHeight: 1.5,
+  } satisfies CSSProperties,
+
+  // ---- PromptBlock ----
+  promptRow: {
+    borderRadius: 6,
+    border: "1px solid var(--border)",
+    marginBottom: 8,
+    overflow: "hidden",
+  } satisfies CSSProperties,
+  promptHead: { display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", cursor: "pointer" } satisfies CSSProperties,
+  promptDot: (color: string): CSSProperties => ({ width: 7, height: 7, borderRadius: 2, background: color }),
+  promptLabel: { fontSize: 13, fontWeight: 600 } satisfies CSSProperties,
+  promptToggle: { marginLeft: "auto", fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
+  promptPre: {
+    margin: 0,
+    padding: "12px 14px",
+    fontSize: 12,
+    lineHeight: 1.55,
+    color: "var(--text-primary)",
+    background: "var(--code-bg)",
+    borderTop: "1px solid var(--border)",
+    whiteSpace: "pre-wrap",
+    maxHeight: 180,
+    overflow: "auto",
+  } satisfies CSSProperties,
+
+  // ---- Stat ----
+  stat: {
+    flex: 1,
+    padding: "10px 12px",
+    borderRadius: 7,
+    background: "var(--bg-surface)",
+    border: "1px solid var(--border)",
+  } satisfies CSSProperties,
+  statLabel: { fontSize: 12, color: "var(--text-muted)", fontWeight: 600 } satisfies CSSProperties,
+  statVal: { fontSize: 16, fontWeight: 700, marginTop: 4 } satisfies CSSProperties,
+
+  // ---- TraceBody ----
+  configList: { display: "flex", flexDirection: "column", gap: 10, fontSize: 13 } satisfies CSSProperties,
+  configModel: { color: "var(--accent-text)" } satisfies CSSProperties,
+  configProvider: { color: "var(--text-secondary)" } satisfies CSSProperties,
+  specsWrap: { display: "flex", gap: 6, flexWrap: "wrap" } satisfies CSSProperties,
+  specsNone: { color: "var(--text-muted)" } satisfies CSSProperties,
+  spec: { fontSize: 12, color: "var(--text-secondary)" } satisfies CSSProperties,
+  statsRow: { display: "flex", gap: 10 } satisfies CSSProperties,
+  rawPre: {
+    margin: 0,
+    padding: "12px 14px",
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: "var(--text-primary)",
+    background: "var(--code-bg)",
+    borderRadius: 6,
+    whiteSpace: "pre-wrap",
+    overflow: "auto",
+    maxHeight: 220,
+  } satisfies CSSProperties,
+
+  // ---- Row ----
+  row: { display: "flex", gap: 12 } satisfies CSSProperties,
+  rowLabel: { color: "var(--text-muted)", width: 110 } satisfies CSSProperties,
+
+  // ---- ContextDocsSection (context_documents trace rows) ----
+  contextDocRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "8px 10px",
+    borderRadius: 6,
+    border: "1px solid var(--border)",
+    marginBottom: 6,
+    fontSize: 12.5,
+  } satisfies CSSProperties,
+  contextDocLastRow: { marginBottom: 0 } satisfies CSSProperties,
+  contextDocPath: {
+    fontFamily: "var(--font-mono, monospace)",
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "var(--text-primary)",
+  } satisfies CSSProperties,
+  contextDocTokens: { fontSize: 12, color: "var(--text-secondary)", minWidth: 56, textAlign: "right" } satisfies CSSProperties,
+  contextDocSkipReason: { fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 } satisfies CSSProperties,
+  contextDocEmpty: { fontSize: 13, color: "var(--text-muted)" } satisfies CSSProperties,
+
+  // ---- CostBreakdown (per-block tokens / cache / boilerplate / map-reduce) ----
+  costUnavailable: { fontSize: 13, color: "var(--text-muted)" } satisfies CSSProperties,
+  costGroup: { marginBottom: 16 } satisfies CSSProperties,
+  costGroupLast: { marginBottom: 0 } satisfies CSSProperties,
+  costGroupTitle: {
+    fontSize: 11,
+    fontWeight: 600,
+    color: "var(--text-muted)",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+  } satisfies CSSProperties,
+  costBlockRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 6 } satisfies CSSProperties,
+  costBlockLabel: {
+    width: 150,
+    flexShrink: 0,
+    fontSize: 12.5,
+    color: "var(--text-secondary)",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  } satisfies CSSProperties,
+  costBlockTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    background: "var(--bg-surface)",
+    overflow: "hidden",
+  } satisfies CSSProperties,
+  costBlockBar: (pct: number): CSSProperties => ({
+    height: "100%",
+    width: `${pct}%`,
+    borderRadius: 4,
+    background: "var(--accent)",
+  }),
+  costBlockValue: {
+    width: 90,
+    flexShrink: 0,
+    fontSize: 12,
+    color: "var(--text-secondary)",
+    textAlign: "right",
+  } satisfies CSSProperties,
+  costCacheRow: { display: "flex", gap: 10 } satisfies CSSProperties,
+  costMapReduceRow: { display: "flex", gap: 10 } satisfies CSSProperties,
+  costLine: { fontSize: 13, color: "var(--text-secondary)" } satisfies CSSProperties,
+  costBoilerplateFiles: { marginTop: 8, display: "flex", flexDirection: "column", gap: 4 } satisfies CSSProperties,
+  costBoilerplateFile: {
+    fontFamily: "var(--font-mono, monospace)",
+    fontSize: 11.5,
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
+
+  // ---- Drawer body ----
+  footer: { display: "flex", gap: 10 } satisfies CSSProperties,
+  tabBody: { paddingTop: 18 } satisfies CSSProperties,
+  emptyNote: { fontSize: 13, color: "var(--text-muted)", padding: 16 } satisfies CSSProperties,
+  noToolCalls: { fontSize: 13, color: "var(--text-muted)" } satisfies CSSProperties,
+} as const;

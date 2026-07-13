@@ -4,14 +4,18 @@ export function CircularScore({
   score,
   size = 44,
   stroke = 4,
+  color,
 }: {
   score: number;
   size?: number;
   stroke?: number;
+  /** Overrides the computed threshold color (score >= 75 ok / >= 50 warn /
+   *  else crit). Omit to keep the default threshold-based color. */
+  color?: string;
 }) {
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
-  const c = score >= 75 ? "var(--ok)" : score >= 50 ? "var(--warn)" : "var(--crit)";
+  const c = color ?? (score >= 75 ? "var(--ok)" : score >= 50 ? "var(--warn)" : "var(--crit)");
   return (
     <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
       <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>

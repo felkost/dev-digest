@@ -2,7 +2,7 @@
 
 import React, { useCallback } from "react";
 import { Icon, Avatar, Badge, Button, Tabs } from "@devdigest/ui";
-import { RunReviewDropdown } from "../RunReviewDropdown";
+import { MultiAgentPicker } from "@/components/multi-agent-picker";
 import { s } from "./styles";
 import type { PrDetail } from "@/lib/types";
 
@@ -90,7 +90,7 @@ export function PrDetailHeader({
             View on GitHub
           </Button>
           {prId && (
-            <RunReviewDropdown
+            <MultiAgentPicker
               prId={prId}
               warnMerged={pr.status === "merged" || pr.status === "closed"}
               onRunStart={handleRunStart}

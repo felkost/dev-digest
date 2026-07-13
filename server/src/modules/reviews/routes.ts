@@ -4,12 +4,17 @@ import { z } from 'zod';
 import { eq, and, inArray } from 'drizzle-orm';
 import { RunRequest } from '@devdigest/shared';
 import type { RunEvent } from '@devdigest/shared';
+import { classifyIntent } from '@devdigest/reviewer-core';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewService } from './service.js';
+import { resolveIntentModel } from './helpers.js';
 import * as pullRepo from './repository/pull.repo.js';
 import * as t from '../../db/schema.js';
+import { loadDiff } from './diff-loader.js';
+import { BriefGeneratorService } from './brief-generator.js';
+import { BRIEF_GENERATE_RATE_LIMIT } from './constants.js';
 
 /**
  * reviews module.
@@ -20,6 +25,17 @@ import * as t from '../../db/schema.js';
  *   POST   /findings/:id/(accept|dismiss)              → finding actions
  */
 const FINDING_ACTIONS = ['accept', 'dismiss'] as const;
+
+/**
+ * Optional per-request agent selection for `POST /repos/:id/review-all`.
+ * When omitted or empty, every ENABLED agent runs on each open PR (the
+ * historical behavior); when a non-empty list is provided, ONLY those agents
+ * run. Body itself is optional so existing no-body callers keep working.
+ */
+const ReviewAllBody = z
+  .object({ agent_ids: z.array(z.string().uuid()).min(1).optional() })
+  .optional();
+
 export default async function reviewsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
   const { container } = app;
@@ -152,6 +168,110 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     return brief ?? null;
   });
 
+  // ---- Generate/regenerate the LLM-derived part of the PR Brief -------------
+  // Rate-limited per-workspace (not per-IP) — mirrors onboarding/routes.ts's
+  // ONBOARDING_RATE_LIMIT keyGenerator pattern exactly. A single call triggers
+  // exactly one paid structured LLM call (BriefGeneratorService.generate).
+  app.post(
+    '/pulls/:id/brief',
+    {
+      schema: { params: IdParams },
+      config: {
+        rateLimit: {
+          ...BRIEF_GENERATE_RATE_LIMIT,
+          keyGenerator: async (req: import('fastify').FastifyRequest) => {
+            const { workspaceId } = await getContext(container, req);
+            return `risk-brief-generate:${workspaceId}`;
+          },
+        },
+      },
+    },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      const generator = new BriefGeneratorService(container, req.log.child({ route: 'brief.generate', prId: req.params.id }));
+      return generator.generate(workspaceId, req.params.id);
+    },
+  );
+
+  // ---- Clear the LLM-derived part of the PR Brief (reset to "not generated") -
+  // Zero LLM calls — no rate limit needed. Workspace-scoped via getPull (same
+  // pattern as GET/POST above); returns the PR to the "Generate brief" empty
+  // state on the client (gating there is `!brief?.llm`).
+  app.delete('/pulls/:id/brief', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    const pull = await pullRepo.getPull(container.db, workspaceId, req.params.id);
+    if (!pull) throw new NotFoundError('PR not found');
+    const cleared = await pullRepo.clearLlmBrief(container.db, req.params.id);
+    return cleared ?? null;
+  });
+
+  // ---- PR Intent (classifier output for a PR) --------------------------------
+  app.get('/pulls/:id/intent', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    const pull = await pullRepo.getPull(container.db, workspaceId, req.params.id);
+    if (!pull) throw new NotFoundError('PR not found');
+    const intent = await pullRepo.getIntent(container.db, req.params.id);
+    return intent ?? null;
+  });
+
+  // ---- Force re-classify intent for a PR ------------------------------------
+  // Deletes the cached intent and runs a fresh classification via the cheap model.
+  app.post('/pulls/:id/intent', { schema: { params: IdParams } }, async (req) => {
+    const { workspaceId } = await getContext(container, req);
+    const pull = await pullRepo.getPull(container.db, workspaceId, req.params.id);
+    if (!pull) throw new NotFoundError('PR not found');
+
+    // Resolve the repo row for diff loading (needed to attempt a real git diff).
+    const repoRow = await pullRepo.getRepo(container.db, pull.repoId);
+    if (!repoRow) throw new NotFoundError('Repo not found');
+
+    // Load the diff (real git diff or synthetic from pr_files fallback).
+    const diff = await loadDiff(container, container.reviewRepo, workspaceId, pull, repoRow);
+
+    // Build filesSummary: paths + @@ hunk headers only — NO code lines.
+    const filesSummary = diff.files.map((f) =>
+      `${f.path} (+${f.additions}/-${f.deletions})\n` +
+      f.hunks.map((h) => `  @@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`).join('\n'),
+    ).join('\n\n');
+
+    // Delete any existing cached intent before re-classifying.
+    await container.db
+      .delete(t.prIntent)
+      .where(eq(t.prIntent.prId, req.params.id));
+
+    // Cheap model — 'anthropic' provider, intent task routes to haiku (unless
+    // the workspace has an active `review_intent` feature-model override,
+    // which may point at a DIFFERENT provider — the resolved provider always
+    // drives which LLM client is built, never the passed-in default).
+    const DEFAULT_PROVIDER = 'anthropic' as const;
+    const { provider: intentProvider, model } = await resolveIntentModel(container, workspaceId, DEFAULT_PROVIDER);
+    const llm = await container.llm(intentProvider);
+
+    const result = await classifyIntent({
+      title: pull.title,
+      body: pull.body ?? '',
+      filesSummary,
+      llm,
+      model,
+      sessionId: `intent:${pull.id}`,
+    });
+
+    req.log.info(
+      {
+        phase: 'intent',
+        model,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        costUsd: result.costUsd,
+      },
+      'intent force-refresh',
+    );
+
+    const intent = { intent: result.intent, in_scope: result.in_scope, out_of_scope: result.out_of_scope };
+    await pullRepo.upsertIntent(container.db, req.params.id, intent);
+    return intent;
+  });
+
   // ---- Delete a whole review run (one agent's pass) + its findings --------
   app.delete('/reviews/:id', { schema: { params: IdParams } }, async (req) => {
     const { workspaceId } = await getContext(container, req);
@@ -162,7 +282,7 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
 
   // ---- Bulk: trigger reviews for all open PRs in a repo -------------------
   // Fire-and-forget: reviews run in background, returns count immediately.
-  app.post('/repos/:id/review-all', { schema: { params: IdParams }, config: { rateLimit: { max: 2, timeWindow: '1 minute' } } }, async (req) => {
+  app.post('/repos/:id/review-all', { schema: { params: IdParams, body: ReviewAllBody }, config: { rateLimit: { max: 2, timeWindow: '1 minute' } } }, async (req) => {
     const { workspaceId } = await getContext(container, req);
     // Verify repo belongs to this workspace before touching any data.
     const [repo] = await container.db
@@ -193,7 +313,14 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     const runningPrIds = new Set(runningRows.map((r) => r.prId));
     const eligiblePrs = openPrs.filter((p) => !runningPrIds.has(p.id));
     if (eligiblePrs.length === 0) return { triggered: 0 };
-    const targets = await service.resolveTargets(workspaceId, { all: true });
+    // Honor an explicit agent selection when the client sends one (the Review
+    // All picker); fall back to every enabled agent otherwise. `resolveTargets`
+    // throws NotFoundError for an unknown id, surfacing as a 404.
+    const selectedAgentIds = req.body?.agent_ids;
+    const targets =
+      selectedAgentIds && selectedAgentIds.length > 0
+        ? await service.resolveTargets(workspaceId, { agentIds: selectedAgentIds })
+        : await service.resolveTargets(workspaceId, { all: true });
     // Detach a child logger before the response is sent — Fastify recycles req
     // once the handler returns, so req.log is invalid inside the background tasks.
     const log = req.log.child({ route: 'review-all', repoId: req.params.id });

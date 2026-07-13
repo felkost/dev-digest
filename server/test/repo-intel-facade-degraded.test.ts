@@ -109,17 +109,17 @@ describe('RepoIntel facade — degraded contract (flag off)', () => {
 
 describe('RepoIntel facade — degraded contract (flag on, but no data)', () => {
   it('getCallerSignatures with no clone → [] (graceful degrade, no throw)', async () => {
-    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', clonePath: null } });
+    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', defaultBranch: 'main', clonePath: null } });
     await expect(svc.getCallerSignatures('r1', ['a.ts'])).resolves.toEqual([]);
   });
 
   it('getUnresolvedReferences with no clone → []', async () => {
-    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', clonePath: null } });
+    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', defaultBranch: 'main', clonePath: null } });
     await expect(svc.getUnresolvedReferences('r1', ['a.ts'])).resolves.toEqual([]);
   });
 
   it('getCallerSignatures with empty changedFiles → []', async () => {
-    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', clonePath: '/tmp' } });
+    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', defaultBranch: 'main', clonePath: '/tmp' } });
     await expect(svc.getCallerSignatures('r1', [])).resolves.toEqual([]);
   });
 });

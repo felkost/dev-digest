@@ -1,9 +1,29 @@
-import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Db } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
 
 // ---- in-flight / history --------------------------------------------------
+
+/** `multi_agent_run_id` groups for this PR with MORE THAN ONE member — a real
+ *  fan-out (multiple agents picked at once). A group with exactly one member
+ *  (the `MultiAgentPicker` UI allows selecting "any subset...including exactly
+ *  one" — see `client/src/components/multi-agent-picker/MultiAgentPicker.tsx`)
+ *  has nothing to fan out and nothing to displace in the PR-detail accordion,
+ *  so it is NOT a fan-out group and its run/review belongs in the PR-detail
+ *  lists alongside standalone single-agent runs. Only true multi-member groups
+ *  are excluded by `listRunsForPull`/`reviewsForPull` below — narrows commit
+ *  `a529535`'s blanket `multiAgentRunId IS NULL` filter, which pre-dated the
+ *  picker's "exactly one" mode and hid every single-agent picker run too. */
+export async function fanOutGroupIds(db: Db, prId: string): Promise<string[]> {
+  const rows = await db
+    .select({ groupId: t.agentRuns.multiAgentRunId, cnt: count() })
+    .from(t.agentRuns)
+    .where(and(eq(t.agentRuns.prId, prId), isNotNull(t.agentRuns.multiAgentRunId)))
+    .groupBy(t.agentRuns.multiAgentRunId)
+    .having(sql`count(*) > 1`);
+  return rows.map((r) => r.groupId!);
+}
 
 /** In-flight runs for a PR (status='running') — the server-side source of
  *  truth for "which agents are running now". Joined with the agent name. */
@@ -36,17 +56,34 @@ export async function activeRunsForPull(
   }));
 }
 
-/** All runs for a PR (any status), newest first — the PR run history. */
+/** All single-agent-equivalent runs for a PR (any status), newest first — the
+ *  PR run history shown on the PR-detail "Agent runs" tab. Only TRUE fan-out
+ *  runs (a `multi_agent_runs` group with more than one member) are excluded —
+ *  see `fanOutGroupIds` above; those are viewed on the dedicated
+ *  /multi-agent-review page (queried via multi-run.repo `listAgentRunsForGroup`)
+ *  since including them here would let a fan-out run displace the newest
+ *  single-agent run in the default-open accordion and render its members
+ *  ungrouped as loose runs. A one-member group (the `MultiAgentPicker`'s
+ *  "exactly one agent" mode) has no such conflict and IS included. */
 export async function listRunsForPull(
   db: Db,
   workspaceId: string,
   prId: string,
 ): Promise<RunSummary[]> {
+  const fanOutIds = await fanOutGroupIds(db, prId);
   const rows = await db
     .select({ run: t.agentRuns, agentName: t.agents.name })
     .from(t.agentRuns)
     .leftJoin(t.agents, eq(t.agents.id, t.agentRuns.agentId))
-    .where(and(eq(t.agentRuns.workspaceId, workspaceId), eq(t.agentRuns.prId, prId)))
+    .where(
+      and(
+        eq(t.agentRuns.workspaceId, workspaceId),
+        eq(t.agentRuns.prId, prId),
+        fanOutIds.length > 0
+          ? or(isNull(t.agentRuns.multiAgentRunId), notInArray(t.agentRuns.multiAgentRunId, fanOutIds))
+          : undefined,
+      ),
+    )
     .orderBy(desc(t.agentRuns.ranAt));
 
   // Per-severity counts per run: JOIN findings via reviews.run_id.
@@ -149,6 +186,8 @@ export async function createAgentRun(
     prId: string;
     provider: string | null;
     model: string | null;
+    /** Links this run to a multi-agent fan-out group (Multi-Agent Review). */
+    multiAgentRunId?: string | null;
   },
 ): Promise<string> {
   const [row] = await db
@@ -161,9 +200,37 @@ export async function createAgentRun(
       model: values.model,
       status: 'running',
       source: 'local',
+      multiAgentRunId: values.multiAgentRunId ?? null,
     })
     .returning({ id: t.agentRuns.id });
   return row!.id;
+}
+
+/**
+ * The last `limit` successful ('done') runs of one agent against one repo's
+ * PRs — the sample `MultiRunService.estimatesForPr` averages over (Multi-Agent
+ * Review, AC-7). Joined to `pull_requests` on `pr_id` only to filter by
+ * `repoId` (a run's own `agent_runs` row has no direct `repo_id` column).
+ */
+export async function lastSuccessfulRuns(
+  db: Db,
+  params: { workspaceId: string; agentId: string; repoId: string; limit: number },
+): Promise<{ durationMs: number; costUsd: number | null }[]> {
+  const rows = await db
+    .select({ durationMs: t.agentRuns.durationMs, costUsd: t.agentRuns.costUsd })
+    .from(t.agentRuns)
+    .innerJoin(t.pullRequests, eq(t.agentRuns.prId, t.pullRequests.id))
+    .where(
+      and(
+        eq(t.agentRuns.workspaceId, params.workspaceId),
+        eq(t.agentRuns.agentId, params.agentId),
+        eq(t.pullRequests.repoId, params.repoId),
+        eq(t.agentRuns.status, 'done'),
+      ),
+    )
+    .orderBy(desc(t.agentRuns.ranAt))
+    .limit(params.limit);
+  return rows.map((r) => ({ durationMs: r.durationMs ?? 0, costUsd: r.costUsd ?? null }));
 }
 
 export async function completeAgentRun(
@@ -172,8 +239,6 @@ export async function completeAgentRun(
   values: {
     status: 'done' | 'failed' | 'cancelled';
     durationMs: number;
-    tokensIn: number;
-    tokensOut: number;
     findingsCount: number;
     grounding: string;
     /** Review score (0-100); null on failed/cancelled runs. */
@@ -182,8 +247,14 @@ export async function completeAgentRun(
     blockers?: number | null;
     /** Failure reason (status='failed') / cancellation note. Null clears it. */
     error?: string | null;
-    /** USD cost from the provider (or estimated). Null = unknown. */
+    /** USD cost from the provider (or estimated). Null = unknown. Omit to
+     *  leave the column unchanged. */
     costUsd?: number | null;
+    /** Input/output token counts. Null = genuinely unknown (LLM never
+     *  returned). Omit to leave the column unchanged — same contract as
+     *  costUsd (AC-33: tokens follow the identical null-semantics). */
+    tokensIn?: number | null;
+    tokensOut?: number | null;
   },
 ): Promise<void> {
   await db
@@ -191,18 +262,18 @@ export async function completeAgentRun(
     .set({
       status: values.status,
       durationMs: values.durationMs,
-      tokensIn: values.tokensIn,
-      tokensOut: values.tokensOut,
       findingsCount: values.findingsCount,
       grounding: values.grounding,
       score: values.score ?? null,
       blockers: values.blockers ?? null,
       error: values.error ?? null,
-      // Only write costUsd when the caller explicitly provides it (even as null).
-      // Omitting the field leaves the column unchanged, preventing a second
-      // completeAgentRun call (retry / catch path) from overwriting a real cost
-      // that was already persisted by the success path.
+      // Only write these columns when the caller explicitly provides them
+      // (even as null). Omitting a field leaves the column unchanged,
+      // preventing a second completeAgentRun call (retry / catch path) from
+      // overwriting real data already persisted by the success path.
       ...(values.costUsd !== undefined ? { costUsd: values.costUsd } : {}),
+      ...(values.tokensIn !== undefined ? { tokensIn: values.tokensIn } : {}),
+      ...(values.tokensOut !== undefined ? { tokensOut: values.tokensOut } : {}),
     })
     .where(eq(t.agentRuns.id, runId));
 }

@@ -31,6 +31,7 @@ import type {
   AuthWorkspace,
   SecretsProvider,
   SecretKey,
+  RunnerBundler,
 } from '@devdigest/shared';
 import { parseUnifiedDiff } from './git/diff-parser.js';
 
@@ -56,11 +57,11 @@ export interface MockLLMOptions {
 }
 
 export class MockLLMProvider implements LLMProvider {
-  readonly id: 'openai' | 'anthropic';
+  readonly id: LLMProvider['id'];
   public calls: { method: string; req: unknown }[] = [];
 
   constructor(
-    id: 'openai' | 'anthropic' = 'openai',
+    id: LLMProvider['id'] = 'openai',
     private opts: MockLLMOptions = {},
   ) {
     this.id = id;
@@ -68,11 +69,7 @@ export class MockLLMProvider implements LLMProvider {
 
   async listModels(): Promise<ModelInfo[]> {
     this.calls.push({ method: 'listModels', req: null });
-    return (
-      this.opts.models ?? [
-        { id: 'gpt-4.1', provider: this.id === 'anthropic' ? 'anthropic' : 'openai' },
-      ]
-    );
+    return this.opts.models ?? [{ id: 'gpt-4.1', provider: this.id }];
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
@@ -119,19 +116,89 @@ export class MockEmbedder implements Embedder {
 }
 
 // ---------- Mock GitHub ----------
+/** Fixture shape shared by listWorkflowRuns/getWorkflowRun. */
+export interface MockWorkflowRun {
+  id: number;
+  status: string;
+  conclusion: string | null;
+  html_url: string;
+  created_at: string;
+}
+
+/** Fixture shape shared by listRunArtifacts. */
+export interface MockRunArtifact {
+  id: number;
+  name: string;
+  expired: boolean;
+}
+
 export interface MockGitHubOptions {
   pulls?: PrMeta[];
   detail?: Partial<PrDetail>;
   login?: string;
   /** Existing inline review comments returned by listReviewComments. */
   comments?: PrReviewComment[];
+  /** Fixture tree returned by getRepoTree (defaults to a small deterministic tree). */
+  tree?: { path: string; type: 'blob' | 'tree' }[];
+  /** Fixture file contents keyed by path, returned by getFileContents. */
+  contents?: Record<string, string>;
+  /** Fixture default branch returned by getDefaultBranch (defaults to 'main'). */
+  defaultBranch?: string;
+  /** Fixture workflow runs returned by listWorkflowRuns/getWorkflowRun (defaults to one completed/success run + one in_progress run). */
+  workflowRuns?: MockWorkflowRun[];
+  /** Fixture artifacts returned by listRunArtifacts. */
+  artifacts?: MockRunArtifact[];
+  /** Fixture zip bytes returned by downloadArtifact. */
+  artifactContents?: Buffer;
 }
+
+const DEFAULT_MOCK_TREE: { path: string; type: 'blob' | 'tree' }[] = [
+  { path: 'src', type: 'tree' },
+  { path: 'src/index.ts', type: 'blob' },
+  { path: 'package.json', type: 'blob' },
+  { path: 'README.md', type: 'blob' },
+];
+
+const DEFAULT_MOCK_CONTENTS: Record<string, string> = {
+  'package.json': JSON.stringify(
+    { name: 'mock-repo', version: '1.0.0', scripts: { dev: 'node src/index.ts' } },
+    null,
+    2,
+  ),
+  'README.md': '# Mock Repo\n\nA deterministic fixture repository for hermetic tests.\n',
+};
+
+const DEFAULT_MOCK_WORKFLOW_RUNS: MockWorkflowRun[] = [
+  {
+    id: 1001,
+    status: 'completed',
+    conclusion: 'success',
+    html_url: 'https://github.com/mock/mock/actions/runs/1001',
+    created_at: '2026-06-01T00:00:00Z',
+  },
+  {
+    id: 1002,
+    status: 'in_progress',
+    conclusion: null,
+    html_url: 'https://github.com/mock/mock/actions/runs/1002',
+    created_at: '2026-06-02T00:00:00Z',
+  },
+];
+
+const DEFAULT_MOCK_ARTIFACTS: MockRunArtifact[] = [
+  { id: 2001, name: 'devdigest-result', expired: false },
+];
 
 export class MockGitHubClient implements GitHubClient {
   public posted: { n: number; review: GitHubReviewPayload }[] = [];
   public openedPrs: OpenPrPayload[] = [];
   public committed: CommitFilesPayload[] = [];
   public createdComments: CreateReviewCommentInput[] = [];
+  public gotDefaultBranches: RepoRef[] = [];
+  public listedRuns: { repo: RepoRef; workflowFile: string }[] = [];
+  public gotRuns: { repo: RepoRef; runId: number }[] = [];
+  public listedArtifacts: { repo: RepoRef; runId: number }[] = [];
+  public downloadedArtifacts: { repo: RepoRef; artifactId: number }[] = [];
 
   constructor(private opts: MockGitHubOptions = {}) {}
 
@@ -237,6 +304,76 @@ export class MockGitHubClient implements GitHubClient {
   async currentLogin(): Promise<string> {
     return this.opts.login ?? 'mock-user';
   }
+
+  async getRepoTree(
+    _repo: RepoRef,
+    _ref?: string,
+  ): Promise<{ path: string; type: 'blob' | 'tree' }[]> {
+    return this.opts.tree ?? DEFAULT_MOCK_TREE;
+  }
+
+  async getDefaultBranch(repo: RepoRef): Promise<string> {
+    this.gotDefaultBranches.push(repo);
+    return this.opts.defaultBranch ?? 'main';
+  }
+
+  async getFileContents(_repo: RepoRef, path: string, _ref?: string): Promise<string | null> {
+    const fixtures = this.opts.contents ?? DEFAULT_MOCK_CONTENTS;
+    return fixtures[path] ?? null;
+  }
+
+  async listWorkflowRuns(
+    repo: RepoRef,
+    workflowFile: string,
+    _opts?: { perPage?: number },
+  ): Promise<MockWorkflowRun[]> {
+    this.listedRuns.push({ repo, workflowFile });
+    return this.opts.workflowRuns ?? DEFAULT_MOCK_WORKFLOW_RUNS;
+  }
+
+  async getWorkflowRun(
+    repo: RepoRef,
+    runId: number,
+  ): Promise<{ id: number; status: string; conclusion: string | null; html_url: string }> {
+    this.gotRuns.push({ repo, runId });
+    const runs = this.opts.workflowRuns ?? DEFAULT_MOCK_WORKFLOW_RUNS;
+    const match = runs.find((r) => r.id === runId) ?? runs[0];
+    // `??` on individual fields would wrongly overwrite a legitimate
+    // `conclusion: null` (in-progress run) with the 'success' fallback — null
+    // and "no match found" must stay distinguishable. Use the found fixture's
+    // fields verbatim; only synthesize defaults when there is truly no match.
+    if (match) {
+      return { id: match.id, status: match.status, conclusion: match.conclusion, html_url: match.html_url };
+    }
+    return {
+      id: runId,
+      status: 'completed',
+      conclusion: 'success',
+      html_url: `https://github.com/mock/mock/actions/runs/${runId}`,
+    };
+  }
+
+  async listRunArtifacts(repo: RepoRef, runId: number): Promise<MockRunArtifact[]> {
+    this.listedArtifacts.push({ repo, runId });
+    return this.opts.artifacts ?? DEFAULT_MOCK_ARTIFACTS;
+  }
+
+  async downloadArtifact(repo: RepoRef, artifactId: number): Promise<Buffer> {
+    this.downloadedArtifacts.push({ repo, artifactId });
+    return this.opts.artifactContents ?? Buffer.from('mock artifact contents');
+  }
+}
+
+// ---------- Mock RunnerBundler ----------
+export class MockRunnerBundler implements RunnerBundler {
+  public buildCalls = 0;
+
+  constructor(private contents = '// mock runner bundle\n') {}
+
+  async build(): Promise<{ contents: string }> {
+    this.buildCalls += 1;
+    return { contents: this.contents };
+  }
 }
 
 // ---------- Mock Git ----------
@@ -300,7 +437,7 @@ export class MockCodeIndex implements CodeIndex {
   async grep(_repo: RepoRef, pattern: string): Promise<CodeMatch[]> {
     return [{ path: 'src/config.ts', line: 12, text: `match for ${pattern}` }];
   }
-  async symbols(): Promise<CodeSymbol[]> {
+  async symbols(_repo: RepoRef): Promise<CodeSymbol[]> {
     return [{ path: 'src/middleware/ratelimit.ts', name: 'rateLimit', kind: 'function', line: 25 }];
   }
   async references(_repo: RepoRef, symbol: string): Promise<CodeReference[]> {

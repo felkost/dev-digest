@@ -1,13 +1,15 @@
 /**
- * T3 — pure-logic unit tests for the rank + repo-map pipeline steps and the
- * tokenizer fallback. No DB, no clone, no Docker: these pin the algorithms
- * (PageRank direction, percentile ties, token-budget binary search, dedup).
+ * T3 — pure-logic unit tests for the rank + repo-map pipeline steps. No DB,
+ * no clone, no Docker: these pin the algorithms (PageRank direction,
+ * percentile ties, token-budget binary search, dedup). The token counter
+ * itself (`countTokens`, `approxTokens`) is canonical in
+ * `@devdigest/reviewer-core` and tested there (`reviewer-core/test/tokens.test.ts`);
+ * here we only need a deterministic stub satisfying `Tokenizer`.
  */
 import { describe, it, expect } from 'vitest';
 import { computeFileRank } from '../src/modules/repo-intel/pipeline/rank.js';
 import { renderRepoMap, REPO_MAP_HEADER } from '../src/modules/repo-intel/pipeline/repo-map.js';
-import { approxTokens, TiktokenTokenizer } from '../src/adapters/tokenizer/index.js';
-import type { Tokenizer } from '../src/adapters/tokenizer/index.js';
+import type { Tokenizer } from '../src/platform/container.js';
 import type { RepoMapCandidateRow } from '../src/modules/repo-intel/repository.js';
 
 /** Deterministic char-count tokenizer so budgets are exact in tests. */
@@ -97,19 +99,5 @@ describe('renderRepoMap', () => {
     const { text } = renderRepoMap(dual, charTokenizer, 100_000);
     // 'run()' appears exactly once despite the dual emit.
     expect(text.match(/run\(\)/g)?.length).toBe(1);
-  });
-});
-
-describe('tokenizer', () => {
-  it('approxTokens is ceil(chars / 4)', () => {
-    expect(approxTokens('')).toBe(0);
-    expect(approxTokens('abcd')).toBe(1);
-    expect(approxTokens('abcde')).toBe(2);
-  });
-
-  it('TiktokenTokenizer returns a positive count for non-empty text', () => {
-    const tok = new TiktokenTokenizer();
-    expect(tok.count('hello world')).toBeGreaterThan(0);
-    expect(tok.count('')).toBe(0);
   });
 });
