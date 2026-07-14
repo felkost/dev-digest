@@ -4,7 +4,8 @@ import React from "react";
 import { SectionLabel, Icon } from "@devdigest/ui";
 import type { ReviewRecord, PrBrief, DownstreamImpact } from "@devdigest/shared";
 import { VerdictBanner } from "../VerdictBanner";
-import { usePrBrief } from "@/lib/hooks/reviews";
+import { usePrBrief, useIntent } from "@/lib/hooks/reviews";
+import { IntentCard } from "./IntentCard";
 import { s } from "./styles";
 
 // ---- helpers ----------------------------------------------------------------
@@ -12,74 +13,6 @@ import { s } from "./styles";
 function httpMethod(ep: string) {
   const m = ep.match(/^(GET|POST|PUT|PATCH|DELETE|HEAD)\s+/);
   return m ? { method: m[1]!, path: ep.slice(m[1]!.length + 1) } : { method: null, path: ep };
-}
-
-function riskColor(severity: string) {
-  return severity === "high"
-    ? "var(--crit)"
-    : severity === "medium"
-      ? "var(--warn)"
-      : "var(--text-muted)";
-}
-
-// ---- IntentCard -------------------------------------------------------------
-
-function IntentCard({ brief }: { brief: PrBrief }) {
-  const { intent, risks } = brief;
-  return (
-    <div style={s.card}>
-      <div style={s.cardHeader}>
-        <Icon.GitBranch size={12} />
-        Intent
-      </div>
-      <div style={s.cardBody}>
-        <blockquote style={s.intentQuote}>"{intent.intent}"</blockquote>
-
-        <div style={{ display: "flex", gap: 20 }}>
-          {intent.in_scope.length > 0 && (
-            <div style={{ ...s.scopeSection, flex: 1 }}>
-              <div style={s.scopeHeader("var(--ok)")}>In scope</div>
-              {intent.in_scope.map((item, i) => (
-                <div key={i} style={s.scopeItem}>
-                  <Icon.Check size={12} style={{ color: "var(--ok)", flexShrink: 0, marginTop: 2 }} />
-                  {item}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {intent.out_of_scope.length > 0 && (
-            <div style={{ ...s.scopeSection, flex: 1 }}>
-              <div style={s.scopeHeader("var(--crit)")}>Out of scope</div>
-              {intent.out_of_scope.map((item, i) => (
-                <div key={i} style={s.scopeItem}>
-                  <Icon.X size={12} style={{ color: "var(--crit)", flexShrink: 0, marginTop: 2 }} />
-                  {item}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {risks.risks.length > 0 && (
-          <div>
-            <div style={s.scopeHeader("var(--text-muted)")}>Risk areas</div>
-            <div style={s.riskGrid}>
-              {risks.risks.map((r, i) => {
-                const c = riskColor(r.severity);
-                return (
-                  <span key={i} style={s.riskChip(c)}>
-                    <span style={s.riskDot(c)} />
-                    {r.title}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }
 
 // ---- BlastRadiusCard --------------------------------------------------------
@@ -255,6 +188,10 @@ interface OverviewTabProps {
 
 export function OverviewTab({ prBody, prId, runs = [], costUsd }: OverviewTabProps) {
   const { data: brief } = usePrBrief(prId);
+  const { data: liveIntent } = useIntent(prId);
+
+  // Prefer live intent from pr_intent table; fall back to seed brief.intent
+  const displayIntent = liveIntent ?? brief?.intent;
 
   const latest = runs[0] ?? null;
   const blockers = latest
@@ -278,22 +215,30 @@ export function OverviewTab({ prBody, prId, runs = [], costUsd }: OverviewTabPro
         </section>
       )}
 
-      {/* Intent + Blast Radius cards — populated by seeded demo data or future pipeline */}
-      {brief ? (
+      {/* Intent + Blast Radius cards — show whenever there's data or a review to anchor placeholders */}
+      {(displayIntent || brief || latest?.verdict) && (
         <div style={s.cardGrid}>
-          <IntentCard brief={brief} />
-          <BlastRadiusCard brief={brief} />
-        </div>
-      ) : latest?.verdict ? (
-        <div style={s.cardGrid}>
-          {(["Intent", "Blast radius"] as const).map((label) => (
-            <div key={label} style={{ ...s.card, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 120, color: "var(--text-muted)", fontSize: 13 }}>
+          {/* Intent: live data preferred (pr_intent table), falls back to seed brief.intent */}
+          {displayIntent ? (
+            <IntentCard intent={displayIntent} />
+          ) : (
+            <div style={{ ...s.card, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 120, color: "var(--text-muted)", fontSize: 13 }}>
               <Icon.Clock size={18} style={{ opacity: 0.4 }} />
-              <span><strong>{label}</strong> analysis not generated for this PR.</span>
+              <span><strong>Intent</strong> analysis not generated for this PR.</span>
             </div>
-          ))}
+          )}
+
+          {/* Blast Radius: seed data only (L02+) */}
+          {brief ? (
+            <BlastRadiusCard brief={brief} />
+          ) : (
+            <div style={{ ...s.card, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 120, color: "var(--text-muted)", fontSize: 13 }}>
+              <Icon.Clock size={18} style={{ opacity: 0.4 }} />
+              <span><strong>Blast radius</strong> analysis not generated for this PR.</span>
+            </div>
+          )}
         </div>
-      ) : null}
+      )}
 
       {/* Original PR description */}
       {prBody && (

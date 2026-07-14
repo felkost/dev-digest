@@ -16,7 +16,7 @@ export interface JsonSchema {
   name: string;
 }
 
-export function toJsonSchema<T>(schema: z.ZodType<T>, name: string): JsonSchema {
+export function toJsonSchema<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, name: string): JsonSchema {
   const rf = zodResponseFormat(schema as z.ZodTypeAny, name);
   return { schema: rf.json_schema.schema as Record<string, unknown>, name };
 }
@@ -51,7 +51,7 @@ export type ParseResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; repromptMessage: string };
 
-export function parseWithRepair<T>(schema: z.ZodType<T>, raw: string): ParseResult<T> {
+export function parseWithRepair<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, raw: string): ParseResult<T> {
   let parsedJson: unknown;
   try {
     // Strict json_schema mode returns pure JSON — parse it directly. Only fall

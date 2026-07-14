@@ -139,6 +139,10 @@ export class ReviewRepository {
     return pullRepo.getIntent(this.db, prId);
   }
 
+  getIntentScoped(prId: string, workspaceId: string): Promise<Intent | undefined> {
+    return pullRepo.getIntentScoped(this.db, prId, workspaceId);
+  }
+
   // ---- observability: agent_runs + run_traces ----------------------------
 
   /** Create an agent_runs row in `running` state; returns its id (= the runId). */

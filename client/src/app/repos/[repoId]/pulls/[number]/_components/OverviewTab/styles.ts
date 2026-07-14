@@ -94,14 +94,6 @@ export const s = {
     padding: "4px 10px",
   }),
 
-  riskDot: (color: string): CSSProperties => ({
-    width: 7,
-    height: 7,
-    borderRadius: "50%",
-    background: color,
-    flexShrink: 0,
-  }),
-
   riskGrid: {
     display: "flex",
     flexWrap: "wrap" as const,
@@ -249,6 +241,10 @@ export const s = {
     fontWeight: 600,
     borderTop: "1px solid var(--border)",
     userSelect: "none" as const,
+    background: "none",
+    border: "none",
+    width: "100%",
+    textAlign: "left" as const,
   } satisfies CSSProperties,
 
   priorPrItem: {
