@@ -2,7 +2,9 @@ import type { Container } from '../../platform/container.js';
 import type {
   Agent,
   AgentSkillLink,
+  AgentCardStats,
   AgentVersion,
+  AgentContextDocLink,
   CiFailOn,
   ModelInfo,
   Provider,
@@ -63,6 +65,33 @@ export class AgentsService {
   async get(workspaceId: string, id: string): Promise<Agent | undefined> {
     const row = await this.repo.getById(workspaceId, id);
     return row ? toAgentDto(row) : undefined;
+  }
+
+  /**
+   * Rolled-up usage stats for every agent in the workspace (Agents list card
+   * footer). Runs + avg cost from `agent_runs`; accept rate over
+   * accepted+dismissed findings of the agent's reviews; linked-skill count.
+   * `accept_pct` / `avg_cost_usd` are null when there is nothing to average.
+   */
+  async stats(workspaceId: string): Promise<AgentCardStats[]> {
+    const [agents, runStats, acceptance, skillCounts] = await Promise.all([
+      this.repo.list(workspaceId),
+      this.repo.runStatsByAgent(workspaceId),
+      this.repo.acceptanceByAgent(workspaceId),
+      this.repo.skillCountByAgent(workspaceId),
+    ]);
+    return agents.map((a) => {
+      const rs = runStats.get(a.id);
+      const ac = acceptance.get(a.id);
+      const acted = (ac?.accepted ?? 0) + (ac?.dismissed ?? 0);
+      return {
+        agent_id: a.id,
+        runs: rs?.runs ?? 0,
+        skill_count: skillCounts.get(a.id) ?? 0,
+        accept_pct: acted > 0 ? Math.round(((ac!.accepted) / acted) * 100) : null,
+        avg_cost_usd: rs?.avgCostUsd ?? null,
+      };
+    });
   }
 
   /** Delete an agent (and its versions/skill-links, via cascade). */
@@ -169,6 +198,41 @@ export class AgentsService {
     const resolvedOrder = order ?? existing.length;
     await this.repo.linkSkill(agentId, skillId, resolvedOrder);
     return this.skillLinks(agentId);
+  }
+
+  /**
+   * Attached context documents for an agent (ordered). 404-guards `agentId`
+   * against `workspaceId` via `get()` BEFORE delegating to `ContextDocsService`
+   * — `ContextDocsService.agentAttachments`/`setAgentAttachments` intentionally
+   * do NOT re-validate workspace ownership themselves (see context-docs
+   * service.ts's "ownership boundary" comment). Returns `undefined` when the
+   * agent isn't in this workspace (route maps that to 404).
+   */
+  async contextDocLinks(
+    workspaceId: string,
+    agentId: string,
+  ): Promise<AgentContextDocLink[] | undefined> {
+    const agent = await this.repo.getById(workspaceId, agentId);
+    if (!agent) return undefined;
+    const links = await this.container.contextDocs.agentAttachments(agentId);
+    return links.map((l) => ({ owner_id: agentId, path: l.path, order: l.order }));
+  }
+
+  /**
+   * Replace the agent's full set of attached context-document paths (full
+   * replace-and-reorder semantics, mirrors `setSkills`). Same workspace guard
+   * as `contextDocLinks` — validated here, before `ContextDocsService` is
+   * touched.
+   */
+  async setContextDocs(
+    workspaceId: string,
+    agentId: string,
+    paths: string[],
+  ): Promise<AgentContextDocLink[] | undefined> {
+    const agent = await this.repo.getById(workspaceId, agentId);
+    if (!agent) return undefined;
+    const links = await this.container.contextDocs.setAgentAttachments(agentId, paths);
+    return links.map((l) => ({ owner_id: agentId, path: l.path, order: l.order }));
   }
 
   /**

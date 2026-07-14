@@ -24,7 +24,12 @@
     "comment": "Comment",
     "findingsCount": "{count} findings",
     "blockers": " · {count} blockers",
-    "prScore": "PR SCORE"
+    "prScore": "PR SCORE",
+    "regenerate": "Regenerate",
+    "regenerating": "Regenerating…",
+    "generationError": "Couldn’t regenerate: {error}",
+    "clearBrief": "Clear brief",
+    "clearing": "Clearing…"
   },
   "panel": {
     "hideLowConfidence": "Hide low confidence",
