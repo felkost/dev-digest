@@ -3,19 +3,28 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
+import type { Agent, AgentCardStats, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
 
 export function useAgents() {
   return useQuery({
     queryKey: ["agents"],
-    queryFn: () => api.get<Agent[]>("/agents"),
+    queryFn: ({ signal }) => api.get<Agent[]>("/agents", { signal }),
+  });
+}
+
+/** Per-agent usage stats (runs · accept% · avg cost · skills) for the list cards. */
+export function useAgentStats() {
+  return useQuery({
+    queryKey: ["agent-stats"],
+    queryFn: ({ signal }) => api.get<AgentCardStats[]>("/agents/stats", { signal }),
+    staleTime: 30_000,
   });
 }
 
 export function useAgent(id: string | null | undefined) {
   return useQuery({
     queryKey: ["agent", id],
-    queryFn: () => api.get<Agent>(`/agents/${id}`),
+    queryFn: ({ signal }) => api.get<Agent>(`/agents/${id}`, { signal }),
     enabled: !!id,
   });
 }
@@ -84,7 +93,7 @@ export function useDeleteAgent() {
 export function useProviderModels(provider: Provider | null | undefined) {
   return useQuery({
     queryKey: ["provider-models", provider],
-    queryFn: () => api.get<ModelInfo[]>(`/providers/${provider}/models`),
+    queryFn: ({ signal }) => api.get<ModelInfo[]>(`/providers/${provider}/models`, { signal }),
     enabled: !!provider,
     staleTime: 5 * 60_000,
   });

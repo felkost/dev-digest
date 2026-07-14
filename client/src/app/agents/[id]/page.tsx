@@ -9,10 +9,10 @@ import { Button, Dropdown, ErrorState, Skeleton, Icon, Badge } from "@devdigest/
 import { AppShell } from "../../../components/app-shell";
 import { AgentCard } from "../_components/AgentCard";
 import { AgentEditor } from "./_components/AgentEditor";
-import { useAgents, useAgent, useUpdateAgent } from "../../../lib/hooks/agents";
+import { useAgents, useAgent, useAgentStats, useUpdateAgent } from "../../../lib/hooks/agents";
 import { ApiError } from "../../../lib/api";
 
-const VALID_TABS = ["config"];
+const VALID_TABS = ["config", "skills"];
 
 export default function AgentEditorPage() {
   const params = useParams<{ id: string }>();
@@ -21,8 +21,14 @@ export default function AgentEditorPage() {
   const { id } = params;
 
   const { data: agents } = useAgents();
+  const { data: stats } = useAgentStats();
   const { data: agent, isLoading, isError, error, refetch } = useAgent(id);
   const update = useUpdateAgent();
+
+  const statsById = React.useMemo(
+    () => new Map((stats ?? []).map((s) => [s.agent_id, s])),
+    [stats],
+  );
 
   const tab = VALID_TABS.includes(search.get("tab") ?? "") ? search.get("tab")! : "config";
   const setTab = (t: string) => {
@@ -42,7 +48,7 @@ export default function AgentEditorPage() {
       <AppShell crumb={crumb}>
         <ErrorState
           fullScreen
-          title="Couldn’t load this agent"
+          title="Could not load this agent"
           body={error instanceof ApiError ? error.message : "The agent could not be loaded."}
           onRetry={() => refetch()}
         />
@@ -56,7 +62,7 @@ export default function AgentEditorPage() {
         {/* left: agent list */}
         <div
           style={{
-            width: 280,
+            width: 340,
             flexShrink: 0,
             borderRight: "1px solid var(--border)",
             display: "flex",
@@ -80,15 +86,20 @@ export default function AgentEditorPage() {
             </div>
           </div>
           <div style={{ flex: 1, overflow: "auto", padding: "0 12px 12px" }}>
-            {(agents ?? []).map((a) => (
-              <AgentCard
-                key={a.id}
-                ag={a}
-                active={a.id === id}
-                onClick={() => router.push(`/agents/${a.id}?tab=${tab}`)}
-                onToggle={(enabled) => update.mutate({ id: a.id, patch: { enabled } })}
-              />
-            ))}
+            {(agents ?? []).map((a) => {
+              const st = statsById.get(a.id);
+              return (
+                <AgentCard
+                  key={a.id}
+                  ag={a}
+                  active={a.id === id}
+                  stats={st}
+                  skillCount={st?.skill_count}
+                  onClick={() => router.push(`/agents/${a.id}?tab=${tab}`)}
+                  onToggle={(enabled) => update.mutate({ id: a.id, patch: { enabled } })}
+                />
+              );
+            })}
           </div>
         </div>
 
@@ -109,7 +120,7 @@ export default function AgentEditorPage() {
               {!agent.enabled && <Badge color="var(--text-muted)">disabled</Badge>}
               <div style={{ marginLeft: "auto" }}>
                 <Button kind="secondary" size="sm" icon="GitPullRequest" onClick={() => router.push("/")}>
-                  Run on a PR…
+                  Run on a PR...
                 </Button>
               </div>
             </div>

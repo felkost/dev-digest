@@ -17,6 +17,7 @@
 export * from './contracts/findings.js';
 export * from './contracts/review-api.js';
 export * from './contracts/brief.js';
+export * from './contracts/blast.js';
 export * from './contracts/knowledge.js';
 export * from './contracts/trace.js';
 export * from './contracts/platform.js';

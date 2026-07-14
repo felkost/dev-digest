@@ -54,7 +54,9 @@ export interface CompletionResult {
  */
 export interface StructuredRequest<T> {
   model: string;
-  schema: z.ZodType<T>;
+  // `unknown` input: safeParse always receives unknown at runtime, and schemas
+  // with .default()/.optional() widen the _input type beyond T — still safe.
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   schemaName: string;
   messages: ChatMessage[];
   temperature?: number;
